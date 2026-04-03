@@ -13,7 +13,7 @@
   "dependencies": {
     "@dagrejs/dagre": "^2.0.3",
     "@monaco-editor/react": "^4.7.0",
-    "@supabase/supabase-js": "^2.97.0",
+    "@supabase/supabase-js": "^2.101.1",
     "@xyflow/react": "^12.10.0",
     "axios": "^1.13.4",
     "d3": "^7.9.0",

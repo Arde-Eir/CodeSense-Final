@@ -62,9 +62,59 @@ app.use((req: Request, _res: Response, next: NextFunction) => {
  */
 app.use('/api', analyzeRoutes);
 
+// Add this RIGHT AFTER app.use('/api', analyzeRoutes);
+console.log('✅ Routes registered:');
+app._router.stack.forEach((r: any) => {
+  if (r.route && r.route.path) {
+    console.log(`   ${Object.keys(r.route.methods).join(',').toUpperCase()} /api${r.route.path}`);
+  }
+});
+
 // Simple Health Check for Vercel
 app.get('/', (req, res) => {
     res.status(200).send('CodeSense Analysis Engine is Online.');
+});
+
+app.get('/', (req, res) => {
+  res.status(200).send('CodeSense Analysis Engine is Online.');
+});
+
+// ✅ ADD THIS — catches any unmatched route
+app.use((req: Request, res: Response) => {
+  console.error(`❌ 404 - Route not found: ${req.method} ${req.path}`);
+  res.status(200).json({
+    success: false,
+    errors: [{
+      type: 'semantic' as const,
+      severity: 'error' as const,
+      message: `Route not found: ${req.method} ${req.path}`,
+      line: 0
+    }],
+    tokens: [],
+    ast: null,
+    safetyChecks: [],
+    cfg: { nodes: [], edges: [] },
+    cognitiveComplexity: 0,
+    gamification: { xpEarned: 0, qualityBonus: 0 },
+    symbolicExecution: [],
+    explanations: ['❌ **Status:** API route not found.']
+  });
+});
+
+// Global error handler (keep this LAST)
+app.use((err: any, _req: Request, res: Response, _next: NextFunction) => {
+  console.error(`🔥 Backend Error: ${err.message}`);
+  res.status(200).json({
+    success: false,
+    errors: [{
+      type: 'syntactic',
+      message: err.message,
+      line: err.location?.start?.line || 0
+    }],
+    safetyChecks: [],
+    cfg: { nodes: [], edges: [] },
+    explanations: ['The engine encountered an unexpected structure.']
+  });
 });
 
 /**

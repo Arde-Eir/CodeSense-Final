@@ -677,10 +677,22 @@ function peg$parse(input, options) {
       return { type: 'CinStatement', targets: items, ...loc() };
     };
   var peg$f52 = function(first, rest) {
-      return [first, ...rest.map(r => r[3])];
+      return rest.reduce((acc, r) => ({
+        type: 'BinaryOp', 
+        operator: '<<', 
+        left: acc, 
+        right: r[3], 
+        ...loc()
+      }), first);
     };
   var peg$f53 = function(first, rest) {
-      return [first, ...rest.map(r => r[3])];
+      return rest.reduce((acc, r) => ({
+        type: 'BinaryOp', 
+        operator: '>>', 
+        left: acc, 
+        right: r[3], 
+        ...loc()
+      }), first);
     };
   var peg$f54 = function(name, dims) {
       return { type: 'ArrayAccess', name, indices: dims.map(d => d[3]), ...loc() };
