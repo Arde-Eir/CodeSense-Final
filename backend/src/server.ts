@@ -62,14 +62,6 @@ app.use((req: Request, _res: Response, next: NextFunction) => {
  */
 app.use('/api', analyzeRoutes);
 
-// Add this RIGHT AFTER app.use('/api', analyzeRoutes);
-console.log('✅ Routes registered:');
-app._router.stack.forEach((r: any) => {
-  if (r.route && r.route.path) {
-    console.log(`   ${Object.keys(r.route.methods).join(',').toUpperCase()} /api${r.route.path}`);
-  }
-});
-
 // Simple Health Check for Vercel
 app.get('/', (req, res) => {
     res.status(200).send('CodeSense Analysis Engine is Online.');
