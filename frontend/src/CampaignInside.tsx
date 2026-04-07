@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { useAuth } from './components/AuthScreen';
 import { supabase } from './services/supabase';
@@ -426,8 +426,6 @@ const HintPanel: React.FC<{
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
       <div style={{ flex: 1, overflowY: 'auto', display: 'flex', flexDirection: 'column', minHeight: 0 }}>
-
-        {/* Header + objectives from DB */}
         <div style={{ padding: '14px 16px', background: 'rgba(255,255,255,0.02)', borderBottom: '1px solid #21262d', flexShrink: 0 }}>
           <div style={{ fontSize: 10, color: '#484f58', fontFamily: "'IBM Plex Mono', monospace", letterSpacing: 1, textTransform: 'uppercase', marginBottom: 4 }}>TUTORIAL</div>
           <div style={{ fontSize: 13, fontWeight: 700, color: '#e6edf3', lineHeight: 1.3 }}>{quest.title}</div>
@@ -456,7 +454,6 @@ const HintPanel: React.FC<{
           </div>
         </div>
 
-        {/* Hint body */}
         <div style={{ padding: '14px 16px', borderBottom: '1px solid #21262d', flexShrink: 0 }}>
           <div style={{ display: 'flex', alignItems: 'flex-start', gap: 10 }}>
             <div style={{
@@ -471,7 +468,6 @@ const HintPanel: React.FC<{
           </div>
         </div>
 
-        {/* Code illustration */}
         {hint.image && (
           <div style={{ padding: '14px 16px', borderBottom: '1px solid #21262d', flexShrink: 0 }}>
             <div style={{
@@ -565,7 +561,6 @@ const QuestList: React.FC<{
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%', overflow: 'hidden' }}>
-      {/* Phase hero banner */}
       <div style={{
         flexShrink: 0, height: 140,
         background: config.bg + ', #0d1117',
@@ -594,7 +589,6 @@ const QuestList: React.FC<{
       </div>
 
       <div style={{ flex: 1, display: 'grid', gridTemplateColumns: '1fr 220px', gap: 16, minHeight: 0, overflow: 'hidden' }}>
-        {/* Quest list */}
         <div style={{ overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 8 }}>
           {loading ? (
             <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: 160, gap: 12 }}>
@@ -626,7 +620,7 @@ const QuestList: React.FC<{
                     display: 'flex', alignItems: 'center', gap: 12,
                     padding: '14px 16px', borderRadius: 10,
                     border: `1px solid ${isHov ? config.color + '55' : '#21262d'}`,
-                    background: isHov ? `${config.color}08` : '#0d1117',
+                    background: isHov ? `${config.color}08` : 'rgba(13,17,23,0.6)',
                     cursor: isLocked ? 'not-allowed' : 'pointer',
                     opacity: isLocked ? 0.45 : 1, transition: 'all 0.15s',
                     transform: isHov && !isLocked ? 'translateX(2px)' : 'none',
@@ -682,9 +676,8 @@ const QuestList: React.FC<{
           )}
         </div>
 
-        {/* Sidebar */}
         <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-          <div style={{ background: 'rgba(22,27,34,0.9)', border: '1px solid #21262d', borderRadius: 12, padding: 16, display: 'flex', flexDirection: 'column', gap: 14 }}>
+          <div style={{ background: 'rgba(22,27,34,0.7)', border: '1px solid #21262d', borderRadius: 12, padding: 16, display: 'flex', flexDirection: 'column', gap: 14 }}>
             {stats.map(s => (
               <div key={s.label} style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
                 <span style={{ fontSize: 16 }}>{s.icon}</span>
@@ -700,12 +693,12 @@ const QuestList: React.FC<{
               </div>
             ))}
           </div>
-          <div style={{ background: 'rgba(22,27,34,0.9)', border: '1px solid #21262d', borderRadius: 12, padding: 16, textAlign: 'center' }}>
+          <div style={{ background: 'rgba(22,27,34,0.7)', border: '1px solid #21262d', borderRadius: 12, padding: 16, textAlign: 'center' }}>
             <div style={{ fontSize: 10, color: '#484f58', fontFamily: "'IBM Plex Mono', monospace", letterSpacing: 1, marginBottom: 6 }}>YOUR XP</div>
             <div style={{ fontSize: 28, fontWeight: 800, color: '#facc15', fontFamily: "'IBM Plex Mono', monospace" }}>{userXP.toLocaleString()}</div>
             <div style={{ fontSize: 10, color: '#484f58', marginTop: 3 }}>total earned</div>
           </div>
-          <div style={{ background: 'rgba(22,27,34,0.9)', border: '1px solid #21262d', borderRadius: 12, padding: 14 }}>
+          <div style={{ background: 'rgba(22,27,34,0.7)', border: '1px solid #21262d', borderRadius: 12, padding: 14 }}>
             <div style={{ fontSize: 9, color: '#484f58', fontFamily: "'IBM Plex Mono', monospace", letterSpacing: 1, marginBottom: 10, textTransform: 'uppercase' }}>Difficulty</div>
             {[{ label: 'Easy', color: '#3fb950' }, { label: 'Medium', color: '#e3b341' }, { label: 'Hard', color: '#f85149' }].map(d => (
               <div key={d.label} style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
@@ -838,6 +831,16 @@ export default function CampaignInside() {
   const [activeQuest, setActiveQuest]     = useState<Quest | null>(null);
   const [hintsUsed, setHintsUsed]         = useState(0);
 
+  // ── Background click particles ────────────────────────────────────────────
+  const [bgParticles, setBgParticles] = useState<{ x: number; y: number; id: number }[]>([]);
+  const particleId = useRef(0);
+
+  const handlePageClick = useCallback((e: React.MouseEvent) => {
+    const id = particleId.current++;
+    setBgParticles(p => [...p, { x: e.clientX, y: e.clientY, id }]);
+    setTimeout(() => setBgParticles(p => p.filter(pt => pt.id !== id)), 900);
+  }, []);
+
   const config = PHASE_CONFIG[phase] ?? PHASE_CONFIG.beginner;
 
   // ── Fetch XP + real-time subscription ─────────────────────────────────────
@@ -907,7 +910,7 @@ export default function CampaignInside() {
 
   useEffect(() => { fetchQuests(); }, [fetchQuests]);
 
-  // ── Select quest — upsert mission_progress row ────────────────────────────
+  // ── Select quest ──────────────────────────────────────────────────────────
   const handleSelectQuest = useCallback(async (quest: Quest) => {
     if (!user?.id) return;
     setActiveQuest(quest);
@@ -940,16 +943,16 @@ export default function CampaignInside() {
     } catch (e) { console.error(e); }
   }, [user?.id, activeQuest, hintsUsed]);
 
-  // ── Quest complete — write XP + mark completed + log ─────────────────────
+  // ── Quest complete ────────────────────────────────────────────────────────
   const handleQuestComplete = useCallback(async (xpEarned: number) => {
     if (!user?.id || !activeQuest) return;
-    const newXP = userXP + xpEarned;
     try {
-      // Mark completed
       if (activeQuest.progressId) {
         await supabase.from('mission_progress').update({
-          status: 'completed', completedat: new Date().toISOString(),
-          updatedat: new Date().toISOString(), attempts: activeQuest.attempts + 1,
+          status: 'completed',
+          completedat: new Date().toISOString(),
+          updatedat: new Date().toISOString(),
+          attempts: activeQuest.attempts + 1,
         }).eq('id', activeQuest.progressId);
       } else {
         await supabase.from('mission_progress').insert({
@@ -958,42 +961,124 @@ export default function CampaignInside() {
           startedat: new Date().toISOString(), completedat: new Date().toISOString(),
         });
       }
-      // Award XP
-      await supabase.from('users').update({ totalxp: newXP, updatedat: new Date().toISOString() }).eq('id', user.id);
-      setUserXP(newXP);
-      // Activity log
+      await supabase.rpc('increment_xp', { user_id: user.id, xp_to_add: xpEarned });
       await supabase.from('activity_log').insert({
         userid: user.id, type: 'quest_completed', title: activeQuest.title,
         description: `Completed quest in ${phase} phase`, xp_gained: xpEarned,
         meta: { questid: activeQuest.id, phase, hintsused: hintsUsed },
       });
       await fetchQuests();
-    } catch (e) {
-      console.error(e);
-      setUserXP(prev => prev + xpEarned);
-    }
+    } catch (e) { console.error('XP Award Error:', e); }
     setTimeout(() => { setView('list'); setActiveQuest(null); }, 2200);
-  }, [user?.id, activeQuest, userXP, hintsUsed, phase, fetchQuests]);
+  }, [user?.id, activeQuest, hintsUsed, phase, fetchQuests]);
 
   return (
     <>
       <style>{`
         @import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;600;700;800&family=IBM+Plex+Sans:wght@400;500;600;700;800&display=swap');
-        @keyframes xpBurstIn { from { opacity:0; transform:translate(-50%,-50%) scale(0.5); } to { opacity:1; transform:translate(-50%,-50%) scale(1); } }
-        @keyframes slideInRight { from { opacity:0; transform:translateX(20px); } to { opacity:1; transform:translateX(0); } }
+
+        @keyframes xpBurstIn {
+          from { opacity:0; transform:translate(-50%,-50%) scale(0.5); }
+          to   { opacity:1; transform:translate(-50%,-50%) scale(1); }
+        }
+        @keyframes slideInRight {
+          from { opacity:0; transform:translateX(20px); }
+          to   { opacity:1; transform:translateX(0); }
+        }
         @keyframes spin { to { transform:rotate(360deg); } }
+
+        @keyframes ci-drift {
+          0%   { transform: translate(0,0) scale(1); }
+          33%  { transform: translate(12px,-8px) scale(1.04); }
+          66%  { transform: translate(-8px,12px) scale(0.97); }
+          100% { transform: translate(0,0) scale(1); }
+        }
+        @keyframes ci-scanline {
+          0%   { transform: translateY(-100%); }
+          100% { transform: translateY(100vh); }
+        }
+        @keyframes ci-particle-burst {
+          0%   { transform: translate(-50%,-50%) scale(0); opacity: 0.8; }
+          60%  { opacity: 0.5; }
+          100% { transform: translate(-50%,-50%) scale(6); opacity: 0; }
+        }
+
         * { box-sizing:border-box; margin:0; padding:0; }
-        .campaign-root { font-family:'IBM Plex Sans',system-ui,sans-serif; background:#080b10; color:#e6edf3; min-height:100vh; display:flex; flex-direction:column; overflow:hidden; }
+
+        /* Fixed background layer */
+        .ci-bg {
+          position: fixed;
+          inset: 0;
+          z-index: 0;
+          pointer-events: none;
+          overflow: hidden;
+          background: #080b10;
+        }
+        .ci-bg .ci-grid {
+          position: absolute;
+          inset: 0;
+          opacity: 0.25;
+          background-image:
+            linear-gradient(rgba(227,179,65,0.5) 1px, transparent 1px),
+            linear-gradient(90deg, rgba(227,179,65,0.5) 1px, transparent 1px);
+          background-size: 50px 50px;
+          animation: ci-drift 20s ease-in-out infinite;
+        }
+        .ci-bg .ci-scanline {
+          position: absolute;
+          left: 0; right: 0;
+          height: 2px;
+          background: linear-gradient(90deg, transparent, rgba(227,179,65,0.2), transparent);
+          animation: ci-scanline 6s linear infinite;
+        }
+
+        /* Root content sits above bg */
+        .ci-root {
+          position: relative;
+          z-index: 1;
+          font-family: 'IBM Plex Sans', system-ui, sans-serif;
+          color: #e6edf3;
+          min-height: 100vh;
+          display: flex;
+          flex-direction: column;
+          overflow: hidden;
+          background: transparent;
+        }
+
         ::-webkit-scrollbar { width:5px; height:5px; }
         ::-webkit-scrollbar-track { background:transparent; }
         ::-webkit-scrollbar-thumb { background:#21262d; border-radius:3px; }
       `}</style>
 
-      <div className="campaign-root">
+      {/* ── Fixed background: grid + scanline ── */}
+      <div className="ci-bg">
+        <div className="ci-grid" />
+        <div className="ci-scanline" />
+      </div>
+
+      {/* ── Global click particle overlay ── */}
+      <div style={{ position: 'fixed', inset: 0, zIndex: 9999, pointerEvents: 'none', overflow: 'hidden' }}>
+        {bgParticles.map(p => (
+          <div key={p.id} style={{
+            position: 'absolute', left: p.x, top: p.y,
+            width: '70px', height: '70px', borderRadius: '50%',
+            border: '2px solid rgba(227,179,65,0.7)',
+            animation: 'ci-particle-burst 0.9s ease-out forwards',
+            pointerEvents: 'none',
+          }} />
+        ))}
+      </div>
+
+      {/* ── App shell ── */}
+      <div className="ci-root" onClick={handlePageClick}>
         <header style={{
-          height: 56, flexShrink: 0, background: '#161b22', borderBottom: '1px solid #21262d',
+          height: 56, flexShrink: 0,
+          background: 'rgba(22,27,34,0.6)',
+          backdropFilter: 'blur(12px)',
+          borderBottom: '1px solid #21262d',
           display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-          padding: '0 24px', position: 'relative', zIndex: 100, boxShadow: '0 4px 20px rgba(0,0,0,0.4)',
+          padding: '0 24px', position: 'relative', zIndex: 100,
+          boxShadow: '0 4px 20px rgba(0,0,0,0.4)',
         }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
             <span style={{ fontSize: 16 }}>{config.icon}</span>

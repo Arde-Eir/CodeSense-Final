@@ -12,6 +12,8 @@ import { LeaderboardPage } from './LeaderboardPage';
 import { WelcomePage } from './WelcomePage';
 import { CampaignPage } from './CampaignPage';
 import CampaignInside from './CampaignInside';
+import LevelOneDashboard from './levelonedashboard';
+import LessonActivity from './lessonactivity';
 
 const ProtectedRoute: React.FC<{ children: React.ReactElement }> = ({ children }) => {
   const { isAuthenticated, isGuest } = useAuth();
@@ -43,6 +45,8 @@ export const App: React.FC = () => {
           <Route path="/campaign" element={<ProtectedRoute><CampaignPage /></ProtectedRoute>} />
           <Route path="/campaign/inside" element={<ProtectedRoute><CampaignInside /></ProtectedRoute>} />
           <Route path="/campaign/inside/:phase" element={<ProtectedRoute><CampaignInside /></ProtectedRoute>} />
+          <Route path="/level/1" element={<ProtectedRoute><LevelOneDashboard /></ProtectedRoute>} />
+          <Route path="/lesson/:questId" element={<ProtectedRoute><LessonActivity /></ProtectedRoute>} />
           {/* :phase last, so "inside" isn't swallowed as a param */}
           <Route path="/campaign/:phase" element={<ProtectedRoute><CampaignPage /></ProtectedRoute>} />
 

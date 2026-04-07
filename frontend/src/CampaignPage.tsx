@@ -41,6 +41,7 @@ export const CampaignPage: React.FC = () => {
   const [questCounts, setQuestCounts] = useState<Record<string, number>>({})
   const [hoveredLevel, setHoveredLevel] = useState<number | null>(null)
   const [particles, setParticles] = useState<{ x: number; y: number; id: number }[]>([])
+  const [bgParticles, setBgParticles] = useState<{ x: number; y: number; id: number }[]>([])
   const bannerRef = useRef<HTMLDivElement>(null)
   const particleId = useRef(0)
 
@@ -73,11 +74,19 @@ export const CampaignPage: React.FC = () => {
 
   const isLevelUnlocked = (requiredXP: number) => userXP >= requiredXP
 
-  // ── KEY FIX: navigate to /campaign/inside/:phase ──
+  const handlePageClick = (e: React.MouseEvent) => {
+    const id = particleId.current++
+    setBgParticles(p => [...p, { x: e.clientX, y: e.clientY, id }])
+    setTimeout(() => setBgParticles(p => p.filter(pt => pt.id !== id)), 900)
+  }
+
   const handleLevelClick = (level: LevelInfo) => {
-    if (!started) return
-    if (!isLevelUnlocked(level.requiredXP)) return
-    navigate(`/campaign/inside/${level.phase}`)
+    if (!started || !isLevelUnlocked(level.requiredXP)) return
+    if (level.id === 1) {
+      navigate('/level/1')
+    } else {
+      navigate(`/campaign/inside/${level.phase}`)
+    }
   }
 
   const handleBannerClick = (e: React.MouseEvent) => {
@@ -97,12 +106,8 @@ export const CampaignPage: React.FC = () => {
         @import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;600;700&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap');
 
         @keyframes scanline {
-          0% { transform: translateY(-100%); }
+          0%   { transform: translateY(-100%); }
           100% { transform: translateY(100vh); }
-        }
-        @keyframes pulse-glow {
-          0%, 100% { opacity: 0.7; }
-          50% { opacity: 1; }
         }
         @keyframes flicker {
           0%, 95%, 100% { opacity: 1; }
@@ -111,9 +116,9 @@ export const CampaignPage: React.FC = () => {
           98% { opacity: 0.6; }
         }
         @keyframes drift {
-          0% { transform: translate(0,0) scale(1); }
-          33% { transform: translate(12px,-8px) scale(1.04); }
-          66% { transform: translate(-8px,12px) scale(0.97); }
+          0%   { transform: translate(0,0) scale(1); }
+          33%  { transform: translate(12px,-8px) scale(1.04); }
+          66%  { transform: translate(-8px,12px) scale(0.97); }
           100% { transform: translate(0,0) scale(1); }
         }
         @keyframes particle-burst {
@@ -124,6 +129,66 @@ export const CampaignPage: React.FC = () => {
           from { opacity: 0; transform: translateY(30px); }
           to   { opacity: 1; transform: translateY(0); }
         }
+        @keyframes press-pulse {
+          0%,100% { box-shadow: 0 0 0 0 rgba(227,179,65,0.6); }
+          50%     { box-shadow: 0 0 0 12px rgba(227,179,65,0); }
+        }
+
+        .campaign-root {
+          position: relative;
+          min-height: 100vh;
+          width: 100%;
+          background: transparent;
+          font-family: 'IBM Plex Sans', system-ui, sans-serif;
+          color: #e6edf3;
+          overflow-x: hidden;
+        }
+
+        /* Fixed background layer — grid + scanline */
+        .campaign-bg {
+          position: fixed;
+          inset: 0;
+          z-index: 0;
+          pointer-events: none;
+          overflow: hidden;
+          background: #080b10;
+        }
+        @keyframes bg-particle-burst {
+          0%   { transform: translate(-50%,-50%) scale(0); opacity: 0.8; }
+          60%  { opacity: 0.5; }
+          100% { transform: translate(-50%,-50%) scale(6); opacity: 0; }
+        }
+
+        .campaign-bg .grid {
+          position: absolute;
+          inset: 0;
+          opacity: 0.25;
+          background-image:
+            linear-gradient(rgba(227,179,65,0.5) 1px, transparent 1px),
+            linear-gradient(90deg, rgba(227,179,65,0.5) 1px, transparent 1px);
+          background-size: 50px 50px;
+          animation: drift 20s ease-in-out infinite;
+        }
+        .campaign-bg .scanline {
+          position: absolute;
+          left: 0; right: 0;
+          height: 2px;
+          background: linear-gradient(90deg, transparent, rgba(227,179,65,0.2), transparent);
+          animation: scanline 6s linear infinite;
+        }
+
+        /* Everything above the fixed bg */
+        .campaign-content {
+          position: relative;
+          z-index: 1;
+        }
+
+        .level-card {
+          animation: card-in 0.5s ease both;
+        }
+        .level-card:hover .lock-icon {
+          animation: lock-shake 0.4s ease;
+        }
         @keyframes lock-shake {
           0%,100% { transform: translateX(0); }
           20%     { transform: translateX(-4px); }
@@ -131,34 +196,50 @@ export const CampaignPage: React.FC = () => {
           60%     { transform: translateX(-3px); }
           80%     { transform: translateX(3px); }
         }
-        @keyframes press-pulse {
-          0%,100% { box-shadow: 0 0 0 0 rgba(227,179,65,0.6); }
-          50%     { box-shadow: 0 0 0 12px rgba(227,179,65,0); }
+
+        .press-btn {
+          animation: flicker 5s ease-in-out infinite, press-pulse 2s ease-in-out infinite;
+          transition: transform 0.2s ease;
         }
-        .level-card {
-          animation: card-in 0.5s ease both;
+        .press-btn:hover {
+          transform: scale(1.06);
         }
-        .level-card:hover .lock-icon { animation: lock-shake 0.4s ease; }
-        .press-btn { animation: press-pulse 2s ease-in-out infinite; }
-        .press-btn:hover { transform: scale(1.06) !important; }
       `}</style>
 
-      <div style={{
-        minHeight: '100vh', width: '100%',
-        background: '#080b10',
-        fontFamily: "'IBM Plex Sans', system-ui, sans-serif",
-        color: '#e6edf3',
-        opacity: visible ? 1 : 0,
-        transition: 'opacity 0.4s ease',
-        overflowX: 'hidden'
-      }}>
+      {/* ── Fixed background ── */}
+      <div className="campaign-bg">
+        <div className="grid" />
+        <div className="scanline" />
+      </div>
 
+      {/* ── Global click particles overlay ── */}
+      <div style={{ position: 'fixed', inset: 0, zIndex: 9999, pointerEvents: 'none', overflow: 'hidden' }}>
+        {bgParticles.map(p => (
+          <div key={p.id} style={{
+            position: 'absolute', left: p.x, top: p.y,
+            width: '70px', height: '70px', borderRadius: '50%',
+            border: '2px solid rgba(227,179,65,0.7)',
+            animation: 'bg-particle-burst 0.9s ease-out forwards',
+            pointerEvents: 'none'
+          }} />
+        ))}
+      </div>
+
+      {/* ── Scrollable content ── */}
+      <div
+        className="campaign-root campaign-content"
+        style={{ opacity: visible ? 1 : 0, transition: 'opacity 0.4s ease' }}
+        onClick={handlePageClick}
+      >
         {/* ── Header ── */}
         <div style={{
-          height: '58px', background: '#161b22',
+          height: '58px',
+          background: 'rgba(8,11,16,0.6)',
+          backdropFilter: 'blur(12px)',
           borderBottom: '1px solid #2d333b',
           display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-          padding: '0 24px', position: 'sticky', top: 0, zIndex: 100,
+          padding: '0 24px',
+          position: 'sticky', top: 0, zIndex: 100,
           boxShadow: '0 4px 20px rgba(0,0,0,0.5)'
         }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
@@ -169,18 +250,29 @@ export const CampaignPage: React.FC = () => {
           </div>
           <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
             {user && (
-              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', background: 'rgba(63,185,80,0.1)', border: '1px solid rgba(63,185,80,0.25)', borderRadius: '8px', padding: '5px 12px' }}>
+              <div style={{
+                display: 'flex', alignItems: 'center', gap: '8px',
+                background: 'rgba(63,185,80,0.1)',
+                border: '1px solid rgba(63,185,80,0.25)',
+                borderRadius: '8px', padding: '5px 12px'
+              }}>
                 <span style={{ fontSize: '12px' }}>⚡</span>
-                <span style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: '12px', color: '#3fb950', fontWeight: 700 }}>{userXP.toLocaleString()} XP</span>
+                <span style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: '12px', color: '#3fb950', fontWeight: 700 }}>
+                  {userXP.toLocaleString()} XP
+                </span>
               </div>
             )}
-            <button onClick={() => navigate('/home')} style={{
-              background: 'transparent', border: '1px solid #444c56',
-              color: '#8b949e', padding: '7px 14px', borderRadius: '6px',
-              fontWeight: 600, fontSize: '11px', letterSpacing: '0.5px',
-              cursor: 'pointer', fontFamily: "'IBM Plex Mono', monospace",
-              transition: 'all 0.15s'
-            }}
+            <button
+              onClick={() => navigate('/home')}
+              style={{
+                background: 'transparent',
+                border: '1px solid #444c56',
+                color: '#8b949e',
+                padding: '7px 14px', borderRadius: '6px',
+                fontWeight: 600, fontSize: '11px', letterSpacing: '0.5px',
+                cursor: 'pointer', fontFamily: "'IBM Plex Mono', monospace",
+                transition: 'all 0.15s'
+              }}
               onMouseEnter={e => { e.currentTarget.style.borderColor = '#f85149'; e.currentTarget.style.color = '#f85149' }}
               onMouseLeave={e => { e.currentTarget.style.borderColor = '#444c56'; e.currentTarget.style.color = '#8b949e' }}
             >
@@ -208,28 +300,40 @@ export const CampaignPage: React.FC = () => {
               transition: 'box-shadow 0.4s ease'
             }}
           >
+            {/* Banner grid */}
             <div style={{
               position: 'absolute', inset: 0, opacity: 0.07,
               backgroundImage: 'linear-gradient(rgba(227,179,65,0.8) 1px, transparent 1px), linear-gradient(90deg, rgba(227,179,65,0.8) 1px, transparent 1px)',
               backgroundSize: '40px 40px',
-              animation: 'drift 12s ease-in-out infinite'
+              animation: 'drift 12s ease-in-out infinite',
+              pointerEvents: 'none'
             }} />
+            {/* Banner scanline */}
             <div style={{
               position: 'absolute', left: 0, right: 0, height: '2px',
               background: 'linear-gradient(90deg, transparent, rgba(227,179,65,0.3), transparent)',
-              animation: 'scanline 4s linear infinite', pointerEvents: 'none'
+              animation: 'scanline 4s linear infinite',
+              pointerEvents: 'none'
             }} />
-            {[['0', '0', '0', 'auto'], ['0', 'auto', '0', '0'], ['auto', '0', '0', 'auto'], ['auto', 'auto', '0', '0']].map((pos, i) => (
+            {/* Corner brackets */}
+            {([
+              { top: '12px',  left: '12px',  borderTop: true,  borderLeft: true  },
+              { top: '12px',  right: '12px', borderTop: true,  borderRight: true },
+              { bottom: '12px', left: '12px',  borderBottom: true, borderLeft: true  },
+              { bottom: '12px', right: '12px', borderBottom: true, borderRight: true },
+            ] as const).map((corner, i) => (
               <div key={i} style={{
-                position: 'absolute', top: pos[0] === 'auto' ? 'auto' : '12px', bottom: pos[0] === 'auto' ? '12px' : 'auto',
-                right: pos[1] === 'auto' ? 'auto' : '12px', left: pos[1] === 'auto' ? '12px' : 'auto',
+                position: 'absolute',
+                ...corner,
                 width: '20px', height: '20px',
-                borderTop: i < 2 ? '2px solid rgba(227,179,65,0.4)' : 'none',
-                borderBottom: i >= 2 ? '2px solid rgba(227,179,65,0.4)' : 'none',
-                borderLeft: (i === 0 || i === 2) ? '2px solid rgba(227,179,65,0.4)' : 'none',
-                borderRight: (i === 1 || i === 3) ? '2px solid rgba(227,179,65,0.4)' : 'none',
+                borderTop:    (corner as any).borderTop    ? '2px solid rgba(227,179,65,0.4)' : undefined,
+                borderBottom: (corner as any).borderBottom ? '2px solid rgba(227,179,65,0.4)' : undefined,
+                borderLeft:   (corner as any).borderLeft   ? '2px solid rgba(227,179,65,0.4)' : undefined,
+                borderRight:  (corner as any).borderRight  ? '2px solid rgba(227,179,65,0.4)' : undefined,
+                pointerEvents: 'none'
               }} />
             ))}
+            {/* Radial glow */}
             <div style={{
               position: 'absolute', top: '50%', left: '50%',
               transform: 'translate(-50%,-50%)',
@@ -240,6 +344,7 @@ export const CampaignPage: React.FC = () => {
               transition: 'background 0.5s ease',
               pointerEvents: 'none'
             }} />
+            {/* Click particles */}
             {particles.map(p => (
               <div key={p.id} style={{
                 position: 'absolute', left: p.x, top: p.y,
@@ -249,6 +354,7 @@ export const CampaignPage: React.FC = () => {
                 pointerEvents: 'none'
               }} />
             ))}
+            {/* Banner CTA */}
             <div style={{
               position: 'absolute', inset: 0,
               display: 'flex', flexDirection: 'column',
@@ -259,24 +365,27 @@ export const CampaignPage: React.FC = () => {
                   background: 'transparent',
                   border: '2px solid #e3b341',
                   color: '#e3b341',
-                  padding: '12px 36px',
-                  borderRadius: '8px',
+                  padding: '12px 36px', borderRadius: '8px',
                   fontFamily: "'IBM Plex Mono', monospace",
                   fontWeight: 700, fontSize: '16px', letterSpacing: '3px',
                   cursor: 'pointer',
-                  transition: 'all 0.2s ease',
                   textShadow: '0 0 20px rgba(227,179,65,0.5)',
-                  animation: 'flicker 5s ease-in-out infinite, press-pulse 2s ease-in-out infinite'
                 }}>
                   PRESS TO START
                 </button>
               ) : (
                 <div style={{ textAlign: 'center', animation: 'card-in 0.4s ease' }}>
                   <div style={{ fontSize: '28px', marginBottom: '8px' }}>🎯</div>
-                  <div style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: '18px', fontWeight: 700, color: '#e3b341', letterSpacing: '2px' }}>
+                  <div style={{
+                    fontFamily: "'IBM Plex Mono', monospace",
+                    fontSize: '18px', fontWeight: 700,
+                    color: '#e3b341', letterSpacing: '2px'
+                  }}>
                     CHOOSE YOUR PATH
                   </div>
-                  <div style={{ fontSize: '13px', color: '#8b949e', marginTop: '6px' }}>Select a difficulty level below to begin</div>
+                  <div style={{ fontSize: '13px', color: '#8b949e', marginTop: '6px' }}>
+                    Select a difficulty level below to begin
+                  </div>
                 </div>
               )}
             </div>
@@ -297,7 +406,7 @@ export const CampaignPage: React.FC = () => {
                   style={{
                     animationDelay: `${i * 0.1 + 0.2}s`,
                     background: active
-                      ? `linear-gradient(160deg, #161b22 0%, #1c2128 100%)`
+                      ? 'linear-gradient(160deg, #161b22 0%, #1c2128 100%)'
                       : '#0d1117',
                     border: `1px solid ${active ? level.color + '55' : '#21262d'}`,
                     borderRadius: '16px',
@@ -322,6 +431,7 @@ export const CampaignPage: React.FC = () => {
                       pointerEvents: 'none'
                     }} />
                   )}
+                  {/* Top accent line */}
                   <div style={{
                     position: 'absolute', top: 0, left: '24px', right: '24px', height: '2px',
                     background: active
@@ -331,11 +441,7 @@ export const CampaignPage: React.FC = () => {
                     transition: 'background 0.3s'
                   }} />
                   <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '6px' }}>
-                    <span style={{
-                      color: active ? level.color : '#444c56',
-                      fontSize: '14px', fontWeight: 700,
-                      transition: 'color 0.3s'
-                    }}>▶</span>
+                    <span style={{ color: active ? level.color : '#444c56', fontSize: '14px', fontWeight: 700, transition: 'color 0.3s' }}>▶</span>
                     <span style={{
                       fontFamily: "'IBM Plex Mono', monospace",
                       fontWeight: 700, fontSize: '17px', letterSpacing: '0.5px',
@@ -345,7 +451,8 @@ export const CampaignPage: React.FC = () => {
                     </span>
                   </div>
                   <div style={{
-                    fontSize: '14px', color: active ? '#8b949e' : '#30363d',
+                    fontSize: '14px',
+                    color: active ? '#8b949e' : '#30363d',
                     marginBottom: '28px', marginLeft: '24px',
                     transition: 'color 0.3s'
                   }}>
@@ -353,16 +460,14 @@ export const CampaignPage: React.FC = () => {
                   </div>
                   {active && unlocked && (
                     <div style={{
-                      fontSize: '11px', color: level.color, fontFamily: "'IBM Plex Mono', monospace",
+                      fontSize: '11px', color: level.color,
+                      fontFamily: "'IBM Plex Mono', monospace",
                       marginBottom: '16px', marginLeft: '24px', letterSpacing: '0.5px'
                     }}>
                       {count} {count === 1 ? 'quest' : 'quests'} available
                     </div>
                   )}
-                  <div style={{
-                    display: 'flex', justifyContent: 'center', alignItems: 'center',
-                    height: '56px', marginTop: 'auto'
-                  }}>
+                  <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '56px', marginTop: 'auto' }}>
                     {unlocked ? (
                       <div style={{
                         width: '48px', height: '48px', borderRadius: '12px',
@@ -396,7 +501,8 @@ export const CampaignPage: React.FC = () => {
                   {unlocked && active && (
                     <div style={{
                       position: 'absolute', top: '14px', right: '14px',
-                      background: `${level.color}22`, border: `1px solid ${level.color}44`,
+                      background: `${level.color}22`,
+                      border: `1px solid ${level.color}44`,
                       borderRadius: '6px', padding: '3px 8px',
                       fontSize: '10px', fontWeight: 700, color: level.color,
                       fontFamily: "'IBM Plex Mono', monospace", letterSpacing: '0.5px'
@@ -410,7 +516,11 @@ export const CampaignPage: React.FC = () => {
           </div>
 
           {!started && (
-            <p style={{ textAlign: 'center', marginTop: '32px', color: '#484f58', fontSize: '13px', fontFamily: "'IBM Plex Mono', monospace", letterSpacing: '0.5px' }}>
+            <p style={{
+              textAlign: 'center', marginTop: '32px',
+              color: '#484f58', fontSize: '13px',
+              fontFamily: "'IBM Plex Mono', monospace", letterSpacing: '0.5px'
+            }}>
               Press the banner above to begin your journey
             </p>
           )}

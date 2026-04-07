@@ -17,6 +17,18 @@ const GLOBAL_STYLES = `
     from { opacity: 0; transform: translateY(6px); }
     to   { opacity: 1; transform: translateY(0);   }
   }
+  @keyframes modalFadeIn {
+    from { opacity: 0; transform: scale(0.95) translateY(12px); }
+    to   { opacity: 1; transform: scale(1) translateY(0); }
+  }
+  @keyframes overlayFadeIn {
+    from { opacity: 0; }
+    to   { opacity: 1; }
+  }
+  @keyframes pulse {
+    0%, 100% { opacity: 1; }
+    50%       { opacity: 0.5; }
+  }
 
   .cs-btn {
     position: relative; overflow: hidden;
@@ -147,7 +159,241 @@ const GLOBAL_STYLES = `
     transform: translateY(-3px) !important;
     box-shadow: 0 8px 20px rgba(0,0,0,0.3) !important;
   }
+
+  .cs-announcement-card {
+    transition: background 0.15s ease, border-color 0.15s ease, transform 0.15s ease;
+  }
+  .cs-announcement-card:hover {
+    background: rgba(255,255,255,0.04) !important;
+    transform: translateX(3px);
+  }
+
+  .cs-modal-close:hover {
+    background: rgba(255,255,255,0.12) !important;
+    transform: scale(1.1);
+  }
+  .cs-modal-close { transition: background 0.15s ease, transform 0.15s ease; }
 `
+
+/* ── Announcement types ── */
+interface Announcement {
+  id: string
+  title: string
+  body: string
+  createdat: string
+  priority: 'info' | 'warning' | 'success' | 'critical'
+  author: string
+  ispinned: boolean
+}
+
+const PRIORITY_CONFIG: Record<Announcement['priority'], { color: string; bg: string; border: string; icon: string; label: string }> = {
+  info:     { color: '#64b5f6', bg: 'rgba(100,181,246,0.08)', border: 'rgba(100,181,246,0.25)', icon: 'ℹ️',  label: 'Info'     },
+  warning:  { color: '#ffa726', bg: 'rgba(255,167,38,0.08)',  border: 'rgba(255,167,38,0.25)',  icon: '⚠️',  label: 'Warning'  },
+  success:  { color: '#4caf50', bg: 'rgba(76,175,80,0.08)',   border: 'rgba(76,175,80,0.25)',   icon: '✅',  label: 'Success'  },
+  critical: { color: '#f85149', bg: 'rgba(248,81,73,0.08)',   border: 'rgba(248,81,73,0.25)',   icon: '🚨',  label: 'Critical' },
+}
+
+/* ── Announcements Modal ── */
+const AnnouncementsModal: React.FC<{ onClose: () => void }> = ({ onClose }) => {
+  const [announcements, setAnnouncements] = useState<Announcement[]>([])
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
+
+  useEffect(() => {
+    const fetchAnnouncements = async () => {
+      try {
+        const { data, error: err } = await supabase
+          .from('announcements')
+          .select('*')
+          .order('ispinned', { ascending: false })
+          .order('createdat', { ascending: false })
+        if (err) throw err
+        setAnnouncements(data ?? [])
+      } catch (e: any) {
+        setError(e.message ?? 'Failed to load announcements')
+      } finally {
+        setLoading(false)
+      }
+    }
+    fetchAnnouncements()
+  }, [])
+
+  // Close on Escape
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose() }
+    document.addEventListener('keydown', handler)
+    return () => document.removeEventListener('keydown', handler)
+  }, [onClose])
+
+  const formatDate = (iso: string) => {
+    const d = new Date(iso)
+    return d.toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })
+  }
+
+  return (
+    <div
+      onClick={onClose}
+      style={{
+        position: 'fixed', inset: 0, zIndex: 2000,
+        background: 'rgba(0,0,0,0.7)', backdropFilter: 'blur(6px)',
+        display: 'flex', alignItems: 'center', justifyContent: 'center',
+        animation: 'overlayFadeIn 0.2s ease',
+      }}
+    >
+      <div
+        onClick={e => e.stopPropagation()}
+        style={{
+          width: '100%', maxWidth: '560px', margin: '20px',
+          background: '#0d1117',
+          border: '1px solid #30363d',
+          borderRadius: '20px',
+          boxShadow: '0 32px 80px rgba(0,0,0,0.8)',
+          overflow: 'hidden',
+          animation: 'modalFadeIn 0.25s cubic-bezier(0.16,1,0.3,1)',
+          maxHeight: '80vh',
+          display: 'flex',
+          flexDirection: 'column',
+        }}
+      >
+        {/* Header */}
+        <div style={{
+          display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+          padding: '20px 24px',
+          borderBottom: '1px solid #21262d',
+          background: 'rgba(22,27,34,0.8)',
+          flexShrink: 0,
+        }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+            <div style={{
+              width: '36px', height: '36px', borderRadius: '10px',
+              background: 'rgba(100,181,246,0.12)', border: '1px solid rgba(100,181,246,0.3)',
+              display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '18px',
+            }}>📢</div>
+            <div>
+              <div style={{ color: '#e6edf3', fontSize: '16px', fontWeight: '700' }}>System Announcements</div>
+              <div style={{ color: '#8b949e', fontSize: '11px' }}>Latest updates from the CodeSense team</div>
+            </div>
+          </div>
+          <button
+            className="cs-modal-close"
+            onClick={onClose}
+            style={{
+              background: 'rgba(255,255,255,0.06)', border: '1px solid #30363d',
+              borderRadius: '8px', color: '#8b949e', fontSize: '14px',
+              cursor: 'pointer', width: '32px', height: '32px',
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+            }}
+          >✕</button>
+        </div>
+
+        {/* Body */}
+        <div style={{ overflowY: 'auto', flex: 1, padding: '16px 24px' }}>
+          {loading && (
+            <div style={{ padding: '40px 0', textAlign: 'center' }}>
+              <div style={{ fontSize: '28px', marginBottom: '12px', animation: 'pulse 1.5s ease infinite' }}>📡</div>
+              <div style={{ color: '#8b949e', fontSize: '13px' }}>Loading announcements...</div>
+            </div>
+          )}
+
+          {!loading && error && (
+            <div style={{ padding: '40px 0', textAlign: 'center' }}>
+              <div style={{ fontSize: '28px', marginBottom: '12px' }}>⚠️</div>
+              <div style={{ color: '#f85149', fontSize: '13px' }}>{error}</div>
+            </div>
+          )}
+
+          {!loading && !error && announcements.length === 0 && (
+            <div style={{ padding: '40px 0', textAlign: 'center' }}>
+              <div style={{ fontSize: '36px', marginBottom: '12px' }}>📭</div>
+              <div style={{ color: '#8b949e', fontSize: '14px', fontWeight: '600' }}>No announcements yet</div>
+              <div style={{ color: '#484f58', fontSize: '12px', marginTop: '4px' }}>Check back later for updates!</div>
+            </div>
+          )}
+
+          {!loading && !error && announcements.length > 0 && (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+              {announcements.map((ann) => {
+                const cfg = PRIORITY_CONFIG[ann.priority] ?? PRIORITY_CONFIG.info
+                return (
+                  <div
+                    key={ann.id}
+                    className="cs-announcement-card"
+                    style={{
+                      background: ann.ispinned ? cfg.bg : 'rgba(255,255,255,0.02)',
+                      border: `1px solid ${ann.ispinned ? cfg.border : '#21262d'}`,
+                      borderRadius: '12px',
+                      padding: '14px 16px',
+                      position: 'relative',
+                    }}
+                  >
+                    {/* Pinned indicator */}
+                    {ann.ispinned && (
+                      <div style={{
+                        position: 'absolute', top: '10px', right: '12px',
+                        fontSize: '11px', color: cfg.color,
+                        background: cfg.bg, border: `1px solid ${cfg.border}`,
+                        borderRadius: '6px', padding: '2px 8px', fontWeight: '700',
+                        letterSpacing: '0.5px',
+                      }}>📌 PINNED</div>
+                    )}
+
+                    {/* Priority badge + title */}
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '8px', paddingRight: ann.ispinned ? '80px' : '0' }}>
+                      <span style={{ fontSize: '15px' }}>{cfg.icon}</span>
+                      <span style={{
+                        fontSize: '10px', fontWeight: '700', letterSpacing: '1px',
+                        textTransform: 'uppercase', color: cfg.color,
+                        background: cfg.bg, border: `1px solid ${cfg.border}`,
+                        borderRadius: '5px', padding: '2px 7px',
+                      }}>{cfg.label}</span>
+                      <span style={{ color: '#e6edf3', fontSize: '14px', fontWeight: '600' }}>{ann.title}</span>
+                    </div>
+
+                    {/* Body */}
+                    <p style={{
+                      color: '#8b949e', fontSize: '13px', lineHeight: '1.65',
+                      margin: '0 0 10px 0', whiteSpace: 'pre-wrap',
+                    }}>{ann.body}</p>
+
+                    {/* Footer */}
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                      <span style={{ color: '#484f58', fontSize: '11px' }}>
+                        By <span style={{ color: '#8b949e', fontWeight: '600' }}>{ann.author}</span>
+                      </span>
+                      <span style={{ color: '#484f58', fontSize: '11px' }}>{formatDate(ann.createdat)}</span>
+                    </div>
+                  </div>
+                )
+              })}
+            </div>
+          )}
+        </div>
+
+        {/* Footer */}
+        <div style={{
+          padding: '14px 24px',
+          borderTop: '1px solid #21262d',
+          background: 'rgba(13,17,23,0.8)',
+          display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+          flexShrink: 0,
+        }}>
+          <span style={{ color: '#484f58', fontSize: '11px' }}>
+            {announcements.length} announcement{announcements.length !== 1 ? 's' : ''}
+          </span>
+          <button
+            className="cs-btn"
+            onClick={onClose}
+            style={{
+              background: 'rgba(255,255,255,0.06)', border: '1px solid #30363d',
+              borderRadius: '8px', color: '#8b949e', fontSize: '12px',
+              cursor: 'pointer', padding: '7px 16px', fontWeight: '600',
+            }}
+          >Close</button>
+        </div>
+      </div>
+    </div>
+  )
+}
 
 interface DashboardStats {
   sandboxRuns: number
@@ -167,6 +413,9 @@ export const HomeDashboard: React.FC = () => {
   const [myRank, setMyRank] = useState<number | null>(null)
   const [profileMenuOpen, setProfileMenuOpen] = useState(false)
   const profileMenuRef = useRef<HTMLDivElement>(null)
+
+  // ── NEW: announcements modal state ──
+  const [announcementsOpen, setAnnouncementsOpen] = useState(false)
 
   const [searchQuery, setSearchQuery] = useState('')
   const [searchOpen, setSearchOpen] = useState(false)
@@ -221,11 +470,12 @@ export const HomeDashboard: React.FC = () => {
   }, [])
 
   const QUICK_ACTIONS = [
-    { label: 'Sandbox Mode',    icon: '🔬', desc: 'Experiment freely with code',   path: '/sandbox',  keywords: ['sandbox','experiment','code','run','free'] },
-    { label: 'Campaign Mode',   icon: '⚔️', desc: 'Complete quests and earn XP',   path: '/campaign', keywords: ['campaign','quest','mission','learn','level'] },
-    { label: 'Progress Report', icon: '📊', desc: 'View your stats and activity',  path: '/progress', keywords: ['progress','report','stats','activity','xp','chart'] },
-    { label: 'Profile Settings',icon: '👤', desc: 'Edit your profile and avatar',  path: '/profile',  keywords: ['profile','avatar','settings','edit','account','image'] },
-    { label: 'Leaderboard',     icon: '🏆', desc: 'See top players ranking',       path: '/progress', keywords: ['leaderboard','rank','ranking','top','players'] },
+    { label: 'Sandbox Mode',         icon: '🔬', desc: 'Experiment freely with code',      path: '/sandbox',  keywords: ['sandbox','experiment','code','run','free'] },
+    { label: 'Campaign Mode',        icon: '⚔️', desc: 'Complete quests and earn XP',      path: '/campaign', keywords: ['campaign','quest','mission','learn','level'] },
+    { label: 'Progress Report',      icon: '📊', desc: 'View your stats and activity',     path: '/progress', keywords: ['progress','report','stats','activity','xp','chart'] },
+    { label: 'Profile Settings',     icon: '👤', desc: 'Edit your profile and avatar',     path: '/profile',  keywords: ['profile','avatar','settings','edit','account','image'] },
+    { label: 'Leaderboard',          icon: '🏆', desc: 'See top players ranking',          path: '/progress', keywords: ['leaderboard','rank','ranking','top','players'] },
+    { label: 'System Announcements', icon: '📢', desc: 'View latest updates and notices',  path: '',          keywords: ['announcement','announcements','news','update','notice','system'] },
   ]
 
   const runSearch = async (q: string) => {
@@ -251,7 +501,10 @@ export const HomeDashboard: React.FC = () => {
         ;[...((byMode as any).data ?? []), ...((byCode as any).data ?? [])].forEach((r: any) => rm.set(r.id, r))
         reportsData = Array.from(rm.values()).slice(0, 5)
       }
-      const matchedActions = QUICK_ACTIONS.filter(a => a.keywords.some(k => k.includes(ql) || ql.includes(k)) || a.label.toLowerCase().includes(ql))
+      // Include announcements action if search matches
+      const matchedActions = QUICK_ACTIONS.filter(a =>
+        a.keywords.some(k => k.includes(ql) || ql.includes(k)) || a.label.toLowerCase().includes(ql)
+      )
       setSearchResults({ actions: matchedActions, players: players ?? [], quests: Array.from(questMap.values()).slice(0, 5), reports: reportsData })
     } catch (e) { console.error('Search error:', e) }
     finally { setSearchLoading(false) }
@@ -296,8 +549,22 @@ export const HomeDashboard: React.FC = () => {
 
   const currentLevelName = user ? getLevelName((user.currentLevel as 1 | 2 | 3 | 4) || 1) : 'Squire'
 
+  // Handler for search action clicks — announcements open modal, others navigate
+  const handleSearchActionClick = (action: Pick<typeof QUICK_ACTIONS[0], 'label' | 'path'>) => {
+    setSearchOpen(false)
+    setSearchQuery('')
+    if (action.label === 'System Announcements') {
+      setAnnouncementsOpen(true)
+    } else {
+      navigate(action.path)
+    }
+  }
+
   return (
     <div style={{ minHeight: '100vh', width: '100%', background: 'linear-gradient(135deg, #0d1117 0%, #1a1f2e 100%)', display: 'flex', flexDirection: 'column', alignItems: 'center', paddingBottom: '40px' }}>
+
+      {/* ── ANNOUNCEMENTS MODAL ── */}
+      {announcementsOpen && <AnnouncementsModal onClose={() => setAnnouncementsOpen(false)} />}
 
       {/* ── HEADER ── */}
       <header style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '16px 32px', background: 'rgba(22,27,34,0.95)', backdropFilter: 'blur(12px)', borderRadius: '14px', margin: '20px 0 30px 0', border: '1px solid #30363d', width: '95%', maxWidth: '1280px', boxSizing: 'border-box', gap: '16px' }}>
@@ -335,7 +602,7 @@ export const HomeDashboard: React.FC = () => {
                 {searchResults.actions.length > 0 && (<div>
                   <div style={{ padding: '8px 16px 4px', color: '#8b949e', fontSize: '10px', fontWeight: '700', letterSpacing: '1.5px', textTransform: 'uppercase' }}>Quick Actions</div>
                   {searchResults.actions.map(a => (
-                    <button key={a.label} className="cs-search-result-btn" onClick={() => { setSearchOpen(false); setSearchQuery(''); navigate(a.path) }}
+                    <button key={a.label} className="cs-search-result-btn" onClick={() => handleSearchActionClick(a)}
                       style={{ width: '100%', background: 'transparent', border: 'none', padding: '10px 16px', display: 'flex', alignItems: 'center', gap: '12px', cursor: 'pointer', textAlign: 'left' }}>
                       <div style={{ width: '32px', height: '32px', borderRadius: '8px', background: 'rgba(76,175,80,0.12)', border: '1px solid rgba(76,175,80,0.3)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
                         <span style={{ fontSize: '16px' }}>{a.icon}</span>
@@ -432,10 +699,11 @@ export const HomeDashboard: React.FC = () => {
                   </div>
                 </div>
                 {[
-                  { icon: '🖼️', label: 'Profile Image',      action: () => { navigate('/profile');  setProfileMenuOpen(false) } },
-                  { icon: '📋', label: 'Details Information', action: () => { navigate('/profile');  setProfileMenuOpen(false) } },
-                  { icon: '📊', label: 'Progress Report',     action: () => { navigate('/progress'); setProfileMenuOpen(false) } },
-                  { icon: 'ℹ️', label: 'About',              action: () => { navigate('/profile');  setProfileMenuOpen(false) } },
+                  { icon: '🖼️', label: 'Profile Image',          action: () => { navigate('/profile');  setProfileMenuOpen(false) } },
+                  // ── CHANGED: "Details Information" → "System Announcements" ──
+                  { icon: '📢', label: 'System Announcements',   action: () => { setProfileMenuOpen(false); setAnnouncementsOpen(true) } },
+                  { icon: '📊', label: 'Progress Report',         action: () => { navigate('/progress'); setProfileMenuOpen(false) } },
+                  { icon: 'ℹ️', label: 'About',                  action: () => { navigate('/profile');  setProfileMenuOpen(false) } },
                 ].map(item => (
                   <button key={item.label} className="cs-menu-item" onClick={item.action}
                     style={{ width: '100%', background: 'transparent', border: 'none', color: '#e6edf3', padding: '11px 16px', fontSize: '13px', cursor: 'pointer', textAlign: 'left', display: 'flex', alignItems: 'center', gap: '10px' }}>
