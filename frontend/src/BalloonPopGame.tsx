@@ -8,6 +8,10 @@
 //   6. Correct balloon removed from balloons array only after pop animation
 //   7. Game Over / Done overlays work properly
 //   8. onComplete called exactly once
+//   9. FIX (Issue #2): rx/ry are NO LONGER baked in on spawn.
+//      They are derived at draw-time from a constant SCALE_FACTOR so that
+//      hit-detection and the visual always use the same radius even after
+//      a window resize or device rotation.
 
 import React, { useEffect, useRef, useState, useCallback } from 'react';
 
@@ -19,6 +23,11 @@ export interface MCQ {
   explanation: string;
 }
 
+// ── FIX: store a scale-factor constant instead of baking in absolute radii ──
+// rx = W * BALLOON_SCALE * 0.56   (derived at draw/hit time from current W)
+// ry = W * BALLOON_SCALE * 0.67
+const BALLOON_SCALE = 0.085; // fraction of min(W,H)
+
 interface FloatingBalloon {
   uid: string;
   optionIndex: number;
@@ -27,8 +36,7 @@ interface FloatingBalloon {
   y: number;         // px
   vx: number;        // px/s
   vy: number;        // px/s
-  rx: number;        // radius x px
-  ry: number;        // radius y px
+  // ── FIX: rx/ry removed — computed dynamically via getBalloonRadii() ──
   color: string;
   shineColor: string;
   stringColor: string;
@@ -63,14 +71,19 @@ const PALETTE = [
 const TOTAL_LIVES = 3;
 let _pid = 0;
 
+// ── FIX: getBalloonRadii — single source of truth for hitbox & visual ─────────
+function getBalloonRadii(W: number, H: number): { rx: number; ry: number; bR: number } {
+  const bR = Math.min(W, H) * BALLOON_SCALE;
+  return { rx: bR * 0.56, ry: bR * 0.67, bR };
+}
+
+// spawnBalloons no longer stores rx/ry — positions only
 function spawnBalloons(options: string[], qIdx: number, W: number, H: number): FloatingBalloon[] {
-  const bR = Math.min(W, H) * 0.085;
   return options.map((label, i) => {
     const col   = PALETTE[(i + qIdx * 3) % PALETTE.length];
-    const speed = 55 + Math.random() * 35; // px/s
-    const angle = Math.PI * (-0.55 + Math.random() * 0.3); // upward mostly
+    const speed = 55 + Math.random() * 35;
+    const angle = Math.PI * (-0.55 + Math.random() * 0.3);
     const count = options.length;
-    // spread horizontally
     const xPos  = (W * 0.12) + (i / Math.max(count - 1, 1)) * (W * 0.76) + (Math.random() - 0.5) * 30;
     return {
       uid:         `${qIdx}-${i}-${Math.random()}`,
@@ -80,14 +93,12 @@ function spawnBalloons(options: string[], qIdx: number, W: number, H: number): F
       y:           H * 0.82 + Math.random() * (H * 0.1),
       vx:          Math.cos(angle) * speed * (Math.random() > 0.5 ? 1 : -1),
       vy:          -Math.abs(Math.sin(angle) * speed) - 10,
-      rx:          bR * 0.56,
-      ry:          bR * 0.67,
       color:       col.body,
       shineColor:  col.shine,
       stringColor: col.string,
       wobble:      Math.random() * Math.PI * 2,
       wobbleSpeed: 1.1 + Math.random() * 0.9,
-      wobbleAmp:   6 + Math.random() * 8, // px
+      wobbleAmp:   6 + Math.random() * 8,
       state:       'floating',
       wrongTimer:  0,
       particles:   [],
@@ -105,7 +116,6 @@ export const BalloonPopGame: React.FC<{
   const t0Ref        = useRef<number>(0);
   const completedRef = useRef(false);
 
-  // Stable game state in a ref — avoids stale closure issues
   const gs = useRef({
     balloons:     [] as FloatingBalloon[],
     lives:        TOTAL_LIVES,
@@ -145,7 +155,6 @@ export const BalloonPopGame: React.FC<{
     });
   }, [questions]);
 
-  // Spawn balloons using current canvas size
   const loadQuestion = useCallback((idx: number) => {
     const g = gs.current;
     g.balloons = spawnBalloons(
@@ -157,7 +166,7 @@ export const BalloonPopGame: React.FC<{
     g.phase = 'playing';
   }, [questions]);
 
-  // ── Click / touch hit test ─────────────────────────────────────────────────
+  // ── FIX: hit test now derives rx/ry from current canvas size ──────────────
   const hit = useCallback((clientX: number, clientY: number) => {
     const g      = gs.current;
     if (g.phase !== 'playing') return;
@@ -165,23 +174,22 @@ export const BalloonPopGame: React.FC<{
     if (!canvas) return;
 
     const rect = canvas.getBoundingClientRect();
-    // Map to logical (CSS) pixels
     const mx = clientX - rect.left;
     const my = clientY - rect.top;
     const q  = questions[g.qIdx];
     if (!q) return;
 
+    // ── FIX: derive radii from current canvas dimensions ──
+    const { rx, ry } = getBalloonRadii(g.W || canvas.offsetWidth, g.H || canvas.offsetHeight);
+
     for (const b of g.balloons) {
       if (b.state !== 'floating') continue;
       const wx = b.x + b.wobbleAmp * Math.sin(b.wobble);
-      // Ellipse hit test
-      const dx = (mx - wx) / b.rx;
-      const dy = (my - b.y)  / b.ry;
+      const dx = (mx - wx) / rx;
+      const dy = (my - b.y)  / ry;
       if (dx * dx + dy * dy < 1.0) {
         if (b.optionIndex === q.correct) {
-          // ✅ Correct
           b.state      = 'popped';
-          // Confetti burst (pixel coords)
           b.particles  = Array.from({ length: 28 }, (_, pi) => {
             const a = (pi / 28) * Math.PI * 2 + Math.random() * 0.3;
             return {
@@ -200,10 +208,8 @@ export const BalloonPopGame: React.FC<{
           g.correctLabel = b.label;
           g.phase        = 'between';
           g.betweenTimer = 2.6;
-          // Hide other balloons
           g.balloons.forEach(ob => { if (ob.uid !== b.uid && ob.state === 'floating') ob.state = 'popped'; });
         } else {
-          // ❌ Wrong
           b.state      = 'wrong';
           b.wrongTimer = 0.8;
           g.lives      = Math.max(0, g.lives - 1);
@@ -223,7 +229,6 @@ export const BalloonPopGame: React.FC<{
     if (t) hit(t.clientX, t.clientY);
   }, [hit]);
 
-  // ── Main render loop ───────────────────────────────────────────────────────
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
@@ -238,19 +243,23 @@ export const BalloonPopGame: React.FC<{
       ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
       gs.current.W = W;
       gs.current.H = H;
+      // ── FIX: re-spawn balloons so starting positions scale correctly ──
+      if (gs.current.phase === 'playing') {
+        gs.current.balloons = spawnBalloons(
+          questions[gs.current.qIdx]?.options ?? [],
+          gs.current.qIdx,
+          W, H,
+        );
+      }
     };
 
-    // Wait one frame so layout is settled
     requestAnimationFrame(() => {
       updateSize();
       loadQuestion(0);
       syncUi();
     });
 
-    const ro = new ResizeObserver(() => {
-      updateSize();
-      // Re-spawn if size changed dramatically
-    });
+    const ro = new ResizeObserver(() => { updateSize(); });
     ro.observe(canvas);
 
     const draw = (now: number) => {
@@ -259,25 +268,24 @@ export const BalloonPopGame: React.FC<{
       const g  = gs.current;
       const W  = g.W || canvas.offsetWidth;
       const H  = g.H || canvas.offsetHeight;
-      const bR = Math.min(W, H) * 0.085;
+
+      // ── FIX: derive visual radii here — same source as hit test ──
+      const { rx: bRX, ry: bRY, bR } = getBalloonRadii(W, H);
 
       ctx.clearRect(0, 0, W, H);
 
-      // Background
       const bg = ctx.createLinearGradient(0, 0, 0, H);
       bg.addColorStop(0, '#0d1117');
       bg.addColorStop(1, '#080c12');
       ctx.fillStyle = bg;
       ctx.fillRect(0, 0, W, H);
 
-      // Dot grid
       ctx.fillStyle = 'rgba(33,38,45,0.9)';
       for (let gx = 24; gx < W; gx += 24)
         for (let gy = 24; gy < H; gy += 24) {
           ctx.beginPath(); ctx.arc(gx, gy, 0.9, 0, Math.PI * 2); ctx.fill();
         }
 
-      // Screen shake
       let didSave = false;
       if (g.shake > 0) {
         const t = g.shake / 18;
@@ -286,7 +294,6 @@ export const BalloonPopGame: React.FC<{
         g.shake--;
       }
 
-      // Between timer → advance question
       if (g.phase === 'between') {
         g.betweenTimer -= dt;
         if (g.betweenTimer <= 0) {
@@ -308,14 +315,11 @@ export const BalloonPopGame: React.FC<{
         }
       }
 
-      // Update + draw all balloons
       for (const b of g.balloons) {
-
-        // Draw + animate particles
         b.particles.forEach(p => {
           p.x  += p.vx * dt;
           p.y  += p.vy * dt;
-          p.vy += 200 * dt; // gravity
+          p.vy += 200 * dt;
           p.life -= dt * 1.1;
           if (p.life > 0) {
             ctx.save();
@@ -331,28 +335,25 @@ export const BalloonPopGame: React.FC<{
 
         if (b.state === 'popped') continue;
 
-        // Wrong flash timer
         if (b.state === 'wrong') {
           b.wrongTimer -= dt;
           if (b.wrongTimer <= 0) b.state = 'floating';
         }
 
-        // Physics
         if (b.state === 'floating') {
           b.wobble += b.wobbleSpeed * dt;
           b.x      += b.vx * dt;
           b.y      += b.vy * dt;
 
-          // Walls — bounce with damping
-          const minX = b.rx + 4, maxX = W - b.rx - 4;
-          const minY = b.ry + 4, maxY = H - b.ry - 4;
+          // ── FIX: wall boundaries use the same dynamic radii ──
+          const minX = bRX + 4, maxX = W - bRX - 4;
+          const minY = bRY + 4, maxY = H - bRY - 4;
           if (b.x < minX)  { b.x  = minX;  b.vx =  Math.abs(b.vx) * 0.7; }
           if (b.x > maxX)  { b.x  = maxX;  b.vx = -Math.abs(b.vx) * 0.7; }
           if (b.y < minY)  { b.y  = minY;  b.vy =  Math.abs(b.vy) * 0.65; }
           if (b.y > maxY)  { b.y  = maxY;  b.vy = -Math.abs(b.vy) * 0.75; }
         }
 
-        // Draw balloon
         const wx      = b.x + b.wobbleAmp * Math.sin(b.wobble);
         const wy      = b.y;
         const isWrong = b.state === 'wrong';
@@ -365,31 +366,27 @@ export const BalloonPopGame: React.FC<{
           ctx.translate(wx, wy);
         }
 
-        // String
         ctx.strokeStyle = isWrong ? '#991b1b' : b.stringColor;
         ctx.lineWidth   = 1.3;
         ctx.beginPath();
-        ctx.moveTo(0, b.ry * 0.82);
-        ctx.quadraticCurveTo(b.rx * 0.3, b.ry * 1.3, 0, b.ry * 0.82 + bR * 1.0);
+        ctx.moveTo(0, bRY * 0.82);
+        ctx.quadraticCurveTo(bRX * 0.3, bRY * 1.3, 0, bRY * 0.82 + bR * 1.0);
         ctx.stroke();
 
-        // Balloon body (ellipse)
-        const grad = ctx.createRadialGradient(-b.rx * 0.28, -b.ry * 0.22, b.rx * 0.04, 0, 0, Math.max(b.rx, b.ry) * 0.9);
+        const grad = ctx.createRadialGradient(-bRX * 0.28, -bRY * 0.22, bRX * 0.04, 0, 0, Math.max(bRX, bRY) * 0.9);
         grad.addColorStop(0,    isWrong ? '#ff9090' : b.shineColor);
         grad.addColorStop(0.38, isWrong ? '#da3633' : b.color);
         grad.addColorStop(1,    (isWrong ? '#991b1b' : b.color) + '88');
         ctx.beginPath();
-        ctx.ellipse(0, 0, b.rx, b.ry, 0, 0, Math.PI * 2);
+        ctx.ellipse(0, 0, bRX, bRY, 0, 0, Math.PI * 2);
         ctx.fillStyle = grad;
         ctx.fill();
 
-        // Knot
         ctx.beginPath();
-        ctx.arc(0, b.ry * 0.82, b.rx * 0.1, 0, Math.PI * 2);
+        ctx.arc(0, bRY * 0.82, bRX * 0.1, 0, Math.PI * 2);
         ctx.fillStyle = isWrong ? '#da3633' : b.color;
         ctx.fill();
 
-        // Label text
         const fz = Math.max(9, Math.min(13, bR * 0.26));
         ctx.font         = `700 ${fz}px 'JetBrains Mono', monospace`;
         ctx.textAlign    = 'center';
@@ -398,7 +395,7 @@ export const BalloonPopGame: React.FC<{
         ctx.shadowBlur   = 6;
         ctx.fillStyle    = isWrong ? '#fca5a5' : '#fff';
 
-        const maxTW = b.rx * 1.72;
+        const maxTW = bRX * 1.72;
         const words = b.label.split(' ');
         const lines: string[] = [];
         let cur = '';
@@ -413,7 +410,6 @@ export const BalloonPopGame: React.FC<{
         lines.forEach((l, li) => ctx.fillText(l, 0, startY + li * lh));
         ctx.shadowBlur = 0;
 
-        // ✕ on wrong
         if (isWrong) {
           ctx.font      = `900 ${bR * 0.45}px sans-serif`;
           ctx.fillStyle = 'rgba(255,255,255,0.88)';
@@ -436,7 +432,7 @@ export const BalloonPopGame: React.FC<{
       ro.disconnect();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []); // ← run once; game state managed via gs ref
+  }, []);
 
   const restart = useCallback(() => {
     completedRef.current = false;
@@ -497,10 +493,8 @@ export const BalloonPopGame: React.FC<{
         </div>
       )}
 
-      {/* Red vignette when lives lost */}
       <div style={{ position: 'absolute', inset: 0, pointerEvents: 'none', zIndex: 5, borderRadius: 12, boxShadow: ui.lives < TOTAL_LIVES && ui.phase === 'playing' ? 'inset 0 0 70px rgba(248,81,73,.45)' : 'none', transition: 'box-shadow .6s ease' }} />
 
-      {/* Game Over */}
       {ui.phase === 'gameover' && (
         <div style={{ position: 'absolute', inset: 0, zIndex: 20, background: 'rgba(13,17,23,0.94)', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 18, backdropFilter: 'blur(8px)', animation: 'bfadeIn .4s ease' }}>
           <div style={{ fontSize: 58 }}>💥</div>
@@ -512,7 +506,6 @@ export const BalloonPopGame: React.FC<{
         </div>
       )}
 
-      {/* Done */}
       {ui.phase === 'done' && (
         <div style={{ position: 'absolute', inset: 0, zIndex: 20, background: 'rgba(13,17,23,0.94)', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 16, backdropFilter: 'blur(8px)', animation: 'bfadeIn .4s ease' }}>
           <div style={{ fontSize: 60 }}>🎊</div>

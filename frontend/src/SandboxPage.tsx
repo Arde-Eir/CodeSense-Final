@@ -38,8 +38,8 @@ const PlayerHUD: React.FC<{
   user: { id: string; playerName: string } | null;
   isGuest: boolean;
   liveStats: LiveStats | null;
-  xpFlash: number;
-}> = ({ user, isGuest, liveStats, xpFlash }) => {
+  runFlash: boolean;
+}> = ({ user, isGuest, liveStats, runFlash }) => {
   if (isGuest) return (
     <div style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '6px 12px', background: 'rgba(139,148,158,0.06)', border: '1px solid #2d333b', borderRadius: '8px' }}>
       <span style={{ fontSize: '15px' }}>👤</span>
@@ -105,9 +105,10 @@ const PlayerHUD: React.FC<{
         <div style={{ color: '#484f58', fontSize: '9px', letterSpacing: '0.5px', textTransform: 'uppercase', fontFamily: 'IBM Plex Mono, monospace' }}>RUNS</div>
       </div>
 
-      {xpFlash > 0 && (
-        <div style={{ position: 'absolute', top: '-30px', right: '6px', color: '#3fb950', fontSize: '12px', fontWeight: '700', animation: 'xpFloat 1.8s ease-out forwards', pointerEvents: 'none', whiteSpace: 'nowrap', fontFamily: 'IBM Plex Mono, monospace' }}>
-          🔬 run logged
+      {/* Run flash indicator — no XP, just shows analysis ran */}
+      {runFlash && (
+        <div style={{ position: 'absolute', top: '-28px', right: '6px', color: '#58a6ff', fontSize: '11px', fontWeight: '700', animation: 'xpFloat 1.8s ease-out forwards', pointerEvents: 'none', whiteSpace: 'nowrap', fontFamily: 'IBM Plex Mono, monospace' }}>
+          🔬 analyzed
         </div>
       )}
     </div>
@@ -218,15 +219,13 @@ const GeneratedCodeViewer: React.FC<{
 };
 
 // ─── Accordion Panel ──────────────────────────────────────────────────────────
-// Each panel can be expanded/collapsed. When open, it fills available space.
-// A drag handle between panels lets users resize.
 interface AccordionPanelProps {
   label: string;
   icon: string;
   isOpen: boolean;
   onToggle: () => void;
   children: React.ReactNode;
-  height?: number; // controlled height in px when open
+  height?: number;
   accentColor?: string;
   badge?: React.ReactNode;
 }
@@ -236,9 +235,6 @@ const HEADER_H = 46;
 const AccordionPanel: React.FC<AccordionPanelProps> = ({
   label, icon, isOpen, onToggle, children, height, accentColor = '#3fb950', badge
 }) => {
-  // When height is given (both panels open, user dragging), use explicit px.
-  // When only this panel is open, flex:1 fills the column.
-  // When closed, render just the header (no content space).
   const outerStyle: React.CSSProperties = isOpen
     ? height != null
       ? { height: `${height}px`, flexShrink: 0, flexGrow: 0 }
@@ -257,7 +253,6 @@ const AccordionPanel: React.FC<AccordionPanelProps> = ({
       boxShadow: isOpen ? `0 0 0 1px ${accentColor}10, 0 4px 24px rgba(0,0,0,0.3)` : 'none',
       ...outerStyle,
     }}>
-      {/* ── Header / Toggle ── */}
       <button
         onClick={onToggle}
         style={{
@@ -289,7 +284,6 @@ const AccordionPanel: React.FC<AccordionPanelProps> = ({
         </svg>
       </button>
 
-      {/* ── Content — only rendered (takes space) when open ── */}
       {isOpen && (
         <div style={{ flex: 1, overflow: 'hidden', display: 'flex', flexDirection: 'column', minHeight: 0 }}>
           {children}
@@ -403,22 +397,19 @@ int main() {
   const [editorFullscreen, setEditorFullscreen] = useState(false);
   const [builtCode, setBuiltCode] = useState('');
   const [liveStats, setLiveStats] = useState<LiveStats | null>(null);
-  const [xpFlash, setXpFlash] = useState(0);
+  // runFlash: shows "analyzed" indicator without any XP implication
+  const [runFlash, setRunFlash] = useState(false);
 
-  // ── Accordion state ───────────────────────────────────────────────────────
   const [openPanels, setOpenPanels] = useState<{ editor: boolean; tabs: boolean }>({
     editor: true,
     tabs: false,
   });
 
   const containerRef = useRef<HTMLDivElement>(null);
-  // Explicit pixel heights — null means "fill remaining space via flex"
   const [editorHeight, setEditorHeight] = useState<number | null>(null);
   const [tabsHeight, setTabsHeight] = useState<number | null>(null);
 
   const bothOpen = openPanels.editor && openPanels.tabs;
-
-  const HEADER_H = 46; // accordion header height px
 
   const togglePanel = (panel: 'editor' | 'tabs') => {
     setEditorHeight(null);
@@ -429,11 +420,9 @@ int main() {
   const handleDrag = useCallback((dy: number) => {
     const container = containerRef.current;
     if (!container) return;
-    // Total available = container height minus padding, 2 headers, handle
     const available = container.clientHeight - 24 - (HEADER_H * 2) - 16;
 
     setEditorHeight(prev => {
-      // On first drag, seed from actual container (35% editor, 65% tabs)
       const current = prev ?? Math.round(available * 0.35);
       const next = Math.max(80, Math.min(available - 120, current + dy));
       setTabsHeight(available - next);
@@ -452,17 +441,18 @@ int main() {
     } catch (err) { console.error('Failed to fetch live stats:', err); }
   };
 
-  useEffect(() => { fetchLiveStats(); }, [user?.id]); 
+  useEffect(() => { fetchLiveStats(); }, [user?.id]);
+
   useEffect(() => {
-  const handleKey = (e: KeyboardEvent) => {
-    if (e.key === 'Escape') {
-      if (tabFullscreen) setTabFullscreen(false);
-      if (editorFullscreen) setEditorFullscreen(false);
-    }
-  };
-  window.addEventListener('keydown', handleKey);
-  return () => window.removeEventListener('keydown', handleKey);
-}, [tabFullscreen, editorFullscreen]);
+    const handleKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        if (tabFullscreen) setTabFullscreen(false);
+        if (editorFullscreen) setEditorFullscreen(false);
+      }
+    };
+    window.addEventListener('keydown', handleKey);
+    return () => window.removeEventListener('keydown', handleKey);
+  }, [tabFullscreen, editorFullscreen]);
 
   const handleNodeClick = (line: number) => {
     if (!editorRef.current) return;
@@ -482,11 +472,14 @@ int main() {
     try {
       const data = await analyzeCode(code);
       setResult(data);
+
+      // Sandbox: log run (NO XP awarded) and update run counter only
       if (data.success && user) {
         await DatabaseService.logSandboxRun(user.id, code, data.cognitiveComplexity ?? 0, data.symbolTable ?? {});
         await fetchLiveStats();
-        setXpFlash(1);
-        setTimeout(() => setXpFlash(0), 2200);
+        // Show "analyzed" flash — NOT an XP gain notification
+        setRunFlash(true);
+        setTimeout(() => setRunFlash(false), 2200);
       }
       if (data.success && isGuest) DataIsolationService.saveGuestProgress({ sandboxProgress: { lastCode: code } });
     } catch (err) { console.error('Analysis failed:', err); }
@@ -524,7 +517,17 @@ int main() {
         </div>
 
         <div className="header-actions">
-          <PlayerHUD user={user} isGuest={isGuest} liveStats={liveStats} xpFlash={xpFlash} />
+          {/* Sandbox mode badge — make clear no XP is earned here */}
+          <div style={{
+            display: 'flex', alignItems: 'center', gap: '5px',
+            padding: '4px 10px', borderRadius: '6px',
+            background: 'rgba(88,166,255,0.08)', border: '1px solid rgba(88,166,255,0.2)',
+            fontSize: '10px', color: '#58a6ff', fontFamily: 'IBM Plex Mono, monospace',
+            fontWeight: '700',
+          }}>
+            🔬 FREE SANDBOX — No XP
+          </div>
+          <PlayerHUD user={user} isGuest={isGuest} liveStats={liveStats} runFlash={runFlash} />
           <button className="exit-btn" onClick={() => navigate('/home')}>EXIT ⎋</button>
         </div>
       </header>
@@ -534,7 +537,6 @@ int main() {
 
         {/* ══════════════════ ANALYZE MODE ══════════════════════════════ */}
         {mode === 'analyze' && (<>
-          {/* Left column — accordion */}
           <div
             ref={containerRef}
             className="left-column"
@@ -547,7 +549,6 @@ int main() {
               minHeight: 0,
             }}
           >
-            {/* ── Editor Panel ── */}
             <AccordionPanel
               label="Source Code"
               icon="📝"
@@ -572,39 +573,26 @@ int main() {
             >
               <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden', padding: '12px', minHeight: 0 }}>
                 <div style={{ position: 'relative', flex: 1, minHeight: 0 }}>
-  <div className="editor-container" style={{ height: '100%' }}>
-    <CodeEditor code={code} onChange={setCode} onEditorMount={e => (editorRef.current = e)} />
-  </div>
-  {/* Fullscreen button — top right corner of editor */}
-  <button
-    type="button"
-    onClick={() => setEditorFullscreen(true)}
-    title="Fullscreen Editor"
-    style={{
-      position: 'absolute',
-      bottom: '8px',
-      right: '8px',
-      zIndex: 10,
-      padding: '4px 10px',
-      borderRadius: '6px',
-      border: '1px solid rgba(63,185,80,0.3)',
-      background: 'rgba(13,17,23,0.85)',
-      color: '#3fb950',
-      fontSize: '11px',
-      fontWeight: '700',
-      cursor: 'pointer',
-      fontFamily: 'IBM Plex Mono, monospace',
-      letterSpacing: '0.4px',
-      display: 'flex',
-      alignItems: 'center',
-      gap: '5px',
-      backdropFilter: 'blur(4px)',
-      transition: 'all 0.2s',
-    }}
-  >
-    ⛶ FULL
-  </button>
-</div>
+                  <div className="editor-container" style={{ height: '100%' }}>
+                    <CodeEditor code={code} onChange={setCode} onEditorMount={e => (editorRef.current = e)} />
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setEditorFullscreen(true)}
+                    title="Fullscreen Editor"
+                    style={{
+                      position: 'absolute', bottom: '8px', right: '8px', zIndex: 10,
+                      padding: '4px 10px', borderRadius: '6px',
+                      border: '1px solid rgba(63,185,80,0.3)', background: 'rgba(13,17,23,0.85)',
+                      color: '#3fb950', fontSize: '11px', fontWeight: '700', cursor: 'pointer',
+                      fontFamily: 'IBM Plex Mono, monospace', letterSpacing: '0.4px',
+                      display: 'flex', alignItems: 'center', gap: '5px',
+                      backdropFilter: 'blur(4px)', transition: 'all 0.2s',
+                    }}
+                  >
+                    ⛶ FULL
+                  </button>
+                </div>
                 <div className="action-bar" style={{ marginTop: '10px', flexShrink: 0 }}>
                   <button onClick={handleAnalyze} disabled={isAnalyzing} className="analyze-btn">
                     {isAnalyzing ? '⟳  Analyzing…' : 'ANALYZE CODE'}
@@ -613,10 +601,8 @@ int main() {
               </div>
             </AccordionPanel>
 
-            {/* Resize handle — only visible when both panels are open */}
             <ResizeHandle onDrag={handleDrag} disabled={!bothOpen} />
 
-            {/* ── Analysis Tabs Panel ── */}
             <AccordionPanel
               label="Analysis"
               icon="🔬"
@@ -641,45 +627,32 @@ int main() {
               }
             >
               <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden', minHeight: 0 }}>
-                {/* Tab headers */}
                 <div className="tab-headers">
-  {TABS.map(({ id, label }) => (
-    <button key={id} onClick={() => setActiveTab(id)} className={activeTab === id ? 'tab-link active' : 'tab-link'}>
-      {label}
-    </button>
-  ))}
-  {result && (
-    <button
-      onClick={() => setTabFullscreen(true)}
-      title="View Fullscreen"
-      style={{
-        marginLeft: 'auto',
-        marginRight: '8px',
-        padding: '4px 10px',
-        borderRadius: '6px',
-        border: '1px solid rgba(88,166,255,0.3)',
-        background: 'rgba(88,166,255,0.08)',
-        color: '#58a6ff',
-        fontSize: '11px',
-        fontWeight: '700',
-        cursor: 'pointer',
-        fontFamily: 'IBM Plex Mono, monospace',
-        letterSpacing: '0.4px',
-        display: 'flex',
-        alignItems: 'center',
-        gap: '5px',
-        flexShrink: 0,
-        whiteSpace: 'nowrap',
-        transition: 'all 0.2s',
-      }}
-    >
-      ⛶ FULL
-    </button>
-  )}
-</div>
+                  {TABS.map(({ id, label }) => (
+                    <button key={id} onClick={() => setActiveTab(id)} className={activeTab === id ? 'tab-link active' : 'tab-link'}>
+                      {label}
+                    </button>
+                  ))}
+                  {result && (
+                    <button
+                      onClick={() => setTabFullscreen(true)}
+                      title="View Fullscreen"
+                      style={{
+                        marginLeft: 'auto', marginRight: '8px',
+                        padding: '4px 10px', borderRadius: '6px',
+                        border: '1px solid rgba(88,166,255,0.3)', background: 'rgba(88,166,255,0.08)',
+                        color: '#58a6ff', fontSize: '11px', fontWeight: '700', cursor: 'pointer',
+                        fontFamily: 'IBM Plex Mono, monospace', letterSpacing: '0.4px',
+                        display: 'flex', alignItems: 'center', gap: '5px',
+                        flexShrink: 0, whiteSpace: 'nowrap', transition: 'all 0.2s',
+                      }}
+                    >
+                      ⛶ FULL
+                    </button>
+                  )}
+                </div>
 
                 <div className="tab-content" style={{ flex: 1, overflow: 'hidden', minHeight: 0 }}>
-                  {/* Lexical */}
                   {activeTab === 'lexical' && (
                     <div className="tab-view-scroll">
                       {result?.tokens ? (
@@ -696,30 +669,16 @@ int main() {
                       )}
                     </div>
                   )}
-
-                  {/* Syntactic */}
                   {activeTab === 'syntactic' && (
                     <div className="tab-view-scroll">
-                      {result?.ast ? (
-                        <ASTViewer ast={result.ast} />
-                      ) : (
-                        <div className="placeholder-text">Run analysis to view AST.</div>
-                      )}
+                      {result?.ast ? <ASTViewer ast={result.ast} /> : <div className="placeholder-text">Run analysis to view AST.</div>}
                     </div>
                   )}
-
-                  {/* Symbols */}
                   {activeTab === 'symbols' && (
                     <div className="tab-view-scroll">
                       {symbols.length > 0 ? (
                         <table className="symbol-table">
-                          <thead>
-                            <tr>
-                              <th>Type</th>
-                              <th>Variable</th>
-                              <th style={{ textAlign: 'right' }}>Line</th>
-                            </tr>
-                          </thead>
+                          <thead><tr><th>Type</th><th>Variable</th><th style={{ textAlign: 'right' }}>Line</th></tr></thead>
                           <tbody>
                             {symbols.map((s, i) => (
                               <tr key={i}>
@@ -730,23 +689,14 @@ int main() {
                             ))}
                           </tbody>
                         </table>
-                      ) : (
-                        <div className="placeholder-text">No symbols detected.</div>
-                      )}
+                      ) : <div className="placeholder-text">No symbols detected.</div>}
                     </div>
                   )}
-
-                  {/* Math */}
                   {activeTab === 'math' && (
                     <div className="tab-view-scroll">
-                      <MathTab
-                        safetyChecks={result?.safetyChecks}
-                        symbolicExecution={result?.symbolicExecution}
-                      />
+                      <MathTab safetyChecks={result?.safetyChecks} symbolicExecution={result?.symbolicExecution} />
                     </div>
                   )}
-
-                  {/* Logs */}
                   {activeTab === 'logs' && (
                     <div className="tab-view-scroll" style={{ height: '100%' }}>
                       <LogsTab
@@ -764,7 +714,6 @@ int main() {
             </AccordionPanel>
           </div>
 
-          {/* Right column — CFG */}
           <div className="right-column">
             <div className="section-title cfg-title">Control Flow Graph</div>
             {result?.success && result.cfg && (
@@ -772,12 +721,7 @@ int main() {
             )}
             <div className="visualizer-container">
               {result?.success && result.cfg ? (
-                <FlowGraph
-                  cfg={result.cfg}
-                  safetyChecks={result.safetyChecks}
-                  onNodeClick={handleNodeClick}
-                  isDrawerOpen={isTokenDrawerOpen}
-                />
+                <FlowGraph cfg={result.cfg} safetyChecks={result.safetyChecks} onNodeClick={handleNodeClick} isDrawerOpen={isTokenDrawerOpen} />
               ) : (
                 <div className="placeholder-msg">
                   Run ANALYZE CODE to generate<br />the Control Flow Graph
@@ -796,16 +740,10 @@ int main() {
                 <GeneratedCodeViewer code={builtCode} onLoadInEditor={c => { setCode(c); setMode('analyze'); setResult(null); }} />
               </div>
             </section>
-
             <div style={{
-              padding: '14px 16px',
-              background: 'rgba(163,113,247,0.05)',
-              border: '1px solid rgba(163,113,247,0.2)',
-              borderRadius: '10px',
-              fontSize: '12px',
-              color: '#8b949e',
-              lineHeight: '1.8',
-              flexShrink: 0,
+              padding: '14px 16px', background: 'rgba(163,113,247,0.05)',
+              border: '1px solid rgba(163,113,247,0.2)', borderRadius: '10px',
+              fontSize: '12px', color: '#8b949e', lineHeight: '1.8', flexShrink: 0,
             }}>
               <div style={{ color: '#a371f7', fontWeight: '700', marginBottom: '6px', fontSize: '11px', textTransform: 'uppercase', letterSpacing: '0.5px', fontFamily: 'IBM Plex Mono, monospace' }}>
                 🎨 How to build
@@ -818,7 +756,6 @@ int main() {
               <div style={{ marginTop: '8px', color: '#484f58' }}>Then use <strong style={{ color: '#3fb950' }}>🔍 Load &amp; Analyze</strong> to send to the analyzer.</div>
             </div>
           </div>
-
           <div className="right-column">
             <div className="section-title build-title">Flowchart Canvas</div>
             <div className="visualizer-container">
@@ -828,331 +765,68 @@ int main() {
         </>)}
       </main>
 
-      {/* Token drawer */}
       {mode === 'analyze' && (
         <TokenDrawer tokens={result?.tokens || []} isOpen={isTokenDrawerOpen} onClose={() => setIsTokenDrawerOpen(false)} />
       )}
 
-      {/* ── Logs Fullscreen Modal ─────────────────────────────────────── */}
-{/* ── Tab Fullscreen Modal ─────────────────────────────────────── */}
-{/* ── Tab Fullscreen Modal ─────────────────────────────────────── */}
-{tabFullscreen && (
-  <div
-    style={{
-      position: 'fixed',
-      inset: 0,
-      zIndex: 9999,
-      background: 'rgba(1,4,9,0.92)',
-      backdropFilter: 'blur(6px)',
-      display: 'flex',
-      flexDirection: 'column',
-      padding: '24px',
-    }}
-    onClick={(e) => { if (e.target === e.currentTarget) setTabFullscreen(false); }}
-  >
-    <div style={{
-      flex: 1,
-      display: 'flex',
-      flexDirection: 'column',
-      background: '#0d1117',
-      border: '1px solid rgba(88,166,255,0.25)',
-      borderRadius: '14px',
-      overflow: 'hidden',
-      boxShadow: '0 0 0 1px rgba(88,166,255,0.1), 0 32px 80px rgba(0,0,0,0.6)',
-      minHeight: 0,
-    }}>
-
-      {/* ── Modal header ── */}
-      <div style={{
-        display: 'flex',
-        alignItems: 'center',
-        padding: '0 16px',
-        height: '52px',
-        borderBottom: '1px solid rgba(88,166,255,0.15)',
-        background: 'linear-gradient(90deg, rgba(88,166,255,0.06) 0%, transparent 100%)',
-        flexShrink: 0,
-        gap: '6px',
-      }}>
-        {/* Accent bar */}
-        <div style={{ width: '3px', height: '18px', borderRadius: '2px', background: '#58a6ff', flexShrink: 0 }} />
-        <span style={{ fontSize: '14px', flexShrink: 0 }}>🔬</span>
-
-        {/* Tab switcher */}
-        <div style={{ display: 'flex', gap: '2px', flex: 1, overflowX: 'auto' }}>
-          {TABS.map(({ id, label }) => (
-            <button
-              key={id}
-              onClick={() => setActiveTab(id)}
-              style={{
-                padding: '5px 14px',
-                borderRadius: '6px',
-                border: activeTab === id
-                  ? '1px solid rgba(88,166,255,0.45)'
-                  : '1px solid transparent',
-                background: activeTab === id
-                  ? 'rgba(88,166,255,0.14)'
-                  : 'transparent',
-                color: activeTab === id ? '#58a6ff' : '#484f58',
-                fontSize: '11px',
-                fontWeight: '700',
-                cursor: 'pointer',
-                fontFamily: 'IBM Plex Mono, monospace',
-                letterSpacing: '0.4px',
-                whiteSpace: 'nowrap',
-                transition: 'all 0.15s',
-                flexShrink: 0,
-              }}
-            >
-              {label}
-            </button>
-          ))}
-        </div>
-
-        {/* PASS / FAIL badge */}
-        <span style={{
-          fontSize: '10px',
-          fontFamily: 'IBM Plex Mono, monospace',
-          color: result?.success ? '#3fb950' : '#f85149',
-          background: result?.success ? 'rgba(63,185,80,0.1)' : 'rgba(248,81,73,0.1)',
-          border: `1px solid ${result?.success ? 'rgba(63,185,80,0.3)' : 'rgba(248,81,73,0.3)'}`,
-          borderRadius: '5px',
-          padding: '3px 8px',
-          flexShrink: 0,
-        }}>
-          {result?.success ? '● PASS' : '● FAIL'}
-        </span>
-
-        {/* Close button */}
-        <button
-          type="button"
-          onMouseDown={(e) => { e.stopPropagation(); setTabFullscreen(false); }}
-          style={{
-            padding: '6px 16px',
-            borderRadius: '7px',
-            border: '1px solid rgba(248,81,73,0.4)',
-            background: 'rgba(248,81,73,0.1)',
-            color: '#f85149',
-            fontSize: '12px',
-            fontWeight: '700',
-            cursor: 'pointer',
-            fontFamily: 'IBM Plex Mono, monospace',
-            letterSpacing: '0.3px',
-            flexShrink: 0,
-            transition: 'all 0.2s',
-          }}
-        >
-          ✕ CLOSE
-        </button>
-      </div>
-
-      {/* ── Modal body ── */}
-      <div style={{
-        flex: 1,
-        display: 'flex',
-        flexDirection: 'column',
-        overflow: 'hidden',
-        minHeight: 0,
-        padding: '16px',
-      }}>
-        <div style={{
-          flex: 1,
-          overflow: 'auto',
-          minHeight: 0,
-          height: '100%',
-        }}>
-
-          {activeTab === 'lexical' && (
-            result?.tokens ? (
-              <div className="token-integration">
-                <TokenChart tokens={result.tokens} />
-                <div className="token-action-footer">
-                  <button
-                    onClick={() => { setTabFullscreen(false); setIsTokenDrawerOpen(true); }}
-                    className="view-all-tokens-btn"
-                  >
-                    Open Token Drawer →
+      {/* ── Tab Fullscreen Modal ── */}
+      {tabFullscreen && (
+        <div style={{ position: 'fixed', inset: 0, zIndex: 9999, background: 'rgba(1,4,9,0.92)', backdropFilter: 'blur(6px)', display: 'flex', flexDirection: 'column', padding: '24px' }}
+          onClick={(e) => { if (e.target === e.currentTarget) setTabFullscreen(false); }}>
+          <div style={{ flex: 1, display: 'flex', flexDirection: 'column', background: '#0d1117', border: '1px solid rgba(88,166,255,0.25)', borderRadius: '14px', overflow: 'hidden', boxShadow: '0 0 0 1px rgba(88,166,255,0.1), 0 32px 80px rgba(0,0,0,0.6)', minHeight: 0 }}>
+            <div style={{ display: 'flex', alignItems: 'center', padding: '0 16px', height: '52px', borderBottom: '1px solid rgba(88,166,255,0.15)', background: 'linear-gradient(90deg, rgba(88,166,255,0.06) 0%, transparent 100%)', flexShrink: 0, gap: '6px' }}>
+              <div style={{ width: '3px', height: '18px', borderRadius: '2px', background: '#58a6ff', flexShrink: 0 }} />
+              <span style={{ fontSize: '14px', flexShrink: 0 }}>🔬</span>
+              <div style={{ display: 'flex', gap: '2px', flex: 1, overflowX: 'auto' }}>
+                {TABS.map(({ id, label }) => (
+                  <button key={id} onClick={() => setActiveTab(id)} style={{ padding: '5px 14px', borderRadius: '6px', border: activeTab === id ? '1px solid rgba(88,166,255,0.45)' : '1px solid transparent', background: activeTab === id ? 'rgba(88,166,255,0.14)' : 'transparent', color: activeTab === id ? '#58a6ff' : '#484f58', fontSize: '11px', fontWeight: '700', cursor: 'pointer', fontFamily: 'IBM Plex Mono, monospace', letterSpacing: '0.4px', whiteSpace: 'nowrap', transition: 'all 0.15s', flexShrink: 0 }}>
+                    {label}
                   </button>
-                </div>
+                ))}
               </div>
-            ) : (
-              <div className="placeholder-text">Run analysis to view token distribution.</div>
-            )
-          )}
-
-          {activeTab === 'syntactic' && (
-            result?.ast
-              ? <ASTViewer ast={result.ast} />
-              : <div className="placeholder-text">Run analysis to view AST.</div>
-          )}
-
-          {activeTab === 'symbols' && (
-            symbols.length > 0 ? (
-              <table className="symbol-table">
-                <thead>
-                  <tr>
-                    <th>Type</th>
-                    <th>Variable</th>
-                    <th style={{ textAlign: 'right' }}>Line</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {symbols.map((s, i) => (
-                    <tr key={i}>
-                      <td className="symbol-type">{s.type}</td>
-                      <td className="symbol-name">{s.name}</td>
-                      <td className="symbol-line">{s.line}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            ) : (
-              <div className="placeholder-text">No symbols detected.</div>
-            )
-          )}
-
-          {activeTab === 'math' && (
-            <MathTab
-              safetyChecks={result?.safetyChecks}
-              symbolicExecution={result?.symbolicExecution}
-            />
-          )}
-
-          {activeTab === 'logs' && (
-            <LogsTab
-              explanations={result?.explanations}
-              errors={result?.errors}
-              warnings={result?.warnings}
-              success={result?.success}
-              cognitiveComplexity={result?.cognitiveComplexity}
-              cyclomaticComplexity={result?.cyclomaticComplexity}
-            />
-          )}
-
+              <span style={{ fontSize: '10px', fontFamily: 'IBM Plex Mono, monospace', color: result?.success ? '#3fb950' : '#f85149', background: result?.success ? 'rgba(63,185,80,0.1)' : 'rgba(248,81,73,0.1)', border: `1px solid ${result?.success ? 'rgba(63,185,80,0.3)' : 'rgba(248,81,73,0.3)'}`, borderRadius: '5px', padding: '3px 8px', flexShrink: 0 }}>
+                {result?.success ? '● PASS' : '● FAIL'}
+              </span>
+              <button type="button" onMouseDown={(e) => { e.stopPropagation(); setTabFullscreen(false); }} style={{ padding: '6px 16px', borderRadius: '7px', border: '1px solid rgba(248,81,73,0.4)', background: 'rgba(248,81,73,0.1)', color: '#f85149', fontSize: '12px', fontWeight: '700', cursor: 'pointer', fontFamily: 'IBM Plex Mono, monospace', letterSpacing: '0.3px', flexShrink: 0 }}>
+                ✕ CLOSE
+              </button>
+            </div>
+            <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden', minHeight: 0, padding: '16px' }}>
+              <div style={{ flex: 1, overflow: 'auto', minHeight: 0, height: '100%' }}>
+                {activeTab === 'lexical' && (result?.tokens ? <div className="token-integration"><TokenChart tokens={result.tokens} /><div className="token-action-footer"><button onClick={() => { setTabFullscreen(false); setIsTokenDrawerOpen(true); }} className="view-all-tokens-btn">Open Token Drawer →</button></div></div> : <div className="placeholder-text">Run analysis to view token distribution.</div>)}
+                {activeTab === 'syntactic' && (result?.ast ? <ASTViewer ast={result.ast} /> : <div className="placeholder-text">Run analysis to view AST.</div>)}
+                {activeTab === 'symbols' && (symbols.length > 0 ? <table className="symbol-table"><thead><tr><th>Type</th><th>Variable</th><th style={{ textAlign: 'right' }}>Line</th></tr></thead><tbody>{symbols.map((s, i) => <tr key={i}><td className="symbol-type">{s.type}</td><td className="symbol-name">{s.name}</td><td className="symbol-line">{s.line}</td></tr>)}</tbody></table> : <div className="placeholder-text">No symbols detected.</div>)}
+                {activeTab === 'math' && <MathTab safetyChecks={result?.safetyChecks} symbolicExecution={result?.symbolicExecution} />}
+                {activeTab === 'logs' && <LogsTab explanations={result?.explanations} errors={result?.errors} warnings={result?.warnings} success={result?.success} cognitiveComplexity={result?.cognitiveComplexity} cyclomaticComplexity={result?.cyclomaticComplexity} />}
+              </div>
+            </div>
+          </div>
         </div>
-      </div>
-    </div>
-  </div>
-)}
+      )}
 
-{/* ── Editor Fullscreen Modal ──────────────────────────────────── */}
-{editorFullscreen && (
-  <div
-    style={{
-      position: 'fixed',
-      inset: 0,
-      zIndex: 9999,
-      background: 'rgba(1,4,9,0.92)',
-      backdropFilter: 'blur(6px)',
-      display: 'flex',
-      flexDirection: 'column',
-      padding: '24px',
-    }}
-    onClick={(e) => { if (e.target === e.currentTarget) setEditorFullscreen(false); }}
-  >
-    <div style={{
-      flex: 1,
-      display: 'flex',
-      flexDirection: 'column',
-      background: '#0d1117',
-      border: '1px solid rgba(63,185,80,0.25)',
-      borderRadius: '14px',
-      overflow: 'hidden',
-      boxShadow: '0 0 0 1px rgba(63,185,80,0.1), 0 32px 80px rgba(0,0,0,0.6)',
-      minHeight: 0,
-    }}>
-
-      {/* Modal header */}
-      <div style={{
-        display: 'flex',
-        alignItems: 'center',
-        padding: '0 16px',
-        height: '52px',
-        borderBottom: '1px solid rgba(63,185,80,0.15)',
-        background: 'linear-gradient(90deg, rgba(63,185,80,0.06) 0%, transparent 100%)',
-        flexShrink: 0,
-        gap: '10px',
-      }}>
-        <div style={{ width: '3px', height: '18px', borderRadius: '2px', background: '#3fb950', flexShrink: 0 }} />
-        <span style={{ fontSize: '14px' }}>📝</span>
-        <span style={{
-          color: '#e6edf3',
-          fontSize: '12px',
-          fontWeight: '700',
-          letterSpacing: '0.5px',
-          fontFamily: 'IBM Plex Mono, monospace',
-          textTransform: 'uppercase',
-          flex: 1,
-        }}>
-          Source Code — Full View
-        </span>
-
-        {/* filename badge */}
-        <span style={{
-          fontSize: '10px',
-          fontFamily: 'IBM Plex Mono, monospace',
-          color: '#8b949e',
-          background: '#1c2128',
-          border: '1px solid #2d333b',
-          borderRadius: '5px',
-          padding: '3px 8px',
-          flexShrink: 0,
-        }}>
-          main.cpp
-        </span>
-
-        {/* Close button */}
-        <button
-          type="button"
-          onMouseDown={(e) => { e.stopPropagation(); setEditorFullscreen(false); }}
-          style={{
-            padding: '6px 16px',
-            borderRadius: '7px',
-            border: '1px solid rgba(248,81,73,0.4)',
-            background: 'rgba(248,81,73,0.1)',
-            color: '#f85149',
-            fontSize: '12px',
-            fontWeight: '700',
-            cursor: 'pointer',
-            fontFamily: 'IBM Plex Mono, monospace',
-            letterSpacing: '0.3px',
-            flexShrink: 0,
-            transition: 'all 0.2s',
-          }}
-        >
-          ✕ CLOSE
-        </button>
-      </div>
-
-      {/* Monaco editor — full height */}
-      <div style={{ flex: 1, minHeight: 0, overflow: 'hidden' }}>
-        <CodeEditor
-          code={code}
-          onChange={setCode}
-          onEditorMount={e => (editorRef.current = e)}
-        />
-      </div>
-
-      {/* Analyze button at the bottom */}
-      <div style={{
-        padding: '12px 16px',
-        borderTop: '1px solid rgba(63,185,80,0.15)',
-        background: 'rgba(13,17,23,0.8)',
-        flexShrink: 0,
-        display: 'flex',
-        gap: '10px',
-      }}>
-        <button
-          onClick={() => { setEditorFullscreen(false); handleAnalyze(); }}
-          disabled={isAnalyzing}
-          className="analyze-btn"
-        >
-          {isAnalyzing ? '⟳  Analyzing…' : 'ANALYZE CODE'}
-        </button>
-      </div>
-
-    </div>
-  </div>
-)}
+      {/* ── Editor Fullscreen Modal ── */}
+      {editorFullscreen && (
+        <div style={{ position: 'fixed', inset: 0, zIndex: 9999, background: 'rgba(1,4,9,0.92)', backdropFilter: 'blur(6px)', display: 'flex', flexDirection: 'column', padding: '24px' }}
+          onClick={(e) => { if (e.target === e.currentTarget) setEditorFullscreen(false); }}>
+          <div style={{ flex: 1, display: 'flex', flexDirection: 'column', background: '#0d1117', border: '1px solid rgba(63,185,80,0.25)', borderRadius: '14px', overflow: 'hidden', boxShadow: '0 0 0 1px rgba(63,185,80,0.1), 0 32px 80px rgba(0,0,0,0.6)', minHeight: 0 }}>
+            <div style={{ display: 'flex', alignItems: 'center', padding: '0 16px', height: '52px', borderBottom: '1px solid rgba(63,185,80,0.15)', background: 'linear-gradient(90deg, rgba(63,185,80,0.06) 0%, transparent 100%)', flexShrink: 0, gap: '10px' }}>
+              <div style={{ width: '3px', height: '18px', borderRadius: '2px', background: '#3fb950', flexShrink: 0 }} />
+              <span style={{ fontSize: '14px' }}>📝</span>
+              <span style={{ color: '#e6edf3', fontSize: '12px', fontWeight: '700', letterSpacing: '0.5px', fontFamily: 'IBM Plex Mono, monospace', textTransform: 'uppercase', flex: 1 }}>Source Code — Full View</span>
+              <span style={{ fontSize: '10px', fontFamily: 'IBM Plex Mono, monospace', color: '#8b949e', background: '#1c2128', border: '1px solid #2d333b', borderRadius: '5px', padding: '3px 8px', flexShrink: 0 }}>main.cpp</span>
+              <button type="button" onMouseDown={(e) => { e.stopPropagation(); setEditorFullscreen(false); }} style={{ padding: '6px 16px', borderRadius: '7px', border: '1px solid rgba(248,81,73,0.4)', background: 'rgba(248,81,73,0.1)', color: '#f85149', fontSize: '12px', fontWeight: '700', cursor: 'pointer', fontFamily: 'IBM Plex Mono, monospace', letterSpacing: '0.3px', flexShrink: 0 }}>✕ CLOSE</button>
+            </div>
+            <div style={{ flex: 1, minHeight: 0, overflow: 'hidden' }}>
+              <CodeEditor code={code} onChange={setCode} onEditorMount={e => (editorRef.current = e)} />
+            </div>
+            <div style={{ padding: '12px 16px', borderTop: '1px solid rgba(63,185,80,0.15)', background: 'rgba(13,17,23,0.8)', flexShrink: 0, display: 'flex', gap: '10px' }}>
+              <button onClick={() => { setEditorFullscreen(false); handleAnalyze(); }} disabled={isAnalyzing} className="analyze-btn">
+                {isAnalyzing ? '⟳  Analyzing…' : 'ANALYZE CODE'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       <style>{`
         @keyframes xpFloat {

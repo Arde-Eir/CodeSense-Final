@@ -2,8 +2,8 @@ import React from 'react';
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { AuthProvider, useAuth } from './components/AuthScreen';
 import { HomeDashboard } from './HomeDashboard';
-import { SignupPage } from './Signuppage'; 
-import { LoginPage } from './Loginpage'; 
+import { SignupPage } from './Signuppage';
+import { LoginPage } from './Loginpage';
 import { SandboxPage } from './SandboxPage';
 import { LandingPage } from './Landingpage';
 import { ProgressPage } from './Progresspage';
@@ -41,19 +41,28 @@ export const App: React.FC = () => {
           <Route path="/sandbox" element={<ProtectedRoute><SandboxPage /></ProtectedRoute>} />
           <Route path="/profile" element={<ProtectedRoute><ProfileSettings /></ProtectedRoute>} />
 
-          {/* Campaign Routes — more specific paths FIRST */}
+          {/* ── FIX: Campaign Routes — most specific FIRST, parameterised LAST ──
+              /campaign/inside          → CampaignInside (no phase param, defaults to 'beginner')
+              /campaign/inside/:phase   → CampaignInside with phase param
+              /level/1                  → LevelOneDashboard
+              /lesson/:questId          → LessonActivity
+              /campaign                 → CampaignPage (exact, no param)
+              /campaign/:phase          → CampaignPage with phase param — must be LAST so
+                                          "inside" is never swallowed as :phase
+          */}
           <Route path="/campaign" element={<ProtectedRoute><CampaignPage /></ProtectedRoute>} />
           <Route path="/campaign/inside" element={<ProtectedRoute><CampaignInside /></ProtectedRoute>} />
           <Route path="/campaign/inside/:phase" element={<ProtectedRoute><CampaignInside /></ProtectedRoute>} />
           <Route path="/level/1" element={<ProtectedRoute><LevelOneDashboard /></ProtectedRoute>} />
           <Route path="/lesson/:questId" element={<ProtectedRoute><LessonActivity /></ProtectedRoute>} />
-          {/* :phase last, so "inside" isn't swallowed as a param */}
+          {/* :phase LAST — static segments always win in React Router v6, but being
+              explicit prevents future confusion if new sub-routes are added */}
           <Route path="/campaign/:phase" element={<ProtectedRoute><CampaignPage /></ProtectedRoute>} />
 
           {/* Redirects */}
           <Route path="/settings" element={<Navigate to="/home" replace />} />
 
-          {/* Catch-all — ONLY ONE, at the very bottom */}
+          {/* Catch-all — exactly one, at the very bottom */}
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
       </AuthProvider>

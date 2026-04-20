@@ -1,12 +1,14 @@
 // src/LevelOneDashboard.tsx
-// ✅ FIXED:
-//   1. Real-time XP subscription via Supabase postgres_changes
-//   2. Real-time mission_progress subscription — quest statuses update live
-//   3. All stats computed from live DB data — no hardcoded values
-//   4. Correct phase filtering for quests
-//   5. XP bar and streak computed from actual progress records
-//   6. Loading states for each section to avoid flash of empty content
-//   7. Error boundary for failed fetches
+// FIXES:
+//   1. Removed hardcoded curriculumSubTopics dictionary — sub-topics now come
+//      from quest.objectives (already fetched) with a sensible fallback
+//   2. Real-time XP subscription via Supabase postgres_changes
+//   3. Real-time mission_progress subscription — quest statuses update live
+//   4. All stats computed from live DB data — no hardcoded values
+//   5. Correct phase filtering for quests
+//   6. XP bar and streak computed from actual progress records
+//   7. Loading states for each section to avoid flash of empty content
+//   8. Error boundary for failed fetches
 
 import React, { useEffect, useState, useCallback, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
@@ -25,6 +27,7 @@ interface DBQuest {
   phase: string;
   isactive: boolean;
   question_type: string | null;
+  objectives: string[] | null;       // used for sub-topics
 }
 
 interface MissionProgress {
@@ -110,7 +113,6 @@ const SubTopicItem: React.FC<{ title: string; isDone: boolean }> = ({ title, isD
 );
 
 // ─── Quest card ───────────────────────────────────────────────────────────────
-// ─── Updated Quest Card with Dropdown Feature ───────────────────────────────
 const QuestCard: React.FC<{ quest: QuestRow; index: number; onClick: () => void }> = ({ quest, index, onClick }) => {
   const [isOpen, setIsOpen] = useState(false);
   const isDone   = quest.uiStatus === 'completed';
@@ -118,26 +120,14 @@ const QuestCard: React.FC<{ quest: QuestRow; index: number; onClick: () => void 
   const isActive = quest.uiStatus === 'active';
   const accent   = isDone ? '#3fb950' : isActive ? '#e3b341' : '#484f58';
 
-  // Sub-topics mapped directly from FEU Module 1 & 2
-  const curriculumSubTopics: Record<string, string[]> = {
-    "What is Programming?": [
-      "The Definition of Code & Programs",
-      "Machine Logic (0s and 1s)",
-      "Programming Syntax & Grammar"
-    ],
-    "The Translator's Toolkit": [
-      "Assembler vs. Interpreter",
-      "Compiler Diagnostics",
-      "High-Level vs. Low-Level"
-    ],
-    "Logic Design & Paradigms": [
-      "IPO Charts & Algorithms",
-      "Procedure-Oriented vs. OOP",
-      "Symbolic Names & Labels"
-    ]
-  };
-
-  const subTopics = curriculumSubTopics[quest.title] || ["Foundational Concepts"];
+  // FIX: Sub-topics come from quest.objectives (stored in DB).
+  // Falls back to the quest description split into a single item, then a
+  // generic placeholder — never hardcoded per quest title.
+  const subTopics: string[] = (() => {
+    if (quest.objectives && quest.objectives.length > 0) return quest.objectives;
+    if (quest.description) return [quest.description];
+    return ['Foundational concepts covered in this lesson'];
+  })();
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', marginBottom: 12, opacity: isLocked ? 0.5 : 1 }}>
@@ -164,7 +154,7 @@ const QuestCard: React.FC<{ quest: QuestRow; index: number; onClick: () => void 
       {isOpen && (
         <div style={{ padding: '20px', background: 'rgba(13,17,23,0.6)', border: '1.5px solid rgba(255,255,255,0.06)', borderTop: 'none', borderRadius: '0 0 12px 12px' }}>
           <div style={{ marginBottom: 18 }}>
-            <div style={{ fontSize: 10, fontWeight: 800, color: '#484f58', textTransform: 'uppercase', marginBottom: 10, letterSpacing: '1px' }}>Required Sub-Topics</div>
+            <div style={{ fontSize: 10, fontWeight: 800, color: '#484f58', textTransform: 'uppercase', marginBottom: 10, letterSpacing: '1px' }}>Topics covered</div>
             {subTopics.map((topic, i) => (
               <SubTopicItem key={i} title={topic} isDone={isDone} />
             ))}
@@ -173,7 +163,7 @@ const QuestCard: React.FC<{ quest: QuestRow; index: number; onClick: () => void 
             onClick={onClick}
             style={{ width: '100%', padding: '12px', borderRadius: 8, background: accent, color: '#080c11', fontWeight: 900, fontSize: 12, cursor: 'pointer', border: 'none', boxShadow: `0 4px 12px ${accent}33` }}
           >
-            {isDone ? 'Review Lesson' : 'Start Final Quest +10 XP'}
+            {isDone ? 'Review Lesson' : `Start Final Quest +${quest.basexp} XP`}
           </button>
         </div>
       )}
@@ -193,7 +183,6 @@ export const LevelOneDashboard: React.FC = () => {
   const [loading,   setLoading]   = useState(true);
   const [error,     setError]     = useState<string | null>(null);
 
-  // Keep questIds for the real-time filter
   const questIds = useRef<string[]>([]);
 
   // ── Compute merged quests + stats from raw DB data ─────────────────────────
@@ -205,21 +194,33 @@ export const LevelOneDashboard: React.FC = () => {
     pData.forEach(p => { pMap[p.questid] = p; });
 
     let foundActive = false;
-    const rows: QuestRow[] = qData.map(q => {
+
+    const seenTitles = new Set<string>();
+
+    const rows: QuestRow[] = qData
+    .filter(q => {
+      if (seenTitles.has(q.title)) return false;
+      seenTitles.add(q.title);
+      return true;
+    })
+    .map(q => {
       const p = pMap[q.id];
       let uiStatus: QuestRow['uiStatus'];
+
       if (p?.status === 'completed') {
         uiStatus = 'completed';
       } else if (!foundActive) {
-        uiStatus = 'active'; foundActive = true;
+        // This is the first quest that isn't 'completed', so it's 'active'
+        uiStatus = 'active'; 
+        foundActive = true;
       } else {
+        // Anything after the first non-completed quest is 'locked'
         uiStatus = 'locked';
       }
       return { ...q, uiStatus, xpGained: p?.xp_gained ?? 0 };
     });
 
     const done     = rows.filter(q => q.uiStatus === 'completed');
-    // Use actual xp_gained from progress records — not basexp
     const xpEarned = done.reduce((s, q) => s + q.xpGained, 0);
     const xpTotal  = rows.reduce((s, q) => s + q.basexp, 0);
     let streak = 0;
@@ -236,12 +237,10 @@ export const LevelOneDashboard: React.FC = () => {
     if (!user?.id) return;
     setLoading(true); setError(null);
     try {
-      // User XP (live baseline)
       const { data: ud, error: uErr } = await supabase.from('users').select('totalxp').eq('id', user.id).single();
       if (uErr) throw uErr;
       if (ud) setUserXP(ud.totalxp ?? 0);
 
-      // Level metadata from DB
       const { data: lm } = await supabase.from('level_info').select('*').eq('phase', 'beginner').maybeSingle();
       if (lm) setLevelInfo({
         title:        lm.title        ?? 'The Core of Programming',
@@ -251,20 +250,20 @@ export const LevelOneDashboard: React.FC = () => {
         accent_color: lm.accent_color ?? '#3fb950',
       });
 
-      // Quests for beginner phase
+      // FIX: include `objectives` in the select so sub-topics render from DB
       const { data: qData, error: qErr } = await supabase
         .from('quests')
-        .select('id,title,description,difficulty,basexp,requiredxp,sortorder,phase,isactive,question_type')
-        .eq('phase', 'beginner')
+        .select('id,title,description,difficulty,basexp,requiredxp,sortorder,phase,isactive,question_type,objectives')
+        .eq('level', 1)
         .eq('isactive', true)
         .eq('mode', 'campaign')
-        .order('sortorder', { ascending: true });
+        .order('sortorder', { ascending: true })
+        .limit(6);
       if (qErr) throw qErr;
       if (!qData?.length) { setQuests([]); setLoading(false); return; }
 
       questIds.current = qData.map((q: DBQuest) => q.id);
 
-      // Mission progress for this user for these quests
       const { data: pData, error: pErr } = await supabase
         .from('mission_progress')
         .select('questid,status,hintsused,xp_gained')
@@ -303,13 +302,11 @@ export const LevelOneDashboard: React.FC = () => {
   // ── Real-time: mission progress ───────────────────────────────────────────
   useEffect(() => {
     if (!user?.id) return;
-    // Subscribe and refresh quest list whenever any mission_progress row changes for this user
     const ch = supabase
       .channel(`lvl1-progress-${user.id}`)
       .on('postgres_changes', {
         event: '*', schema: 'public', table: 'mission_progress', filter: `userid=eq.${user.id}`,
       }, () => {
-        // Re-fetch quests to recompute statuses
         fetchAll();
       })
       .subscribe();
@@ -346,7 +343,6 @@ export const LevelOneDashboard: React.FC = () => {
             <span style={{ fontSize: 10, color: AC, fontFamily: "'JetBrains Mono', monospace", background: `${AC}11`, border: `1px solid ${AC}2e`, padding: '2px 9px', borderRadius: 5 }}>Level 1 · Beginner</span>
           </div>
           <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
-            {/* Live XP — updates via subscription */}
             <div style={{ display: 'flex', alignItems: 'center', gap: 6, background: 'rgba(227,179,65,0.09)', border: '1px solid rgba(227,179,65,0.22)', borderRadius: 7, padding: '5px 12px' }}>
               <span style={{ fontSize: 11 }}>⚡</span>
               <span style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 11, color: '#e3b341', fontWeight: 700 }}>{userXP.toLocaleString()} XP</span>
@@ -411,7 +407,7 @@ export const LevelOneDashboard: React.FC = () => {
                 ? <div style={{ height: 200, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 10 }}>
                     <span style={{ fontSize: 34, opacity: 0.13 }}>📭</span>
                     <span style={{ fontSize: 11, color: '#484f58', fontFamily: "'JetBrains Mono',monospace", textAlign: 'center' }}>
-                      No lessons found.<br />Add quests with <code>phase='beginner'</code> and <code>mode='campaign'</code> in Supabase.
+                      No lessons found.<br />Add quests with <code>level=1</code> and <code>mode='campaign'</code> in Supabase.
                     </span>
                   </div>
                 : quests.map((q, i) => (
@@ -423,11 +419,10 @@ export const LevelOneDashboard: React.FC = () => {
             {/* Sidebar */}
             <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
 
-              {/* Progress — all values from DB */}
+              {/* Progress */}
               <div style={{ background: 'rgba(255,255,255,.02)', border: '1.5px solid rgba(255,255,255,.06)', borderRadius: 13, padding: '18px 16px', animation: 'questIn .5s ease .15s both' }}>
                 <div style={{ fontSize: 9, fontWeight: 700, color: '#484f58', letterSpacing: '1.5px', textTransform: 'uppercase', marginBottom: 14, fontFamily: "'JetBrains Mono',monospace" }}>
                   Your Progress
-                  {/* Live indicator */}
                   <span style={{ marginLeft: 8, display: 'inline-block', width: 6, height: 6, borderRadius: '50%', background: '#3fb950', boxShadow: '0 0 6px #3fb950', verticalAlign: 'middle' }} title="Live" />
                 </div>
                 <StatBar icon="🎒" label="Lessons Done"  current={stats.finished} total={stats.total}   color="#58a6ff" />
@@ -437,13 +432,12 @@ export const LevelOneDashboard: React.FC = () => {
                 <StatBar icon="🔥" label="Streak"        current={stats.streak}   total={stats.total}   color="#f0883e" />
               </div>
 
-              {/* Activity types — from quest data, not hardcoded */}
+              {/* Activity types */}
               <div style={{ background: 'rgba(255,255,255,.02)', border: '1.5px solid rgba(255,255,255,.06)', borderRadius: 13, padding: '14px 16px', animation: 'questIn .5s ease .22s both' }}>
                 <div style={{ fontSize: 9, fontWeight: 700, color: '#484f58', letterSpacing: '1.5px', textTransform: 'uppercase', marginBottom: 12, fontFamily: "'JetBrains Mono',monospace" }}>Activity Types in this Level</div>
                 {loading
                   ? <div style={{ color: '#484f58', fontSize: 11, fontFamily: 'Inter,sans-serif' }}>Loading…</div>
                   : (() => {
-                      // Derive activity types from actual quest data
                       const types = [...new Set(quests.map(q => q.question_type).filter(Boolean))] as string[];
                       const typeLabels: Record<string, { label: string; desc: string }> = {
                         drag_drop:       { label: 'Drag & Drop',    desc: 'Match terms to definitions' },

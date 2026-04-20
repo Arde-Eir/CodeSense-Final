@@ -6,14 +6,12 @@ export const DatabaseService = {
 
   // ── AUTHENTICATION ──────────────────────────────────────────────────────────
 
-  // LOGIN: Looks up the real email by playerName (case-insensitive), then signs in with Supabase Auth
   async login(playerName: string, secretCode: string): Promise<ExplorerProfile> {
     try {
-      // 1. Look up the real email from public.users by playerName (case-insensitive + trimmed)
       const { data: userRow, error: lookupError } = await supabase
         .from('users')
         .select('email')
-        .ilike('playername', playerName.trim())  // case-insensitive match
+        .ilike('playername', playerName.trim())
         .limit(1)
         .maybeSingle()
 
@@ -21,7 +19,6 @@ export const DatabaseService = {
         throw new Error('INVALID_CREDENTIALS')
       }
 
-      // 2. Sign in with their real email + secretCode
       const { data, error } = await supabase.auth.signInWithPassword({
         email: userRow.email,
         password: secretCode,
@@ -31,7 +28,6 @@ export const DatabaseService = {
         throw new Error('INVALID_CREDENTIALS')
       }
 
-      // 3. Fetch full profile
       const { data: profile, error: profileError } = await supabase
         .from('users')
         .select('*')
@@ -42,7 +38,6 @@ export const DatabaseService = {
         throw new Error('PROFILE_NOT_FOUND')
       }
 
-      // 4. Update lastactive
       await supabase
         .from('users')
         .update({ lastactive: new Date().toISOString() })
@@ -56,15 +51,6 @@ export const DatabaseService = {
     }
   },
 
-  // SIGNUP: Creates a Supabase Auth user and a public.users profile row.
-  //
-  // KEY FIXES:
-  //  1. Pre-checks for duplicate playername (case-insensitive) before auth signup,
-  //     giving a friendly USERNAME_TAKEN error instead of a DB crash.
-  //  2. Username/email uniqueness is also enforced by the DB unique index.
-  //  3. After signUp(), we poll for the trigger-created row instead of using
-  //     a fixed timeout — the trigger can take 1–3s under cold starts.
-  //  4. All thrown errors carry distinct codes so the UI can show precise messages.
   async signUp(
     playerName: string,
     secretCode: string,
@@ -72,7 +58,6 @@ export const DatabaseService = {
     characterType: 'squire' | 'knight' | 'duke' | 'lord'
   ): Promise<ExplorerProfile> {
     try {
-      // ── Step 0: Pre-check for duplicate playername (case-insensitive) ───────
       const { data: existing } = await supabase
         .from('users')
         .select('id')
@@ -84,9 +69,6 @@ export const DatabaseService = {
         throw new Error('USERNAME_TAKEN')
       }
 
-      // ── Step 1: Create the Supabase Auth user ──────────────────────────────
-      // Pass playerName in metadata so the DB trigger can write it to
-      // public.users.playername without a separate update call.
       const { data, error } = await supabase.auth.signUp({
         email,
         password: secretCode,
@@ -95,9 +77,6 @@ export const DatabaseService = {
         },
       })
 
-      // Supabase returns specific error messages we can map to friendly copy:
-      //   "User already registered"         → duplicate email in auth.users
-      //   "duplicate key … playername"      → duplicate name in public.users
       if (error) {
         const msg = error.message.toLowerCase()
         if (msg.includes('already registered') || msg.includes('already been registered')) {
@@ -115,9 +94,6 @@ export const DatabaseService = {
 
       const userId = data.user.id
 
-      // ── Step 2: Poll for the trigger-created public.users row ──────────────
-      // The handle_new_user trigger runs asynchronously; we retry up to 10×
-      // with 400 ms gaps (4 s total) before giving up.
       let profile: any = null
       for (let attempt = 0; attempt < 10; attempt++) {
         await new Promise(r => setTimeout(r, 400))
@@ -130,9 +106,6 @@ export const DatabaseService = {
         if (!rowErr && row) { profile = row; break }
       }
 
-      // ── Step 3: If trigger never fired, insert the row manually ───────────
-      // This is a safe fallback: if your DB trigger is missing or disabled,
-      // signup still works.
       if (!profile) {
         const { data: inserted, error: insertErr } = await supabase
           .from('users')
@@ -150,7 +123,6 @@ export const DatabaseService = {
           .single()
 
         if (insertErr) {
-          // Duplicate playername constraint from the DB
           if (insertErr.message.toLowerCase().includes('playername') ||
               insertErr.code === '23505') {
             throw new Error('USERNAME_TAKEN')
@@ -161,12 +133,11 @@ export const DatabaseService = {
         profile = inserted
       }
 
-      // ── Step 4: Update characterType (trigger sets a default) ─────────────
       await supabase
         .from('users')
         .update({
           charactertype: characterType,
-          playername:    playerName,   // ensure name is correct even if trigger used metadata
+          playername:    playerName,
           totalxp:       0,
           currentlevel:  1,
         })
@@ -189,7 +160,6 @@ export const DatabaseService = {
     }
   },
 
-  // GUEST LOGIN: No Supabase auth — pure in-memory session
   async loginAsGuest(): Promise<ExplorerProfile> {
     return {
       id:            `guest_${Date.now()}`,
@@ -203,12 +173,10 @@ export const DatabaseService = {
     } as ExplorerProfile
   },
 
-  // LOGOUT: Signs out from Supabase Auth
   async logout(): Promise<void> {
     await supabase.auth.signOut()
   },
 
-  // RESTORE SESSION: Called on app load to restore an existing Supabase session
   async restoreSession(): Promise<ExplorerProfile | null> {
     try {
       const { data: { session } } = await supabase.auth.getSession()
@@ -243,9 +211,9 @@ export const DatabaseService = {
 
       const newTotal = (current.totalxp || 0) + xpEarned
       let newLevel: 1 | 2 | 3 | 4 = 1
-      if      (newTotal >= 600) newLevel = 4   // Lord
-      else if (newTotal >= 300) newLevel = 3   // Duke
-      else if (newTotal >= 100) newLevel = 2   // Knight
+      if      (newTotal >= 600) newLevel = 4
+      else if (newTotal >= 300) newLevel = 3
+      else if (newTotal >= 100) newLevel = 2
 
       const { data: updated } = await supabase
         .from('users')
@@ -268,6 +236,8 @@ export const DatabaseService = {
   },
 
   // ── SANDBOX ─────────────────────────────────────────────────────────────────
+  // NOTE: Sandbox runs ONLY increment the sandbox_runs counter.
+  // They do NOT award any XP — sandbox is a free exploration mode.
 
   async logSandboxRun(
     userId: string,
@@ -276,12 +246,38 @@ export const DatabaseService = {
     symbolTable: object
   ): Promise<void> {
     try {
-      await supabase.rpc('log_sandbox_run', {
-        p_userid:               userId,
-        p_sourcecode:           sourceCode,
-        p_cognitive_complexity: cognitiveComplexity,
-        p_symbol_table:         symbolTable,
+      // Only insert a report record and increment sandbox_runs counter.
+      // NO XP is awarded for sandbox runs.
+      await supabase.from('reports').insert({
+        userid:               userId,
+        type:                 'summary',
+        sourcecode:           sourceCode,
+        mode_context:         'sandbox',
+        cognitive_complexity: cognitiveComplexity,
+        symbol_table:         symbolTable,
+        createdat:            new Date().toISOString(),
       })
+
+      // Increment sandbox_runs counter only (no XP change)
+      await supabase.rpc('increment_sandbox_runs', { p_userid: userId })
+        .then(({ error }) => {
+          if (error) {
+            // Fallback: manual increment if RPC doesn't exist
+            return supabase
+              .from('users')
+              .select('sandbox_runs')
+              .eq('id', userId)
+              .single()
+              .then(({ data }) => {
+                if (data) {
+                  return supabase
+                    .from('users')
+                    .update({ sandbox_runs: (data.sandbox_runs ?? 0) + 1 })
+                    .eq('id', userId)
+                }
+              })
+          }
+        })
     } catch (error) {
       console.error('Sandbox log failed (non-critical):', error)
     }

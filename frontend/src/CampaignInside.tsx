@@ -135,6 +135,8 @@ const diffColor = (d: string | null) =>
 
 // ─── XP Burst ─────────────────────────────────────────────────────────────────
 
+// FIX: accepts the actual xpEarned value so the toast always shows what was
+// really awarded, not the quest's basexp ceiling.
 const XPBurst: React.FC<{ xp: number; visible: boolean }> = ({ xp, visible }) =>
   visible ? (
     <div style={{
@@ -726,6 +728,8 @@ const QuestActivity: React.FC<{
   const config = PHASE_CONFIG[phase] ?? PHASE_CONFIG.beginner;
   const [mode, setMode] = useState<'drag' | 'manual'>('drag');
   const [hintUnlocked, setHintUnlocked] = useState(false);
+  // FIX: track the actual xpEarned so XPBurst shows the real value
+  const [earnedXP, setEarnedXP] = useState(0);
   const [xpBurst, setXpBurst] = useState(false);
   const [notification, setNotification] = useState<string | null>(null);
 
@@ -738,6 +742,7 @@ const QuestActivity: React.FC<{
 
   const handleComplete = (score: number) => {
     const xpEarned = Math.round(quest.basexp * (score / DROP_ZONES.length));
+    setEarnedXP(xpEarned);
     setXpBurst(true);
     setTimeout(() => { setXpBurst(false); onComplete(xpEarned); }, 1800);
   };
@@ -800,7 +805,8 @@ const QuestActivity: React.FC<{
         </div>
       </div>
 
-      <XPBurst xp={quest.basexp} visible={xpBurst} />
+      {/* FIX: pass earnedXP (actual awarded value) not quest.basexp */}
+      <XPBurst xp={earnedXP} visible={xpBurst} />
       {notification && (
         <div style={{
           position: 'fixed', top: 70, right: 24,
@@ -923,9 +929,13 @@ export default function CampaignInside() {
           attempts: 0, hintsused: 0, startedat: new Date().toISOString(),
         });
       }
+      // FIX: explicit description using the phase label, not a variable that
+      // might not have been updated yet
+      const phaseLabel = PHASE_CONFIG[phase]?.label ?? phase;
       await supabase.from('activity_log').insert({
         userid: user.id, type: 'quest_started', title: quest.title,
-        description: `Started quest in ${phase} phase`, xp_gained: 0,
+        description: `Started "${quest.title}" in ${phaseLabel} phase`,
+        xp_gained: 0,
         meta: { questid: quest.id, phase },
       });
     } catch (e) { console.error(e); }
@@ -946,7 +956,23 @@ export default function CampaignInside() {
   // ── Quest complete ────────────────────────────────────────────────────────
   const handleQuestComplete = useCallback(async (xpEarned: number) => {
     if (!user?.id || !activeQuest) return;
+
+    // FIX: replay protection — do NOT award XP if the quest was already
+    // completed. The mission_progress status check happens before the RPC call.
+    // We re-read the current DB status rather than trusting cached uiStatus.
     try {
+      const phaseLabel = PHASE_CONFIG[phase]?.label ?? phase;
+
+      // Check current DB status to prevent double-awarding
+      const { data: currentProgress } = await supabase
+        .from('mission_progress')
+        .select('status')
+        .eq('userid', user.id)
+        .eq('questid', activeQuest.id)
+        .maybeSingle();
+
+      const alreadyCompleted = currentProgress?.status === 'completed';
+
       if (activeQuest.progressId) {
         await supabase.from('mission_progress').update({
           status: 'completed',
@@ -961,14 +987,22 @@ export default function CampaignInside() {
           startedat: new Date().toISOString(), completedat: new Date().toISOString(),
         });
       }
-      await supabase.rpc('increment_xp', { user_id: user.id, xp_to_add: xpEarned });
+
+      // FIX: only call increment_xp for genuinely new completions
+      if (!alreadyCompleted && xpEarned > 0) {
+        await supabase.rpc('increment_xp', { user_id: user.id, xp_to_add: xpEarned });
+      }
+
+      // FIX: activity log uses phaseLabel and xpEarned (0 if repeat)
       await supabase.from('activity_log').insert({
         userid: user.id, type: 'quest_completed', title: activeQuest.title,
-        description: `Completed quest in ${phase} phase`, xp_gained: xpEarned,
-        meta: { questid: activeQuest.id, phase, hintsused: hintsUsed },
+        description: `Completed "${activeQuest.title}" in ${phaseLabel} phase`,
+        xp_gained: alreadyCompleted ? 0 : xpEarned,
+        meta: { questid: activeQuest.id, phase, hintsused: hintsUsed, repeat: alreadyCompleted },
       });
+
       await fetchQuests();
-    } catch (e) { console.error('XP Award Error:', e); }
+    } catch (e) { console.error('Quest complete error:', e); }
     setTimeout(() => { setView('list'); setActiveQuest(null); }, 2200);
   }, [user?.id, activeQuest, hintsUsed, phase, fetchQuests]);
 
@@ -1005,7 +1039,6 @@ export default function CampaignInside() {
 
         * { box-sizing:border-box; margin:0; padding:0; }
 
-        /* Fixed background layer */
         .ci-bg {
           position: fixed;
           inset: 0;
@@ -1032,7 +1065,6 @@ export default function CampaignInside() {
           animation: ci-scanline 6s linear infinite;
         }
 
-        /* Root content sits above bg */
         .ci-root {
           position: relative;
           z-index: 1;
@@ -1050,13 +1082,11 @@ export default function CampaignInside() {
         ::-webkit-scrollbar-thumb { background:#21262d; border-radius:3px; }
       `}</style>
 
-      {/* ── Fixed background: grid + scanline ── */}
       <div className="ci-bg">
         <div className="ci-grid" />
         <div className="ci-scanline" />
       </div>
 
-      {/* ── Global click particle overlay ── */}
       <div style={{ position: 'fixed', inset: 0, zIndex: 9999, pointerEvents: 'none', overflow: 'hidden' }}>
         {bgParticles.map(p => (
           <div key={p.id} style={{
@@ -1069,7 +1099,6 @@ export default function CampaignInside() {
         ))}
       </div>
 
-      {/* ── App shell ── */}
       <div className="ci-root" onClick={handlePageClick}>
         <header style={{
           height: 56, flexShrink: 0,

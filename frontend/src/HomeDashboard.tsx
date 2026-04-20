@@ -478,7 +478,15 @@ export const HomeDashboard: React.FC = () => {
     { label: 'System Announcements', icon: '📢', desc: 'View latest updates and notices',  path: '',          keywords: ['announcement','announcements','news','update','notice','system'] },
   ]
 
+  // ── FIX (Issue #6): AbortController ref — cancels stale search requests ──
+  const searchAbortRef = useRef<AbortController | null>(null)
+
   const runSearch = async (q: string) => {
+    // Cancel any in-flight request before starting a new one
+    if (searchAbortRef.current) searchAbortRef.current.abort()
+    const controller = new AbortController()
+    searchAbortRef.current = controller
+
     setSearchLoading(true)
     const ql = q.toLowerCase()
     try {
@@ -506,8 +514,13 @@ export const HomeDashboard: React.FC = () => {
         a.keywords.some(k => k.includes(ql) || ql.includes(k)) || a.label.toLowerCase().includes(ql)
       )
       setSearchResults({ actions: matchedActions, players: players ?? [], quests: Array.from(questMap.values()).slice(0, 5), reports: reportsData })
-    } catch (e) { console.error('Search error:', e) }
-    finally { setSearchLoading(false) }
+    } catch (e: any) {
+      // AbortError is expected when a newer search supersedes this one
+      if (e?.name !== 'AbortError') console.error('Search error:', e)
+    } finally {
+      // Only clear loading if this is still the active controller
+      if (searchAbortRef.current === controller) setSearchLoading(false)
+    }
   }
 
   const fetchLeaderboard = async () => {
