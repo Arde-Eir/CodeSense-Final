@@ -38,6 +38,12 @@ export const DatabaseService = {
         throw new Error('PROFILE_NOT_FOUND')
       }
 
+      if (profile.is_banned) {
+        await supabase.auth.signOut()
+        const reason = profile.ban_reason ? `: ${profile.ban_reason}` : ''
+        throw new Error(`ACCOUNT_BANNED${reason}`)
+      }
+
       await supabase
         .from('users')
         .update({ lastactive: new Date().toISOString() })
@@ -55,34 +61,32 @@ export const DatabaseService = {
     playerName: string,
     secretCode: string,
     email: string,
-    characterType: 'squire' | 'knight' | 'duke' | 'lord'
+    userType: 'student' | 'professional' = 'student'
   ): Promise<ExplorerProfile> {
     try {
-      const { data: existing } = await supabase
-        .from('users')
-        .select('id')
-        .ilike('playername', playerName.trim())
-        .limit(1)
-        .maybeSingle()
-
-      if (existing) {
-        throw new Error('USERNAME_TAKEN')
-      }
-
       const { data, error } = await supabase.auth.signUp({
         email,
         password: secretCode,
         options: {
-          data: { playername: playerName },
+          data: {
+            playername: playerName,
+            // charactertype omitted: trigger enum cast fails; set via update after auth succeeds
+          },
         },
       })
 
       if (error) {
         const msg = error.message.toLowerCase()
-        if (msg.includes('already registered') || msg.includes('already been registered')) {
+        const code = (error as any).code ?? ''
+        if (
+          code === 'user_already_exists' ||
+          code === 'email_exists' ||
+          msg.includes('already registered') ||
+          msg.includes('already been registered')
+        ) {
           throw new Error('EMAIL_TAKEN')
         }
-        if (msg.includes('playername') || msg.includes('username')) {
+        if (code === '23505' || msg.includes('playername') || msg.includes('username')) {
           throw new Error('USERNAME_TAKEN')
         }
         throw new Error(error.message)
@@ -94,9 +98,10 @@ export const DatabaseService = {
 
       const userId = data.user.id
 
+      // Poll up to 3 times (1s apart) for the trigger to create the row
       let profile: any = null
-      for (let attempt = 0; attempt < 10; attempt++) {
-        await new Promise(r => setTimeout(r, 400))
+      for (let attempt = 0; attempt < 3; attempt++) {
+        await new Promise(r => setTimeout(r, 1000))
         const { data: row, error: rowErr } = await supabase
           .from('users')
           .select('*')
@@ -113,7 +118,8 @@ export const DatabaseService = {
             id:            userId,
             playername:    playerName,
             email:         email,
-            charactertype: characterType,
+            charactertype: 'squire',
+            user_type:     userType,
             totalxp:       0,
             currentlevel:  1,
             createdat:     new Date().toISOString(),
@@ -136,7 +142,8 @@ export const DatabaseService = {
       await supabase
         .from('users')
         .update({
-          charactertype: characterType,
+          charactertype: 'squire',
+          user_type:     userType,
           playername:    playerName,
           totalxp:       0,
           currentlevel:  1,
@@ -147,7 +154,7 @@ export const DatabaseService = {
         id:            userId,
         playerName,
         secretCode:    '***',
-        characterType,
+        characterType: 'squire',
         totalXP:       0,
         currentLevel:  1,
         createdAt:     new Date(profile?.createdat ?? Date.now()),
@@ -246,8 +253,6 @@ export const DatabaseService = {
     symbolTable: object
   ): Promise<void> {
     try {
-      // Only insert a report record and increment sandbox_runs counter.
-      // NO XP is awarded for sandbox runs.
       await supabase.from('reports').insert({
         userid:               userId,
         type:                 'summary',
@@ -258,55 +263,26 @@ export const DatabaseService = {
         createdat:            new Date().toISOString(),
       })
 
-      // Increment sandbox_runs counter only (no XP change)
-      await supabase.rpc('increment_sandbox_runs', { p_userid: userId })
-        .then(({ error }) => {
-          if (error) {
-            // Fallback: manual increment if RPC doesn't exist
-            return supabase
-              .from('users')
-              .select('sandbox_runs')
-              .eq('id', userId)
-              .single()
-              .then(({ data }) => {
-                if (data) {
-                  return supabase
-                    .from('users')
-                    .update({ sandbox_runs: (data.sandbox_runs ?? 0) + 1 })
-                    .eq('id', userId)
-                }
-              })
-          }
-        })
+      const { error: rpcError } = await supabase.rpc('increment_sandbox_runs', { p_userid: userId })
+      if (rpcError) {
+        const { data } = await supabase
+          .from('users')
+          .select('sandbox_runs')
+          .eq('id', userId)
+          .single()
+        if (data) {
+          await supabase
+            .from('users')
+            .update({ sandbox_runs: (data.sandbox_runs ?? 0) + 1 })
+            .eq('id', userId)
+        }
+      }
     } catch (error) {
       console.error('Sandbox log failed (non-critical):', error)
     }
   },
 
   // ── CAMPAIGN ────────────────────────────────────────────────────────────────
-
-  async completeQuest(
-    userId: string,
-    questId: string,
-    xpEarned: number,
-    complexityScore: number,
-    symbolTable: object,
-    sourceCode: string
-  ): Promise<void> {
-    try {
-      await supabase.rpc('complete_campaign_quest', {
-        p_userid:           userId,
-        p_questid:          questId,
-        p_xp_earned:        xpEarned,
-        p_complexity_score: complexityScore,
-        p_symbol_table:     symbolTable,
-        p_sourcecode:       sourceCode,
-      })
-    } catch (error) {
-      console.error('Complete quest error:', error)
-      throw error
-    }
-  },
 
   async getQuests(phase: 'beginner' | 'intermediate' | 'advanced') {
     const { data, error } = await supabase
@@ -374,7 +350,12 @@ function mapProfile(profile: any): ExplorerProfile {
     id:            profile.id,
     playerName:    profile.playername,
     secretCode:    '***',
+    email:         profile.email,
     characterType: profile.charactertype,
+    userType:      profile.user_type ?? 'student',
+    isAdmin:       profile.is_admin ?? false,
+    isBanned:      profile.is_banned ?? false,
+    banReason:     profile.ban_reason ?? undefined,
     totalXP:       profile.totalxp,
     currentLevel:  profile.currentlevel,
     createdAt:     new Date(profile.createdat),

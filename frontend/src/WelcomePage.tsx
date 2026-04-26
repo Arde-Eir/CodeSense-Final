@@ -1,5 +1,5 @@
 // src/WelcomePage.tsx
-import React, { useEffect, useState } from 'react'
+import React, { useEffect, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useAuth } from './components/AuthScreen'
 
@@ -8,18 +8,21 @@ export const WelcomePage: React.FC = () => {
   const { user, isGuest } = useAuth()
   const [visible, setVisible] = useState(false)
   const [exiting, setExiting] = useState(false)
+  const navTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   const playerName = isGuest ? 'Explorer' : (user?.playerName ?? 'Explorer')
 
   useEffect(() => {
-    // Fade in on mount
     const t = setTimeout(() => setVisible(true), 50)
-    return () => clearTimeout(t)
+    return () => {
+      clearTimeout(t)
+      if (navTimerRef.current) clearTimeout(navTimerRef.current)
+    }
   }, [])
 
   const handleStart = () => {
     setExiting(true)
-    setTimeout(() => navigate('/home'), 500)
+    navTimerRef.current = setTimeout(() => navigate('/home'), 500)
   }
 
   return (

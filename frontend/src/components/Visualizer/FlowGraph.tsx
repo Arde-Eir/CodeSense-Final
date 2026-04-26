@@ -1165,13 +1165,19 @@ const EdgeLabelEditor: React.FC<{
 // §7  MAIN FlowGraph COMPONENT
 // ─────────────────────────────────────────────────────────────────────────────
 
+// Safety cap — above this, we still render, but we warn the user and defer ELK
+const MAX_NODES_SAFE = 200;
+
 export const FlowGraph: React.FC<Props> = ({
   cfg, safetyChecks = [], onNodeClick,
   isDrawerOpen = false, onGraphChange, onCodeGenerated,
 }) => {
   const [nodes, setNodes]                 = useState<Node<ExtendedNodeData>[]>([]);
   const [edges, setEdges]                 = useState<Edge[]>([]);
-  const [isInteractive, setIsInteractive] = useState(true);
+  // Lock semantics: when true, nodes are frozen in place AND panning is disabled.
+  // Zoom (wheel / pinch / +/- buttons) stays enabled so the user can still
+  // inspect large graphs without accidentally moving nodes.
+  const [isLocked, setIsLocked]           = useState(false);
   const [hoverInfo, setHoverInfo]         = useState<string | null>(null);
   const [mousePos,  setMousePos]          = useState({ x: 0, y: 0 });
   const [visitedNodes, setVisitedNodes]   = useState<Set<string>>(new Set());
@@ -1304,11 +1310,23 @@ export const FlowGraph: React.FC<Props> = ({
 
   // ── React Flow change handlers ─────────────────────────────────────────────
 
-  const onNodesChangeHandler = useCallback((changes: any) => {
+  const onNodesChangeHandler = useCallback((changes: any[]) => {
+    // Structural changes (add / remove / drag-end) are the only ones that
+    // should bubble up via onGraphChange + isDirty. Mid-drag position updates,
+    // selection flips, and dimension recalcs must NOT round-trip state or the
+    // canvas jitters on large graphs.
+    const structural = changes.some((c: any) =>
+      c.type === 'add' ||
+      c.type === 'remove' ||
+      (c.type === 'position' && c.dragging === false)
+    );
+
     setNodes(nds => {
       const next = applyNodeChanges(changes, nds);
-      setEdges(eds => { onGraphChange?.(next, eds); return eds; });
-      setIsDirty(true);
+      if (structural) {
+        setEdges(eds => { onGraphChange?.(next, eds); return eds; });
+        setIsDirty(true);
+      }
       return next;
     });
   }, [onGraphChange]);
@@ -1356,6 +1374,13 @@ export const FlowGraph: React.FC<Props> = ({
   useEffect(() => {
     if (!cfg?.nodes?.length) return;
 
+    // ── FIX (user bug #1 & #2): Reset the visited-node tracker whenever a
+    // new CFG arrives. Without this, the "Nodes Explored" counter and green
+    // edge highlighting bleed over from the previous analysis, because IDs
+    // like "node_0" / "start" can collide across runs.
+    visitedNodesRef.current = new Set();
+    setVisitedNodes(new Set());
+
     const inferNodeType = (node: ControlFlowNode): FlowNodeType => {
       const lbl = String(node.label ?? '').toLowerCase();
       if (lbl === 'start' || lbl === 'end')                                    return 'terminator';
@@ -1375,7 +1400,22 @@ export const FlowGraph: React.FC<Props> = ({
       return 'process';
     };
 
-    const initialNodes: Node<ExtendedNodeData>[] = cfg.nodes.map(node => ({
+    // Robustness guards before rendering:
+    //  1. Dedupe node IDs (bad back-end output can produce collisions that crash React keys)
+    //  2. Cap node count so massive graphs don't freeze the browser
+    //  3. Drop edges referencing non-existent nodes
+    const seenIds = new Set<string>();
+    const safeNodes = cfg.nodes.filter(n => {
+      if (!n?.id) return false;
+      if (seenIds.has(n.id)) return false;
+      seenIds.add(n.id);
+      return true;
+    });
+    const hardCap = MAX_NODES_SAFE * 5; // absolute ceiling — we warn at MAX_NODES_SAFE already
+    const capped = safeNodes.length > hardCap ? safeNodes.slice(0, hardCap) : safeNodes;
+    const nodeIdSet = new Set(capped.map(n => n.id));
+
+    const initialNodes: Node<ExtendedNodeData>[] = capped.map(node => ({
       id:   node.id,
       type: inferNodeType(node),
       data: {
@@ -1389,8 +1429,9 @@ export const FlowGraph: React.FC<Props> = ({
       draggable: true,
     }));
 
-    const initialEdges: Edge[] = cfg.edges.map((edge, i) => {
-      const target       = cfg.nodes.find(n => n.id === edge.to);
+    const validCfgEdges = cfg.edges.filter(e => nodeIdSet.has(e.from) && nodeIdSet.has(e.to));
+    const initialEdges: Edge[] = validCfgEdges.map((edge, i) => {
+      const target       = capped.find(n => n.id === edge.to);
       const hasViolation = target && safetyChecks.some(c => c.line === target.line && c.status === 'UNSAFE');
       const isVisited    = visitedNodesRef.current.has(edge.from) && visitedNodesRef.current.has(edge.to);
       const color = hasViolation ? '#ff4444' : isVisited ? '#4caf50' : '#64b5f6';
@@ -1513,28 +1554,75 @@ export const FlowGraph: React.FC<Props> = ({
         </div>
       )}
 
+      {/* Large-graph warning banner */}
+      {nodes.length > MAX_NODES_SAFE && (
+        <div style={{
+          position: 'absolute', top: 12, left: '50%', transform: 'translateX(-50%)',
+          zIndex: 50, background: 'rgba(227,179,65,0.12)', border: '1px solid rgba(227,179,65,0.4)',
+          color: '#e3b341', padding: '6px 14px', borderRadius: 6,
+          fontSize: 11, fontWeight: 700, letterSpacing: 0.5,
+          fontFamily: "'IBM Plex Mono', monospace",
+          boxShadow: '0 4px 16px rgba(0,0,0,0.3)',
+        }}>
+          ⚠ Large graph ({nodes.length} nodes) — performance may degrade. Consider Lock + Zoom for navigation.
+        </div>
+      )}
+
+      {/* Lock/Unlock toggle (top-left, separate from React Flow's interactivity control) */}
+      <button
+        onClick={() => setIsLocked(l => !l)}
+        title={isLocked ? 'Unlock — re-enable drag & pan' : 'Lock — freeze nodes & pan (zoom stays on)'}
+        style={{
+          position: 'absolute', bottom: 12, left: 12, zIndex: 1001,
+          background: isLocked ? 'rgba(248,81,73,0.15)' : 'rgba(13,17,23,0.9)',
+          border: `1px solid ${isLocked ? 'rgba(248,81,73,0.45)' : '#30363d'}`,
+          color: isLocked ? '#f85149' : '#8b949e',
+          padding: '7px 12px', borderRadius: 8,
+          fontSize: 11, fontWeight: 700, letterSpacing: 0.6, cursor: 'pointer',
+          fontFamily: "'IBM Plex Mono', monospace",
+          display: 'flex', alignItems: 'center', gap: 6,
+          boxShadow: '0 4px 12px rgba(0,0,0,0.35)',
+          transition: 'all 0.15s ease',
+        }}
+      >
+        <span style={{ fontSize: 13 }}>{isLocked ? '🔒' : '🔓'}</span>
+        {isLocked ? 'LOCKED' : 'UNLOCKED'}
+      </button>
+
       {/* React Flow canvas */}
       <ReactFlow
         nodes={nodes} edges={edges} nodeTypes={nodeTypes}
         onNodesChange={onNodesChangeHandler}
         onEdgesChange={onEdgesChangeHandler}
-        onConnect={isBuildMode ? onConnectHandler : undefined}
+        onConnect={isBuildMode && !isLocked ? onConnectHandler : undefined}
         onNodeClick={handleNodeClick}
-        onEdgeDoubleClick={isBuildMode ? handleEdgeDoubleClick : undefined}
+        onEdgeDoubleClick={isBuildMode && !isLocked ? handleEdgeDoubleClick : undefined}
         fitView
         fitViewOptions={{ padding: 0.25, includeHiddenNodes: true, minZoom: 0.1, maxZoom: 1.0, duration: 800 }}
-        nodesConnectable={isBuildMode} colorMode="dark"
-        nodesDraggable={isBuildMode && isInteractive} nodesFocusable={isInteractive} edgesFocusable={isBuildMode}
-        panOnDrag={isInteractive} panOnScroll={false}
-        selectionOnDrag={isBuildMode && isInteractive} selectionKeyCode={null} multiSelectionKeyCode="Shift"
-        deleteKeyCode={isBuildMode ? 'Backspace' : null}
-        zoomOnScroll={isInteractive} zoomOnPinch={isInteractive} zoomOnDoubleClick={false}
+        nodesConnectable={isBuildMode && !isLocked} colorMode="dark"
+        /* Lock freezes node drag + pan, but zoom stays on so users can still
+           inspect large graphs. */
+        nodesDraggable={isBuildMode && !isLocked}
+        nodesFocusable={!isLocked}
+        edgesFocusable={isBuildMode && !isLocked}
+        panOnDrag={!isLocked}
+        panOnScroll={false}
+        selectionOnDrag={isBuildMode && !isLocked}
+        selectionKeyCode={null}
+        multiSelectionKeyCode="Shift"
+        deleteKeyCode={isBuildMode && !isLocked ? 'Backspace' : null}
+        /* Zoom always works — lock only freezes position/pan. */
+        zoomOnScroll
+        zoomOnPinch
+        zoomOnDoubleClick={false}
         minZoom={0.05} maxZoom={2}
         defaultEdgeOptions={{ type: 'default' }}
+        proOptions={{ hideAttribution: true }}
       >
         <Background color="#1f2937" gap={16} size={1} style={{ opacity: 0.4 }} />
         <Controls
-          showInteractive onInteractiveChange={setIsInteractive} position="bottom-right"
+          showInteractive={false}
+          position="bottom-right"
           style={{ background: 'rgba(13,17,23,0.9)', border: '1px solid #30363d', borderRadius: 8, bottom: 12, right: 12 }}
         />
       </ReactFlow>

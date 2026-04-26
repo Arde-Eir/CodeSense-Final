@@ -364,9 +364,13 @@ function emitDatabase(label: string, code: string): string {
 
 // ─── Graph Helpers ────────────────────────────────────────────────────────────
 
-function buildAdjacency(edges: Edge[]): Map<string, Edge[]> {
+function buildAdjacency(edges: Edge[], nodeIds: Set<string>): Map<string, Edge[]> {
   const adj = new Map<string, Edge[]>();
   for (const e of edges) {
+    // HARDENING: skip dangling edges — edges referencing a node that was
+    // deleted but whose ref lingers in state. Without this, traverse() can
+    // dereference a missing node and emit malformed code.
+    if (!nodeIds.has(e.source) || !nodeIds.has(e.target)) continue;
     if (!adj.has(e.source)) adj.set(e.source, []);
     adj.get(e.source)!.push(e);
   }
@@ -441,17 +445,21 @@ function detectLoop(
   falseEdge: Edge | undefined,
   adj: Map<string, Edge[]>
 ): boolean {
+  // HARDENED: proper BFS with visited set. The previous implementation used
+  // `visited.has(id) ? continue : visited.add(id)` AFTER enqueueing children,
+  // which meant a single node could be enqueued many times on diamond graphs
+  // and the 50-hop cap was hitting false before detecting real back-edges.
   const checkBackEdge = (startId: string): boolean => {
     const visited = new Set<string>();
-    const queue = [startId];
-    let hops = 0;
-    while (queue.length && hops < 50) {
+    const queue: string[] = [startId];
+    while (queue.length) {
       const id = queue.shift()!;
       if (id === nodeId) return true;
       if (visited.has(id)) continue;
       visited.add(id);
-      hops++;
-      for (const e of adj.get(id) ?? []) queue.push(e.target);
+      for (const e of adj.get(id) ?? []) {
+        if (!visited.has(e.target)) queue.push(e.target);
+      }
     }
     return false;
   };
@@ -645,7 +653,8 @@ export const generateCppFromGraph = (nodes: Node[], edges: Edge[]): string => {
 
   const typedNodes = nodes as Node<NodeData>[];
   const nodeMap = new Map(typedNodes.map(n => [n.id, n]));
-  const adj = buildAdjacency(edges);
+  const nodeIdSet = new Set(nodeMap.keys());
+  const adj = buildAdjacency(edges, nodeIdSet);
 
   const startNode = findStartNode(typedNodes, edges);
   if (!startNode) {

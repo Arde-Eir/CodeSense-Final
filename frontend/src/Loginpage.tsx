@@ -2,13 +2,100 @@ import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from './components/AuthScreen';
 
+// ── Account-suspended modal — shown when a banned user tries to log in ───────
+const BannedModal: React.FC<{ reason: string; onClose: () => void }> = ({ reason, onClose }) => (
+  <div style={{
+    position: 'fixed', inset: 0, zIndex: 9999,
+    background: 'rgba(0,0,0,0.82)', backdropFilter: 'blur(6px)',
+    display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '16px',
+    animation: 'bannedFadeIn 0.2s ease',
+  }}>
+    <style>{`
+      @keyframes bannedFadeIn { from { opacity: 0 } to { opacity: 1 } }
+      @keyframes bannedSlideUp { from { opacity: 0; transform: translateY(14px) } to { opacity: 1; transform: translateY(0) } }
+    `}</style>
+    <div style={{
+      background: 'linear-gradient(160deg, #1a0e0e 0%, #0d1117 100%)',
+      border: '1px solid rgba(248,81,73,0.4)', borderRadius: '16px',
+      maxWidth: '480px', width: '100%', padding: '32px',
+      boxShadow: '0 24px 80px rgba(0,0,0,0.7), 0 0 0 1px rgba(248,81,73,0.15)',
+      animation: 'bannedSlideUp 0.25s ease-out',
+    }}>
+      <div style={{ textAlign: 'center', marginBottom: '20px' }}>
+        <div style={{
+          width: '72px', height: '72px', borderRadius: '50%',
+          background: 'rgba(248,81,73,0.12)', border: '2px solid rgba(248,81,73,0.4)',
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+          margin: '0 auto 16px', fontSize: '38px',
+        }}>
+          🚫
+        </div>
+        <div style={{
+          display: 'inline-block', background: 'rgba(248,81,73,0.15)',
+          color: '#f85149', fontSize: '10px', fontWeight: '800',
+          letterSpacing: '1.5px', padding: '4px 10px', borderRadius: '4px',
+          textTransform: 'uppercase', marginBottom: '10px',
+        }}>
+          Account Suspended
+        </div>
+        <h2 style={{ color: '#e6edf3', fontSize: '22px', fontWeight: '700', margin: '0 0 8px' }}>
+          Access Denied
+        </h2>
+        <p style={{ color: '#8b949e', fontSize: '13px', margin: 0, lineHeight: 1.5 }}>
+          This account has been banned from CodeSense by an administrator.
+        </p>
+      </div>
+
+      <div style={{
+        background: 'rgba(248,81,73,0.05)', border: '1px solid rgba(248,81,73,0.25)',
+        borderRadius: '10px', padding: '14px 16px', marginBottom: '20px',
+      }}>
+        <div style={{
+          color: '#f85149', fontSize: '10px', fontWeight: '700',
+          letterSpacing: '1px', textTransform: 'uppercase', marginBottom: '6px',
+        }}>
+          Reason for suspension
+        </div>
+        <div style={{ color: '#e6edf3', fontSize: '14px', lineHeight: 1.6 }}>
+          {reason || 'No specific reason was provided.'}
+        </div>
+      </div>
+
+      <div style={{
+        background: 'rgba(88,166,255,0.05)', border: '1px solid rgba(88,166,255,0.2)',
+        borderRadius: '10px', padding: '12px 14px', marginBottom: '22px',
+        fontSize: '12px', color: '#8b949e', lineHeight: 1.6,
+      }}>
+        <strong style={{ color: '#c9d1d9' }}>Think this is a mistake?</strong>
+        <br />
+        Contact the CodeSense team at <span style={{ color: '#58a6ff' }}>support@codesense.app</span> with your player name and a brief appeal. Decisions are reviewed within 3 business days.
+      </div>
+
+      <button
+        onClick={onClose}
+        style={{
+          width: '100%', padding: '12px', background: 'rgba(255,255,255,0.06)',
+          border: '1px solid #30363d', borderRadius: '8px', color: '#e6edf3',
+          fontSize: '13px', fontWeight: '700', cursor: 'pointer',
+          transition: 'all 0.15s', letterSpacing: '0.4px',
+        }}
+        onMouseEnter={e => { e.currentTarget.style.background = 'rgba(255,255,255,0.1)'; }}
+        onMouseLeave={e => { e.currentTarget.style.background = 'rgba(255,255,255,0.06)'; }}
+      >
+        Understood
+      </button>
+    </div>
+  </div>
+);
+
 export const LoginPage: React.FC = () => {
   const navigate = useNavigate();
   const { login, continueAsGuest } = useAuth();
-  
+
   const [formData, setFormData] = useState({ playerName: '', secretCode: '' });
   const [error, setError] = useState('');
   const [isLoading, setIsLoading] = useState(false);
+  const [banInfo, setBanInfo] = useState<{ reason: string } | null>(null);
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -17,9 +104,16 @@ export const LoginPage: React.FC = () => {
 
     try {
       await login(formData.playerName, formData.secretCode);
-      navigate('/welcome'); 
-    } catch (err) {
-      setError('Invalid Player Name or Secret Code.');
+      navigate('/welcome');
+    } catch (err: any) {
+      const msg: string = err?.message ?? '';
+      if (msg.startsWith('ACCOUNT_BANNED')) {
+        // Format from DatabaseService: "ACCOUNT_BANNED: <reason>"  or just "ACCOUNT_BANNED"
+        const reason = msg.slice('ACCOUNT_BANNED'.length).replace(/^:\s*/, '').trim();
+        setBanInfo({ reason });
+      } else {
+        setError('Invalid Player Name or Secret Code.');
+      }
     } finally {
       setIsLoading(false);
     }
@@ -97,6 +191,8 @@ export const LoginPage: React.FC = () => {
           New explorer? <span onClick={() => navigate('/signup')} style={linkStyle}>Register here</span>
         </p>
       </div>
+
+      {banInfo && <BannedModal reason={banInfo.reason} onClose={() => setBanInfo(null)} />}
     </div>
   );
 };

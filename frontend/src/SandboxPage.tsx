@@ -12,7 +12,7 @@ import { DatabaseService } from './services/DatabaseService';
 import { supabase } from './services/supabase';
 import { getLevelName, getLevelProgress, getXPToNextLevel } from './types';
 import type { AnalysisResult, SymbolInfo } from './types';
-import { ASTViewer } from '../src/components/Visualizer/Astviewer';
+import { ASTViewer } from './components/Visualizer/Astviewer';
 import { MathTab } from './components/Visualizer/MathTab';
 import { LogsTab } from './components/Visualizer/LogsTab';
 
@@ -20,17 +20,18 @@ type AppMode = 'analyze' | 'build';
 
 interface LiveStats {
   totalXP: number;
-  currentLevel: 1 | 2 | 3 | 4;
+  currentLevel: 1 | 2 | 3 | 4 | 5;
   sandboxRuns: number;
   rankName: string;
 }
 
 // ─── Rank config ──────────────────────────────────────────────────────────────
 const RANK_CONFIG = {
-  1: { color: '#8b949e', icon: '🛡️', label: 'Squire'  },
-  2: { color: '#58a6ff', icon: '⚔️', label: 'Knight'  },
-  3: { color: '#e3b341', icon: '👑', label: 'Duke'    },
-  4: { color: '#a371f7', icon: '🌟', label: 'Lord'    },
+  1: { color: '#8b949e', icon: '🛡️', label: 'Squire' },
+  2: { color: '#58a6ff', icon: '⚔️', label: 'Knight' },
+  3: { color: '#a371f7', icon: '🌟', label: 'Lord'   },
+  4: { color: '#e3b341', icon: '👑', label: 'Duke'   },
+  5: { color: '#ffd700', icon: '🔱', label: 'King'   },
 } as const;
 
 // ─── Player HUD ───────────────────────────────────────────────────────────────
@@ -373,8 +374,17 @@ export const SandboxPage = () => {
   const editorRef = useRef<any>(null);
 
   const [mode, setMode] = useState<AppMode>('analyze');
-  const [code, setCode] = useState<string>(
-`#include <iostream>
+  // Quick Start restore: if the dashboard handed us a snippet via sessionStorage,
+  // load it as the initial editor content. Falls back to the default demo.
+  const [code, setCode] = useState<string>(() => {
+    try {
+      const restored = sessionStorage.getItem('cs-sandbox-restore');
+      if (restored && restored.trim().length > 0) {
+        sessionStorage.removeItem('cs-sandbox-restore');
+        return restored;
+      }
+    } catch { /* sessionStorage may be unavailable */ }
+    return `#include <iostream>
 using namespace std;
 
 int main() {
@@ -382,12 +392,13 @@ int main() {
     int damage = 0;
     cout<<"Hello,World!";
     // Safety Risk: Division by Zero
-    int risk = hp / damage; 
+    int risk = hp / damage;
     while (hp > 0) {
         hp = hp - 10;
     }
     return 0;
-}`);
+}`;
+  });
 
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [result, setResult] = useState<AnalysisResult | null>(null);
@@ -435,7 +446,7 @@ int main() {
     try {
       const { data } = await supabase.from('users').select('totalxp, currentlevel, sandbox_runs').eq('id', user.id).single();
       if (data) {
-        const level = (data.currentlevel ?? 1) as 1 | 2 | 3 | 4;
+        const level = Math.min(Math.max(data.currentlevel ?? 1, 1), 5) as 1 | 2 | 3 | 4 | 5;
         setLiveStats({ totalXP: data.totalxp ?? 0, currentLevel: level, sandboxRuns: data.sandbox_runs ?? 0, rankName: getLevelName(level) });
       }
     } catch (err) { console.error('Failed to fetch live stats:', err); }

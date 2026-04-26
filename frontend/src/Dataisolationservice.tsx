@@ -5,10 +5,23 @@
  * 1. Guest users (temporary, limited access)
  * 2. Authenticated users (each with unique isolated data)
  *
- * FIX (Issue #7): migrateGuestToUser now clears sessionStorage BEFORE writing
- * to localStorage so that a mid-migration crash cannot leave duplicate data
- * in both stores. The migration is also wrapped in a try/finally so the guest
- * session is always cleaned up regardless of whether the migration succeeds.
+ * FIX Bug 9 (Security): Guest mode flag stored in sessionStorage is trivially forgeable.
+ *   sessionStorage.setItem('guestMode', 'true') was the ONLY thing controlling guest vs
+ *   authenticated flow. Any user could open DevTools and set this to bypass ProtectedRoute.
+ *
+ *   Fix: sessionStorage guest data is used ONLY for UX (sandbox scratch-pad, temporary
+ *   progress display). ProtectedRoute now checks isAuthenticated independently from
+ *   isGuest. Guests only access routes explicitly marked `guestAllowed: true` — they
+ *   cannot reach all ProtectedRoutes the way authenticated users can.
+ *
+ *   The DataIsolationService itself is unchanged in behaviour; the security fix is in
+ *   AuthScreen / ProtectedRoute. Comments below document the intended contract so
+ *   future callers don't re-introduce the vulnerability.
+ *
+ * FIX Bug 9b (Data integrity): migrateGuestToUser now clears sessionStorage BEFORE
+ *   writing to localStorage so a mid-migration crash cannot leave duplicate data in
+ *   both stores. The migration is wrapped in try/finally so the guest session is always
+ *   cleaned up regardless of whether the migration succeeds.
  */
 
 export class DataIsolationService {
@@ -54,6 +67,12 @@ export class DataIsolationService {
   }
 
   // ── Guest progress ─────────────────────────────────────────────────────────
+  //
+  // NOTE (Bug 9): Guest progress is stored in sessionStorage for UX only.
+  // It MUST NOT be used to make access-control decisions. ProtectedRoute must
+  // check server-side authentication (via useAuth().isAuthenticated) separately.
+  // The `isGuest` flag from sessionStorage only determines UI affordances
+  // (e.g. showing "sign up to save"), not route access.
 
   static saveGuestProgress(progress: any): void {
     const key  = this.getGuestKey('progress');
@@ -151,6 +170,8 @@ export class DataIsolationService {
     }
     keysToRemove.forEach(key => sessionStorage.removeItem(key));
     sessionStorage.removeItem('guestSessionId');
+    // NOTE (Bug 9): also clear the legacy guestMode flag so it can't be reused
+    sessionStorage.removeItem('guestMode');
   }
 
   static clearUserData(userId: string): void {
@@ -163,7 +184,7 @@ export class DataIsolationService {
     keysToRemove.forEach(key => localStorage.removeItem(key));
   }
 
-  // ── FIX (Issue #7): Atomic guest → user migration ─────────────────────────
+  // ── FIX Bug 9b: Atomic guest → user migration ─────────────────────────────
   //
   // Previous behaviour: wrote to localStorage first, cleared sessionStorage last.
   // A mid-migration crash left duplicate data in both stores, causing the
@@ -174,8 +195,7 @@ export class DataIsolationService {
   //   2. Clear sessionStorage FIRST (the guest data is now gone).
   //   3. Write the snapshot to localStorage.
   //   4. If step 3 throws, the guest data is already gone — we lose it rather
-  //      than duplicate it.  This is the safer trade-off: the user loses their
-  //      temporary session data but their account is clean and consistent.
+  //      than duplicate it. This is the safer trade-off.
   //
   static migrateGuestToUser(userId: string): void {
     // --- snapshot ---
@@ -189,15 +209,20 @@ export class DataIsolationService {
     this.clearGuestData();
 
     // --- write to user storage ---
-    if (guestProgress) {
-      this.saveUserProgress(userId, {
-        sandboxProgress:      guestProgress.sandboxProgress      || {},
-        exploredNodes:        guestProgress.exploredNodes        || [],
-        completedChallenges:  guestProgress.completedChallenges  || [],
-      });
-    }
-    for (const { filename, code } of fileContents) {
-      this.saveSandboxCode(userId, code, filename);
+    try {
+      if (guestProgress) {
+        this.saveUserProgress(userId, {
+          sandboxProgress:      guestProgress.sandboxProgress      || {},
+          exploredNodes:        guestProgress.exploredNodes        || [],
+          completedChallenges:  guestProgress.completedChallenges  || [],
+        });
+      }
+      for (const { filename, code } of fileContents) {
+        this.saveSandboxCode(userId, code, filename);
+      }
+    } catch (err) {
+      // Guest data is already cleared. Log and continue — the user's account is clean.
+      console.error('migrateGuestToUser: failed to write user data, guest data was already cleared', err);
     }
   }
 
@@ -219,6 +244,10 @@ export class DataIsolationService {
   }
 
   // ── Guards ─────────────────────────────────────────────────────────────────
+  //
+  // NOTE (Bug 9): canAccessCampaign / canSavePermanently should be called with
+  // the server-verified isGuest value from useAuth(), NOT from sessionStorage
+  // directly. The sessionStorage `guestMode` flag is UX-only and forgeable.
 
   static canAccessCampaign(isGuest: boolean): boolean   { return !isGuest; }
   static canSavePermanently(isGuest: boolean): boolean  { return !isGuest; }

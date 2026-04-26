@@ -38,6 +38,12 @@
 /* ── Reset ──────────────────────────────────────────────── */
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
+/* Guard against oversize pixel/retro fonts clipping baselines.
+   Without this, fonts with tall ascenders (IBM Plex Mono bold, or any fallback
+   pixel font) can cut off descenders or push strokes outside their container. */
+html { text-size-adjust: 100%; -webkit-text-size-adjust: 100%; }
+button, input, textarea, select { font-family: inherit; line-height: 1.3; }
+
 html, body, #root {
   height: 100%;
   background: var(--bg-void);
@@ -67,7 +73,7 @@ html, body, #root {
   padding: 0 20px;
   flex-shrink: 0;
   position: relative;
-  z-index: 100;
+  z-index: 1000;
   /* Subtle bottom glow to separate from content */
   box-shadow: 0 1px 0 var(--border-faint), 0 4px 20px rgba(0,0,0,0.4);
 }
@@ -218,18 +224,22 @@ html, body, #root {
 }
 
 .analyze-btn {
-  width: 100%;                          
-  padding: 12px 16px;                   
+  width: 100%;
+  padding: 13px 16px;
   border-radius: var(--radius-md, 6px);
   border: none;
   font-weight: 700;
   font-size: 12px;
+  line-height: 1.3;
   letter-spacing: 1.5px;
   cursor: pointer;
   background: var(--yellow);
   color: #080b10;
   font-family: 'IBM Plex Mono', monospace;
   transition: background-color 0.15s, transform 0.15s;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .analyze-btn:hover:not(:disabled) {
@@ -261,7 +271,7 @@ html, body, #root {
   border: none;
   border-bottom: 2px solid transparent;
   color: var(--text-muted);
-  padding: 9px 13px;
+  padding: 10px 14px;
   font-size: 11px;
   font-weight: 600;
   font-family: 'IBM Plex Sans', sans-serif;
@@ -269,6 +279,8 @@ html, body, #root {
   transition: all 0.15s;
   white-space: nowrap;
   letter-spacing: 0.2px;
+  line-height: 1.4;
+  min-height: 36px;
 }
 
 .tab-link:hover { color: var(--text-secondary); }

@@ -1,60 +1,45 @@
-// src/BalloonPopGame.tsx
-// ✅ FIXED:
-//   1. Canvas properly sized via ResizeObserver before first draw
-//   2. Hit detection uses canvas pixel coords (not %) consistently
-//   3. Physics uses canvas pixel coords — no mixed % / px bugs
-//   4. loadQuestion stable ref — no infinite loop in useEffect
-//   5. Particles use pixel coords throughout
-//   6. Correct balloon removed from balloons array only after pop animation
-//   7. Game Over / Done overlays work properly
-//   8. onComplete called exactly once
-//   9. FIX (Issue #2): rx/ry are NO LONGER baked in on spawn.
-//      They are derived at draw-time from a constant SCALE_FACTOR so that
-//      hit-detection and the visual always use the same radius even after
-//      a window resize or device rotation.
+// frontend/src/games/BalloonPopGame.tsx
+// Canvas-based balloon-pop quiz. Pop the balloon labeled with the correct
+// answer; wrong pops cost a life. Three lives total per quest.
+//
+// Implementation moved from frontend/src/BalloonPopGame.tsx — only the
+// `MCQ` type was changed to import from the shared `types/campaign` module
+// (instead of being defined locally) so this file stays in sync with the
+// rest of the campaign UI.
 
 import React, { useEffect, useRef, useState, useCallback } from 'react';
+import type { MCQ } from '../types/campaign';
 
-export interface MCQ {
-  id: string;
-  question: string;
-  options: string[];
-  correct: number;
-  explanation: string;
-}
-
-// ── FIX: store a scale-factor constant instead of baking in absolute radii ──
-// rx = W * BALLOON_SCALE * 0.56   (derived at draw/hit time from current W)
-// ry = W * BALLOON_SCALE * 0.67
-const BALLOON_SCALE = 0.085; // fraction of min(W,H)
+// Scale-factor constant (rx/ry derived at draw/hit time from current canvas
+// size — keeps hitbox and visual aligned across resizes).
+const BALLOON_SCALE = 0.085;
 
 interface FloatingBalloon {
-  uid: string;
+  uid:         string;
   optionIndex: number;
-  label: string;
-  x: number;         // px
-  y: number;         // px
-  vx: number;        // px/s
-  vy: number;        // px/s
-  // ── FIX: rx/ry removed — computed dynamically via getBalloonRadii() ──
-  color: string;
-  shineColor: string;
+  label:       string;
+  x:           number; // px
+  y:           number;
+  vx:          number; // px/s
+  vy:          number;
+  color:       string;
+  shineColor:  string;
   stringColor: string;
-  wobble: number;
+  wobble:      number;
   wobbleSpeed: number;
-  wobbleAmp: number; // px
-  state: 'floating' | 'popped' | 'wrong';
-  wrongTimer: number;
-  particles: Particle[];
+  wobbleAmp:   number;
+  state:       'floating' | 'popped' | 'wrong';
+  wrongTimer:  number;
+  particles:   Particle[];
 }
 
 interface Particle {
-  id: number;
-  x: number; y: number;
-  vx: number; vy: number;
+  id:    number;
+  x:     number; y: number;
+  vx:    number; vy: number;
   color: string;
-  life: number; // 0..1
-  size: number;
+  life:  number; // 0..1
+  size:  number;
 }
 
 const PALETTE = [
@@ -71,13 +56,11 @@ const PALETTE = [
 const TOTAL_LIVES = 3;
 let _pid = 0;
 
-// ── FIX: getBalloonRadii — single source of truth for hitbox & visual ─────────
 function getBalloonRadii(W: number, H: number): { rx: number; ry: number; bR: number } {
   const bR = Math.min(W, H) * BALLOON_SCALE;
   return { rx: bR * 0.56, ry: bR * 0.67, bR };
 }
 
-// spawnBalloons no longer stores rx/ry — positions only
 function spawnBalloons(options: string[], qIdx: number, W: number, H: number): FloatingBalloon[] {
   return options.map((label, i) => {
     const col   = PALETTE[(i + qIdx * 3) % PALETTE.length];
@@ -106,11 +89,16 @@ function spawnBalloons(options: string[], qIdx: number, W: number, H: number): F
   });
 }
 
-export const BalloonPopGame: React.FC<{
-  questions:  MCQ[];
-  onComplete: (score: number, total: number) => void;
-}> = ({ questions, onComplete }) => {
+interface Props {
+  questions:   MCQ[];
+  onComplete:  (score: number, total: number) => void;
+  /** Optional reset signal — bumping this number re-shuffles to question 0
+   *  and restores lives. Kept consistent with the other game APIs even though
+   *  this game already has its own restart button. */
+  resetSignal?: number;
+}
 
+export const BalloonPopGame: React.FC<Props> = ({ questions, onComplete, resetSignal }) => {
   const canvasRef    = useRef<HTMLCanvasElement>(null);
   const rafRef       = useRef<number>(0);
   const t0Ref        = useRef<number>(0);
@@ -166,7 +154,6 @@ export const BalloonPopGame: React.FC<{
     g.phase = 'playing';
   }, [questions]);
 
-  // ── FIX: hit test now derives rx/ry from current canvas size ──────────────
   const hit = useCallback((clientX: number, clientY: number) => {
     const g      = gs.current;
     if (g.phase !== 'playing') return;
@@ -179,7 +166,6 @@ export const BalloonPopGame: React.FC<{
     const q  = questions[g.qIdx];
     if (!q) return;
 
-    // ── FIX: derive radii from current canvas dimensions ──
     const { rx, ry } = getBalloonRadii(g.W || canvas.offsetWidth, g.H || canvas.offsetHeight);
 
     for (const b of g.balloons) {
@@ -214,7 +200,7 @@ export const BalloonPopGame: React.FC<{
           b.wrongTimer = 0.8;
           g.lives      = Math.max(0, g.lives - 1);
           g.shake      = 18;
-          if (g.lives === 0) { g.phase = 'gameover'; }
+          if (g.lives === 0) g.phase = 'gameover';
         }
         syncUi();
         return;
@@ -228,6 +214,18 @@ export const BalloonPopGame: React.FC<{
     const t = e.touches[0];
     if (t) hit(t.clientX, t.clientY);
   }, [hit]);
+
+  // Restart on resetSignal change (matches the other games' API).
+  useEffect(() => {
+    if (resetSignal === undefined || resetSignal === 0) return;
+    completedRef.current = false;
+    Object.assign(gs.current, {
+      lives: TOTAL_LIVES, qIdx: 0, score: 0,
+      phase: 'playing', explanation: '', correctLabel: '', shake: 0,
+    });
+    loadQuestion(0);
+    syncUi();
+  }, [resetSignal, loadQuestion, syncUi]);
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -243,12 +241,10 @@ export const BalloonPopGame: React.FC<{
       ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
       gs.current.W = W;
       gs.current.H = H;
-      // ── FIX: re-spawn balloons so starting positions scale correctly ──
       if (gs.current.phase === 'playing') {
         gs.current.balloons = spawnBalloons(
           questions[gs.current.qIdx]?.options ?? [],
-          gs.current.qIdx,
-          W, H,
+          gs.current.qIdx, W, H,
         );
       }
     };
@@ -265,11 +261,10 @@ export const BalloonPopGame: React.FC<{
     const draw = (now: number) => {
       const dt = Math.min((now - t0Ref.current) / 1000, 0.05);
       t0Ref.current = now;
-      const g  = gs.current;
-      const W  = g.W || canvas.offsetWidth;
-      const H  = g.H || canvas.offsetHeight;
+      const g = gs.current;
+      const W = g.W || canvas.offsetWidth;
+      const H = g.H || canvas.offsetHeight;
 
-      // ── FIX: derive visual radii here — same source as hit test ──
       const { rx: bRX, ry: bRY, bR } = getBalloonRadii(W, H);
 
       ctx.clearRect(0, 0, W, H);
@@ -345,13 +340,12 @@ export const BalloonPopGame: React.FC<{
           b.x      += b.vx * dt;
           b.y      += b.vy * dt;
 
-          // ── FIX: wall boundaries use the same dynamic radii ──
           const minX = bRX + 4, maxX = W - bRX - 4;
           const minY = bRY + 4, maxY = H - bRY - 4;
-          if (b.x < minX)  { b.x  = minX;  b.vx =  Math.abs(b.vx) * 0.7; }
-          if (b.x > maxX)  { b.x  = maxX;  b.vx = -Math.abs(b.vx) * 0.7; }
-          if (b.y < minY)  { b.y  = minY;  b.vy =  Math.abs(b.vy) * 0.65; }
-          if (b.y > maxY)  { b.y  = maxY;  b.vy = -Math.abs(b.vy) * 0.75; }
+          if (b.x < minX) { b.x = minX; b.vx =  Math.abs(b.vx) * 0.7; }
+          if (b.x > maxX) { b.x = maxX; b.vx = -Math.abs(b.vx) * 0.7; }
+          if (b.y < minY) { b.y = minY; b.vy =  Math.abs(b.vy) * 0.65; }
+          if (b.y > maxY) { b.y = maxY; b.vy = -Math.abs(b.vy) * 0.75; }
         }
 
         const wx      = b.x + b.wobbleAmp * Math.sin(b.wobble);
@@ -452,7 +446,6 @@ export const BalloonPopGame: React.FC<{
 
   return (
     <div style={{ position: 'relative', width: '100%', height: '100%', minHeight: 420, borderRadius: 12, overflow: 'hidden', userSelect: 'none' }}>
-
       <canvas
         ref={canvasRef}
         onClick={onClick}

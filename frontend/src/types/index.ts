@@ -9,16 +9,17 @@
 // ============================================================================
 
 export type ASTNode =
-  | ProgramNode | FunctionDeclNode | VariableDeclNode | ParameterNode
-  | IntegerNode | FloatNode | CharNode | StringNode | IdentifierNode 
-  | BinaryOpNode | WhileLoopNode | DoWhileLoopNode | ForLoopNode 
+  | ProgramNode | FunctionDeclNode | FunctionPrototypeNode | VariableDeclNode | ParameterNode
+  | IntegerNode | FloatNode | CharNode | StringNode | IdentifierNode
+  | BinaryOpNode | WhileLoopNode | DoWhileLoopNode | ForLoopNode | RangeBasedForNode
   | IfStatementNode | SwitchStatementNode | ReturnStatementNode | AssignmentNode
   | ArrayAccessNode | InitializerListNode | FunctionCallNode
   | UnaryOpNode | GlobalAccessNode | LoopControlNode
   | BlockNode | ExpressionStatementNode | StreamStatementNode
-  // NEW: Advanced Features
-  | PreprocessorNode | CastExpressionNode | SizeofExpressionNode 
-  | ConditionalExpressionNode | LambdaExpressionNode;
+  | NewExpressionNode | DeleteStatementNode
+  | PreprocessorNode | CastExpressionNode | SizeofExpressionNode
+  | ConditionalExpressionNode | LambdaExpressionNode
+  | TryStatementNode | CatchClauseNode | ThrowStatementNode;
 
 export interface BaseNode {
   type: string;
@@ -341,11 +342,13 @@ export interface Token {
 // ============================================================================
 
 export interface SymbolInfo {
- name: string;
+  name: string;
   type: string;
   line: number;
   scope: string;
   initialized: boolean;
+  isDefined?: boolean;
+  kind: 'variable' | 'function' | 'parameter';
   dimensions?: number[];
 }
 
@@ -393,9 +396,8 @@ export interface AnalysisResult {
   cognitiveComplexity: number;
   symbolicExecution?: SymbolicEntry[];
 
-  // ADD THESE TWO:
   warnings?: AnalysisError[];
-  cyclomaticComplexity?: { score: number; rating: string; interpretation: string };
+  cyclomaticComplexity?: CyclomaticMetrics;
 
   gamification?: {
     xpEarned: number;
@@ -436,11 +438,15 @@ export interface ControlFlowNode {
 export interface ExplorerProfile {
   id: string;
   playerName: string;
-  secretCode: string; 
+  secretCode: string;
   email?: string;
   totalXP: number;
-  currentLevel: 1 | 2 | 3 | 4 ;
-  characterType: 'squire' | 'knight' | 'duke' | 'lord';
+  currentLevel: 1 | 2 | 3 | 4 | 5;
+  characterType: 'squire' | 'knight' | 'lord' | 'duke' | 'king';
+  userType?: 'student' | 'professional';
+  isAdmin?: boolean;
+  isBanned?: boolean;
+  banReason?: string;
   createdAt: Date;
   lastActive: Date;
 }
@@ -467,7 +473,7 @@ export interface TutorialHint {
 
 export interface MissionProgress {
   questId: string;
-  status: 'locked' | 'in-progress' | 'completed';
+  status: 'active' | 'completed' | 'locked';
   attempts: number;
   hintsUsed: number;
   completedAt?: Date;
@@ -486,34 +492,38 @@ export interface LeaderboardEntry {
 // ============================================================================
 
 export const XP_LEVELS = {
-  1: { name: 'Squire',  minXP: 0,   maxXP: 99  },
-  2: { name: 'Knight',  minXP: 100, maxXP: 299 },
-  3: { name: 'Duke',    minXP: 300, maxXP: 599 },
-  4: { name: 'Lord',    minXP: 600, maxXP: Infinity },
+  1: { name: 'Squire', minXP: 0,     maxXP: 999   },
+  2: { name: 'Knight', minXP: 1000,  maxXP: 3999  },
+  3: { name: 'Lord',   minXP: 4000,  maxXP: 9999  },
+  4: { name: 'Duke',   minXP: 10000, maxXP: 24999 },
+  5: { name: 'King',   minXP: 25000, maxXP: Infinity },
 } as const
 
-export function getLevelName(level: 1 | 2 | 3 | 4): string {
+export function getLevelName(level: 1 | 2 | 3 | 4 | 5): string {
   return XP_LEVELS[level].name
 }
 
 export function getLevelProgress(totalXP: number): number {
-  if (totalXP >= 600) return 100
-  if (totalXP >= 300) return Math.floor(((totalXP - 300) / 300) * 100)
-  if (totalXP >= 100) return Math.floor(((totalXP - 100) / 200) * 100)
-  return Math.floor((totalXP / 100) * 100)
+  if (totalXP >= 25000) return 100
+  if (totalXP >= 10000) return Math.floor(((totalXP - 10000) / 15000) * 100)
+  if (totalXP >= 4000)  return Math.floor(((totalXP - 4000)  / 6000)  * 100)
+  if (totalXP >= 1000)  return Math.floor(((totalXP - 1000)  / 3000)  * 100)
+  return Math.floor((totalXP / 1000) * 100)
 }
 
 export function getXPToNextLevel(totalXP: number): number | null {
-  if (totalXP >= 600) return null
-  if (totalXP >= 300) return 600 - totalXP
-  if (totalXP >= 100) return 300 - totalXP
-  return 100 - totalXP
+  if (totalXP >= 25000) return null
+  if (totalXP >= 10000) return 25000 - totalXP
+  if (totalXP >= 4000)  return 10000 - totalXP
+  if (totalXP >= 1000)  return 4000  - totalXP
+  return 1000 - totalXP
 }
 
-export function calculateLevel(totalXP: number): 1 | 2 | 3 | 4 {
-  if (totalXP >= 600) return 4
-  if (totalXP >= 300) return 3
-  if (totalXP >= 100) return 2
+export function calculateLevel(totalXP: number): 1 | 2 | 3 | 4 | 5 {
+  if (totalXP >= 25000) return 5
+  if (totalXP >= 10000) return 4
+  if (totalXP >= 4000)  return 3
+  if (totalXP >= 1000)  return 2
   return 1
 }
 
@@ -556,7 +566,6 @@ export interface LoginResponse {
 export interface SignupRequest {
   playerName: string;
   secretCode: string;
-  characterType: 'squire' | 'knight' | 'duke' | 'lord';
 }
 
 // ============================================================================
@@ -584,8 +593,62 @@ export interface LayeredGraph {
   height: number;
 }
 
-export interface GraphEdge {
-  from: string;
-  to: string;
-  label?: string;
+// ============================================================================
+// Cyclomatic Complexity
+// ============================================================================
+
+export interface CyclomaticMetrics {
+  score: number;
+  edges: number;
+  nodes: number;
+  rating: 'low' | 'moderate' | 'high' | 'very high';
+  interpretation: string;
+}
+
+// ============================================================================
+// AST Node Types (Phase 2 — matches backend grammar extensions)
+// ============================================================================
+
+export interface FunctionPrototypeNode extends BaseNode {
+  type: 'FunctionPrototype';
+  returnType: string;
+  name: string;
+  params: ParameterNode[];
+}
+
+export interface NewExpressionNode extends BaseNode {
+  type: 'NewExpression';
+  baseType: string;
+  size?: ASTNode;
+}
+
+export interface DeleteStatementNode extends BaseNode {
+  type: 'DeleteStatement';
+  target: string;
+  isArray?: boolean;
+}
+
+export interface RangeBasedForNode extends BaseNode {
+  type: 'RangeBasedFor';
+  varType: string;
+  name: string;
+  range: ASTNode;
+  body: ASTNode[];
+}
+
+export interface TryStatementNode extends BaseNode {
+  type: 'TryStatement';
+  body: ASTNode[];
+  handlers: CatchClauseNode[];
+}
+
+export interface CatchClauseNode extends BaseNode {
+  type: 'CatchClause';
+  param: { type: 'CatchParam'; varType: string; name: string | null } | { type: 'CatchAll' };
+  body: ASTNode[];
+}
+
+export interface ThrowStatementNode extends BaseNode {
+  type: 'ThrowStatement';
+  value?: ASTNode;
 }

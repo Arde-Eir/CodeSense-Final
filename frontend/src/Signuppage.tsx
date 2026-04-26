@@ -1,18 +1,7 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from './components/AuthScreen';
-import type { ExplorerProfile } from './types';
 
-// ── Rank metadata ─────────────────────────────────────────────────────────────
-const RANK_META: Record<
-  ExplorerProfile['characterType'],
-  { icon: string; color: string; desc: string }
-> = {
-  squire: { icon: '🛡️', color: '#8b949e', desc: 'Beginner path' },
-  knight: { icon: '⚔️', color: '#58a6ff', desc: 'Intermediate' },
-  duke:   { icon: '👑', color: '#e3b341', desc: 'Advanced' },
-  lord:   { icon: '🌟', color: '#a371f7', desc: 'Expert' },
-};
 
 // ── Reusable field component ──────────────────────────────────────────────────
 const Field: React.FC<{ label: string; error?: string; children: React.ReactNode }> = ({ label, error, children }) => (
@@ -318,6 +307,7 @@ const DTable: React.FC<{ rows: string[][] }> = ({ rows }) => (
 
 const np: React.CSSProperties = { color: '#8b949e', fontSize: 12, lineHeight: 1.7, margin: '0 0 10px' };
 
+
 // ── Main SignupPage component ─────────────────────────────────────────────────
 export const SignupPage: React.FC = () => {
   const navigate = useNavigate();
@@ -328,7 +318,7 @@ export const SignupPage: React.FC = () => {
     password: '',
     email: '',
     confirmPassword: '',
-    characterType: 'squire' as ExplorerProfile['characterType'],
+    userType: 'student' as 'student' | 'professional',
   });
 
   const [agreedToPrivacy,  setAgreedToPrivacy]  = useState(false);
@@ -336,6 +326,20 @@ export const SignupPage: React.FC = () => {
   const [errors,           setErrors]           = useState<Record<string, string>>({});
   const [isLoading,        setIsLoading]        = useState(false);
   const [focusedField,     setFocusedField]     = useState<string | null>(null);
+
+  // ── Bot-detection: math CAPTCHA + honeypot + timing ─────────────────────────
+  const [captchaQ, setCaptchaQ]         = useState({ a: 0, b: 0 });
+  const [captchaAnswer, setCaptchaAnswer] = useState('');
+  const [honeypot, setHoneypot]         = useState('');  // bots fill this; humans don't
+  const formLoadTime = useRef(Date.now());
+
+  useEffect(() => {
+    setCaptchaQ({
+      a: Math.floor(Math.random() * 9) + 1,
+      b: Math.floor(Math.random() * 9) + 1,
+    });
+    formLoadTime.current = Date.now();
+  }, []);
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const { name, value } = e.target;
@@ -345,8 +349,15 @@ export const SignupPage: React.FC = () => {
 
   const validateForm = (): boolean => {
     const errs: Record<string, string> = {};
+
+    // Bot detection: honeypot field must be empty
+    if (honeypot) { setErrors({ submit: 'Automated signup detected.' }); return false; }
+    // Bot detection: form must take at least 4 seconds to fill
+    if (Date.now() - formLoadTime.current < 4000) { setErrors({ submit: 'Please slow down and fill the form carefully.' }); return false; }
+
     if (!formData.username.trim())             errs.username = 'Player name is required';
-    else if (formData.username.trim().length < 3) errs.username = 'Name must be at least 3 characters';
+    else if (formData.username.trim().length < 3)  errs.username = 'Name must be at least 3 characters';
+    else if (formData.username.trim().length > 50) errs.username = 'Name must be 50 characters or fewer';
     if (!formData.email.trim())                errs.email = 'Email address is required';
     else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(formData.email)) errs.email = 'Please enter a valid email address';
     if (!formData.password)                    errs.password = 'Secret code is required';
@@ -354,29 +365,43 @@ export const SignupPage: React.FC = () => {
     if (!formData.confirmPassword)             errs.confirmPassword = 'Please confirm your code';
     else if (formData.password !== formData.confirmPassword) errs.confirmPassword = 'Codes do not match';
     if (!agreedToPrivacy)                      errs.privacy = 'You must agree to the Data Privacy Policy';
+
+    // Math CAPTCHA
+    const expected = captchaQ.a + captchaQ.b;
+    if (!captchaAnswer.trim())                         errs.captcha = 'Please answer the security question';
+    else if (parseInt(captchaAnswer, 10) !== expected) errs.captcha = 'Incorrect answer — try again';
+
     setErrors(errs);
     return Object.keys(errs).length === 0;
   };
 
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!validateForm()) return;
-    setIsLoading(true);
-    try {
-      await signup(formData.username.trim(), formData.password, formData.email.trim(), formData.characterType);
-      navigate('/welcome');
-    } catch (err: any) {
-      const msg = err?.message ?? '';
-      if      (msg === 'USERNAME_TAKEN') setErrors({ username: 'This player name is already taken — try another.' });
-      else if (msg === 'EMAIL_TAKEN')    setErrors({ email: 'An account with this email already exists.' });
-      else if (msg === 'SIGNUP_FAILED')  setErrors({ submit: 'Sign-up failed. Please try again.' });
-      else                               setErrors({ submit: 'An unexpected error occurred. Please try again.' });
-    } finally {
-      setIsLoading(false);
+const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
+  e.preventDefault();
+  if (!validateForm()) return;
+  setIsLoading(true);
+  
+  try {
+    await signup(
+      formData.username.trim(),
+      formData.password,
+      formData.email.trim(),
+      formData.userType
+    );
+    
+    navigate('/welcome');
+  } catch (err: any) {
+    const msg = err?.message ?? '';
+    // Handle specific errors from DatabaseService
+    if      (msg === 'USERNAME_TAKEN') setErrors({ username: 'This player name is already taken.' });
+    else if (msg === 'EMAIL_TAKEN')    setErrors({ email: 'An account with this email already exists.' });
+    else {
+      // This will now properly display "Database error saving new user" to the user
+      setErrors({ submit: msg || 'An unexpected error occurred. Please try again.' });
     }
-  };
-
-  const characters: ExplorerProfile['characterType'][] = ['squire', 'knight', 'duke', 'lord'];
+  } finally {
+    setIsLoading(false);
+  }
+};
 
   const inputStyle = (name: string, hasError: boolean): React.CSSProperties => ({
     ...getInputStyle(hasError),
@@ -453,38 +478,6 @@ export const SignupPage: React.FC = () => {
                 style={inputStyle('username', !!errors.username)} {...focusProps('username')} />
             </Field>
 
-            {/* Choose Rank */}
-            <Field label="Choose Your Rank">
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
-                {characters.map(type => {
-                  const meta   = RANK_META[type];
-                  const active = formData.characterType === type;
-                  return (
-                    <button key={type} type="button"
-                      onClick={() => setFormData(prev => ({ ...prev, characterType: type }))}
-                      style={{
-                        padding: '10px 12px',
-                        background: active ? `${meta.color}18` : 'rgba(13,17,23,0.6)',
-                        border: `1px solid ${active ? meta.color : '#21262d'}`,
-                        borderRadius: 8, color: active ? meta.color : '#484f58',
-                        fontSize: 11, fontWeight: 700, textTransform: 'uppercase',
-                        letterSpacing: '0.6px', cursor: 'pointer', transition: 'all 0.15s ease',
-                        display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6,
-                        fontFamily: "'IBM Plex Mono', monospace",
-                      }}
-                      onMouseEnter={e => { if (!active) { e.currentTarget.style.borderColor = `${meta.color}66`; e.currentTarget.style.color = meta.color; } }}
-                      onMouseLeave={e => { if (!active) { e.currentTarget.style.borderColor = '#21262d'; e.currentTarget.style.color = '#484f58'; } }}
-                    >
-                      <span>{meta.icon}</span><span>{type}</span>
-                    </button>
-                  );
-                })}
-              </div>
-              <p style={{ color: RANK_META[formData.characterType].color, fontSize: 11, marginTop: 8, fontFamily: "'IBM Plex Mono', monospace", opacity: 0.8 }}>
-                {RANK_META[formData.characterType].icon} {RANK_META[formData.characterType].desc} — you can change this later
-              </p>
-            </Field>
-
             {/* Email */}
             <Field label="Email Address" error={errors.email}>
               <input type="email" name="email" value={formData.email} onChange={handleChange}
@@ -504,6 +497,51 @@ export const SignupPage: React.FC = () => {
               <input type="password" name="confirmPassword" value={formData.confirmPassword} onChange={handleChange}
                 placeholder="Repeat your code" autoComplete="new-password"
                 style={inputStyle('confirmPassword', !!errors.confirmPassword)} {...focusProps('confirmPassword')} />
+            </Field>
+
+            {/* ── Honeypot: invisible to humans, bots auto-fill it ── */}
+            <div style={{ position: 'absolute', left: '-9999px', opacity: 0, pointerEvents: 'none' }} aria-hidden="true">
+              <input
+                type="text" tabIndex={-1} autoComplete="off"
+                value={honeypot} onChange={e => setHoneypot(e.target.value)}
+              />
+            </div>
+
+            {/* User Type */}
+            <Field label="I am a">
+              <div style={{ display: 'flex', gap: 8 }}>
+                {(['student', 'professional'] as const).map(type => {
+                  const active = formData.userType === type;
+                  return (
+                    <button key={type} type="button"
+                      onClick={() => setFormData(prev => ({ ...prev, userType: type }))}
+                      style={{
+                        flex: 1, padding: '10px 12px',
+                        background: active ? 'rgba(76,175,80,0.15)' : 'rgba(13,17,23,0.6)',
+                        border: `1px solid ${active ? '#4caf50' : '#21262d'}`,
+                        borderRadius: 8, color: active ? '#4caf50' : '#484f58',
+                        fontSize: 12, fontWeight: 700, cursor: 'pointer',
+                        textTransform: 'uppercase', letterSpacing: '0.5px',
+                        transition: 'all 0.15s ease',
+                        fontFamily: "'IBM Plex Mono', monospace",
+                      }}
+                    >
+                      {type === 'student' ? '🎓 Student' : '💼 Professional'}
+                    </button>
+                  );
+                })}
+              </div>
+            </Field>
+
+            {/* Math CAPTCHA */}
+            <Field label={`Security Check: What is ${captchaQ.a} + ${captchaQ.b}?`} error={errors.captcha}>
+              <input
+                type="number" inputMode="numeric" value={captchaAnswer}
+                onChange={e => { setCaptchaAnswer(e.target.value); if (errors.captcha) setErrors(p => ({ ...p, captcha: '' })); }}
+                placeholder="Enter the answer"
+                style={inputStyle('captcha', !!errors.captcha)}
+                {...focusProps('captcha')}
+              />
             </Field>
 
             {/* Privacy checkbox */}

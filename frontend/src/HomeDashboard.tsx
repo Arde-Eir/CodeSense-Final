@@ -1,9 +1,38 @@
 // src/HomeDashboard.tsx
-import React, { useEffect, useState, useRef } from 'react';
+import React, { useEffect, useState, useRef, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from './components/AuthScreen';
 import { supabase } from './services/supabase';
 import { getLevelProgress, getXPToNextLevel, getLevelName } from './types'
+import { OnboardingWalkthrough, ONBOARD_KEY } from './components/OnboardingWalkthrough'
+import { PlayerDetailModal } from './components/PlayerDetailModal'
+
+// ── Maintenance Banner ─────────────────────────────────────────────────────────
+const MaintenanceBanner: React.FC<{ message: string; isAdmin: boolean; onDisable?: () => void }> = ({ message, isAdmin, onDisable }) => (
+  <div style={{
+    background: 'linear-gradient(90deg, rgba(180,83,9,0.15), rgba(180,83,9,0.08))',
+    border: '1px solid rgba(180,83,9,0.4)', borderRadius: '10px',
+    padding: '12px 18px', marginBottom: '16px',
+    display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '12px',
+  }}>
+    <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+      <span style={{ fontSize: '18px' }}>🔧</span>
+      <div>
+        <div style={{ color: '#fbbf24', fontSize: '13px', fontWeight: '700' }}>Scheduled Maintenance</div>
+        <div style={{ color: '#d97706', fontSize: '12px', marginTop: '2px' }}>{message}</div>
+      </div>
+    </div>
+    {isAdmin && onDisable && (
+      <button onClick={onDisable} style={{
+        background: 'rgba(251,191,36,0.15)', border: '1px solid rgba(251,191,36,0.4)',
+        color: '#fbbf24', borderRadius: '6px', padding: '5px 12px',
+        fontSize: '11px', fontWeight: '700', cursor: 'pointer', whiteSpace: 'nowrap',
+      }}>
+        Disable Maintenance
+      </button>
+    )}
+  </div>
+)
 
 /* ── Global smooth interaction styles injected once ── */
 const GLOBAL_STYLES = `
@@ -193,11 +222,369 @@ const PRIORITY_CONFIG: Record<Announcement['priority'], { color: string; bg: str
   critical: { color: '#f85149', bg: 'rgba(248,81,73,0.08)',   border: 'rgba(248,81,73,0.25)',   icon: '🚨',  label: 'Critical' },
 }
 
+const NOTIF_SEEN_KEY = 'cs-seen-notifs-v2'
+const NOTIF_DISMISSED_KEY = 'cs-dismissed-notifs-v1'
+
+type NotifKind = 'announcement' | 'quest' | 'achievement' | 'rank' | 'admin'
+
+interface NotifItem {
+  id: string
+  kind: NotifKind
+  icon: string
+  color: string
+  title: string
+  body: string
+  timestamp: string
+  onClick?: () => void
+}
+
+const getSeenIds = (): string[] => {
+  try { return JSON.parse(localStorage.getItem(NOTIF_SEEN_KEY) ?? '[]') } catch { return [] }
+}
+const setSeenIds = (ids: string[]) => {
+  try { localStorage.setItem(NOTIF_SEEN_KEY, JSON.stringify(ids.slice(0, 500))) } catch { /* quota */ }
+}
+const getDismissedIds = (): string[] => {
+  try { return JSON.parse(localStorage.getItem(NOTIF_DISMISSED_KEY) ?? '[]') } catch { return [] }
+}
+const setDismissedIds = (ids: string[]) => {
+  try { localStorage.setItem(NOTIF_DISMISSED_KEY, JSON.stringify(ids.slice(0, 500))) } catch { /* quota */ }
+}
+
+interface Derived {
+  check: (stats: { totalxp: number; sandboxRuns: number; quests: number }) => boolean
+  id: string; icon: string; color: string; title: string; body: string
+}
+
+const XP_MILESTONES: Derived[] = [
+  { id: 'rank:knight', icon: '⚔️', color: '#58a6ff', title: 'Knight rank reached!',   body: 'You\'ve crossed 1,000 XP — you can now display the Knight title.',   check: s => s.totalxp >= 1000 },
+  { id: 'rank:lord',   icon: '🌟', color: '#a371f7', title: 'Lord rank reached!',     body: 'You\'ve crossed 4,000 XP — the Lord title is unlocked.',              check: s => s.totalxp >= 4000 },
+  { id: 'rank:duke',   icon: '👑', color: '#e3b341', title: 'Duke rank reached!',     body: 'You\'ve crossed 10,000 XP — the Duke title is unlocked.',             check: s => s.totalxp >= 10000 },
+  { id: 'rank:king',   icon: '🔱', color: '#ffd700', title: 'KING rank reached!',     body: 'You\'ve crossed 25,000 XP — the highest title in the realm is yours.', check: s => s.totalxp >= 25000 },
+]
+
+const RUN_MILESTONES: Derived[] = [
+  { id: 'ach:run1',   icon: '🔬', color: '#4caf50', title: 'First Analysis',     body: 'You ran your first sandbox analysis. Welcome to the lab.',   check: s => s.sandboxRuns >= 1 },
+  { id: 'ach:run10',  icon: '⚗️', color: '#4caf50', title: 'Lab Regular',         body: 'Ten sandbox analyses completed.',                            check: s => s.sandboxRuns >= 10 },
+  { id: 'ach:run25',  icon: '🧪', color: '#58a6ff', title: 'Code Scientist',     body: 'Twenty-five analyses — you\'re getting serious.',             check: s => s.sandboxRuns >= 25 },
+  { id: 'ach:run50',  icon: '🔭', color: '#a371f7', title: 'Master Analyst',     body: 'Fifty analyses. Epic badge unlocked.',                        check: s => s.sandboxRuns >= 50 },
+]
+
+const QUEST_MILESTONES: Derived[] = [
+  { id: 'ach:q1',  icon: '⚔️', color: '#ffa726', title: 'First Quest',      body: 'Your first campaign quest is complete.',          check: s => s.quests >= 1 },
+  { id: 'ach:q5',  icon: '🛡️', color: '#58a6ff', title: 'Quest Knight',     body: 'Five quests completed — you earned the Rare badge.', check: s => s.quests >= 5 },
+  { id: 'ach:q10', icon: '🏆', color: '#a371f7', title: 'Quest Champion',   body: 'Ten quests — Epic achievement unlocked.',         check: s => s.quests >= 10 },
+]
+
+const NotificationBell: React.FC<{ userId: string | undefined; onViewAllAnnouncements: () => void }> = ({ userId, onViewAllAnnouncements }) => {
+  const navigate = useNavigate()
+  const [items, setItems] = useState<NotifItem[]>([])
+  const [open, setOpen] = useState(false)
+  const [seen, setSeen] = useState<string[]>(() => getSeenIds())
+  const [dismissed, setDismissed] = useState<string[]>(() => getDismissedIds())
+  const bellRef = useRef<HTMLDivElement>(null)
+  const [activeFilter, setActiveFilter] = useState<'all' | NotifKind>('all')
+
+  const refresh = useCallback(async () => {
+    const out: NotifItem[] = []
+
+    const { data: anns } = await supabase
+      .from('announcements')
+      .select('id, title, body, createdat, priority, author, ispinned')
+      .order('ispinned', { ascending: false })
+      .order('createdat', { ascending: false })
+      .limit(10)
+    if (anns) {
+      for (const a of anns as Announcement[]) {
+        const cfg = PRIORITY_CONFIG[a.priority] ?? PRIORITY_CONFIG.info
+        out.push({
+          id: `announcement:${a.id}`, kind: 'announcement',
+          icon: cfg.icon, color: cfg.color,
+          title: a.ispinned ? `📌 ${a.title}` : a.title,
+          body: a.body, timestamp: a.createdat,
+          onClick: onViewAllAnnouncements,
+        })
+      }
+    }
+
+    if (userId) {
+      const { data: quests } = await supabase
+        .from('mission_progress')
+        .select('questid, completedat, hintsused, quests(title)')
+        .eq('userid', userId).eq('status', 'completed')
+        .order('completedat', { ascending: false })
+        .limit(10)
+      for (const q of (quests ?? []) as any[]) {
+        if (!q.completedat) continue
+        const title = Array.isArray(q.quests) ? q.quests[0]?.title : q.quests?.title
+        out.push({
+          id: `quest:${q.questid}:${q.completedat}`, kind: 'quest',
+          icon: '⚔️', color: '#ffa726',
+          title: `Quest completed: ${title ?? 'Unknown'}`,
+          body: q.hintsused > 0 ? `Used ${q.hintsused} hint${q.hintsused > 1 ? 's' : ''}.` : 'No hints used — clean clear 🎯.',
+          timestamp: q.completedat,
+          onClick: () => navigate('/campaign'),
+        })
+      }
+
+      const { data: adminEvents } = await supabase
+        .from('admin_audit_log')
+        .select('id, action, details, created_at')
+        .eq('target_user_id', userId)
+        .order('created_at', { ascending: false })
+        .limit(10)
+      for (const e of (adminEvents ?? []) as any[]) {
+        const meta = ADMIN_ACTION_META[e.action] ?? { icon: '🛡', color: '#58a6ff', title: e.action }
+        out.push({
+          id: `admin:${e.id}`, kind: 'admin',
+          icon: meta.icon, color: meta.color,
+          title: meta.title,
+          body: typeof e.details?.reason === 'string' ? `Reason: ${e.details.reason}` : '—',
+          timestamp: e.created_at,
+          onClick: () => navigate('/profile'),
+        })
+      }
+
+      const { data: profile } = await supabase
+        .from('users').select('totalxp, sandbox_runs').eq('id', userId).maybeSingle()
+      const { count: questCount } = await supabase
+        .from('mission_progress').select('*', { count: 'exact', head: true })
+        .eq('userid', userId).eq('status', 'completed')
+
+      if (profile) {
+        const stats = {
+          totalxp: profile.totalxp ?? 0,
+          sandboxRuns: profile.sandbox_runs ?? 0,
+          quests: questCount ?? 0,
+        }
+        const now = new Date().toISOString()
+        for (const m of [...XP_MILESTONES, ...RUN_MILESTONES, ...QUEST_MILESTONES]) {
+          if (!m.check(stats)) continue
+          out.push({
+            id: m.id, kind: m.id.startsWith('rank:') ? 'rank' : 'achievement',
+            icon: m.icon, color: m.color,
+            title: m.title, body: m.body,
+            timestamp: now,
+            onClick: () => navigate('/profile'),
+          })
+        }
+      }
+    }
+
+    const dismissedSet = new Set(getDismissedIds())
+    const visible = out.filter(n => !dismissedSet.has(n.id))
+    visible.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime())
+    setItems(visible.slice(0, 25))
+  }, [userId, navigate, onViewAllAnnouncements])
+
+  useEffect(() => {
+    refresh()
+    const channel = supabase.channel('notif-bell-realtime')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'announcements' }, () => refresh())
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'mission_progress' }, () => refresh())
+      .subscribe()
+    const poll = setInterval(refresh, 90_000)
+    return () => { supabase.removeChannel(channel); clearInterval(poll) }
+  }, [refresh])
+
+  useEffect(() => {
+    const onClick = (e: MouseEvent) => {
+      if (bellRef.current && !bellRef.current.contains(e.target as Node)) setOpen(false)
+    }
+    document.addEventListener('mousedown', onClick)
+    return () => document.removeEventListener('mousedown', onClick)
+  }, [])
+
+  const filtered = activeFilter === 'all' ? items : items.filter(i => i.kind === activeFilter)
+  const unread = items.filter(i => !seen.includes(i.id))
+  const unreadCount = Math.min(unread.length, 99)
+
+  const toggle = () => setOpen(o => !o)
+
+  const markAllRead = () => {
+    const merged = Array.from(new Set([...seen, ...items.map(i => i.id)]))
+    setSeen(merged); setSeenIds(merged)
+  }
+
+  const clearRead = () => {
+    const readIds = items.filter(i => seen.includes(i.id)).map(i => i.id)
+    if (readIds.length === 0) return
+    const mergedDismissed = Array.from(new Set([...dismissed, ...readIds]))
+    setDismissed(mergedDismissed); setDismissedIds(mergedDismissed)
+    setItems(prev => prev.filter(i => !readIds.includes(i.id)))
+  }
+
+  const readCount = items.filter(i => seen.includes(i.id)).length
+  const countByKind = (k: NotifKind) => items.filter(i => i.kind === k).length
+
+  return (
+    <div ref={bellRef} style={{ position: 'relative' }}>
+      <button
+        onClick={toggle}
+        className="cs-icon-btn"
+        style={{
+          background: 'transparent', border: 'none', color: open ? '#e6edf3' : '#8b949e',
+          fontSize: '18px', cursor: 'pointer', padding: '8px',
+          display: 'flex', alignItems: 'center', justifyContent: 'center', position: 'relative',
+        }}
+        aria-label="Notifications"
+      >
+        🔔
+        {unreadCount > 0 && (
+          <span style={{
+            position: 'absolute', top: '3px', right: '2px',
+            minWidth: '16px', height: '16px', padding: '0 4px', boxSizing: 'border-box',
+            borderRadius: '10px', background: '#f85149', color: 'white',
+            fontSize: '10px', fontWeight: '800', lineHeight: '16px', textAlign: 'center',
+            border: '2px solid #161b22', animation: 'pulse 2s ease infinite',
+          }}>{unreadCount}</span>
+        )}
+      </button>
+
+      {open && (
+        <div
+          className="cs-dropdown"
+          style={{
+            position: 'absolute', top: 'calc(100% + 10px)', right: 0,
+            background: '#161b22', border: '1px solid #30363d', borderRadius: '14px',
+            minWidth: '380px', maxWidth: '420px', maxHeight: '540px', overflow: 'hidden',
+            boxShadow: '0 20px 50px rgba(0,0,0,0.6)', zIndex: 1000,
+            display: 'flex', flexDirection: 'column',
+            animation: 'fadeSlideDown 0.18s ease',
+          }}
+        >
+          <div style={{ padding: '14px 16px 10px', borderBottom: '1px solid #21262d' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10, gap: 8 }}>
+              <div style={{ color: '#e6edf3', fontSize: '13px', fontWeight: '700' }}>
+                🔔 Inbox{unread.length > 0 ? ` · ${unread.length} new` : ''}
+              </div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                {unread.length > 0 && (
+                  <button onClick={markAllRead}
+                    style={{ background: 'transparent', border: 'none', color: '#8b949e', fontSize: '10px', cursor: 'pointer', padding: 0, textDecoration: 'underline' }}>
+                    Mark all read
+                  </button>
+                )}
+                {readCount > 0 && (
+                  <button onClick={clearRead}
+                    title="Remove read notifications to free up space"
+                    style={{ background: 'transparent', border: 'none', color: '#f85149', fontSize: '10px', cursor: 'pointer', padding: 0, textDecoration: 'underline' }}>
+                    Clear read ({readCount})
+                  </button>
+                )}
+              </div>
+            </div>
+            <div style={{ display: 'flex', gap: 4, overflowX: 'auto', scrollbarWidth: 'none' }}>
+              {[
+                { key: 'all',          label: 'All',          count: items.length },
+                { key: 'announcement', label: '📢',           count: countByKind('announcement') },
+                { key: 'quest',        label: '⚔️ Quests',    count: countByKind('quest') },
+                { key: 'achievement',  label: '🏅 Badges',    count: countByKind('achievement') },
+                { key: 'rank',         label: '👑 Ranks',     count: countByKind('rank') },
+                { key: 'admin',        label: '🛡 Admin',    count: countByKind('admin') },
+              ].map(f => {
+                const active = activeFilter === f.key
+                return (
+                  <button
+                    key={f.key}
+                    onClick={() => setActiveFilter(f.key as any)}
+                    disabled={f.count === 0 && f.key !== 'all'}
+                    style={{
+                      background: active ? 'rgba(88,166,255,0.15)' : 'transparent',
+                      border: `1px solid ${active ? 'rgba(88,166,255,0.4)' : '#21262d'}`,
+                      color: active ? '#58a6ff' : f.count === 0 && f.key !== 'all' ? '#30363d' : '#8b949e',
+                      padding: '3px 8px', borderRadius: 8, fontSize: 10, fontWeight: 700,
+                      cursor: f.count === 0 && f.key !== 'all' ? 'not-allowed' : 'pointer',
+                      whiteSpace: 'nowrap', flexShrink: 0,
+                    }}
+                  >
+                    {f.label}{f.count > 0 && ` ${f.count}`}
+                  </button>
+                )
+              })}
+            </div>
+          </div>
+
+          <div style={{ overflowY: 'auto', flex: 1 }}>
+            {filtered.length === 0 ? (
+              <div style={{ padding: '36px 20px', textAlign: 'center', color: '#484f58' }}>
+                <div style={{ fontSize: '32px', marginBottom: '8px' }}>📭</div>
+                <div style={{ fontSize: '12px' }}>
+                  {activeFilter === 'all' ? 'No notifications yet' : `Nothing in ${activeFilter}`}
+                </div>
+              </div>
+            ) : (
+              filtered.map(n => {
+                const isUnread = !seen.includes(n.id)
+                return (
+                  <button
+                    key={n.id}
+                    onClick={() => { setOpen(false); n.onClick?.() }}
+                    className="cs-menu-item"
+                    style={{
+                      width: '100%', background: isUnread ? `${n.color}0A` : 'transparent',
+                      border: 'none', borderBottom: '1px solid #21262d',
+                      padding: '12px 16px', cursor: 'pointer', textAlign: 'left',
+                      display: 'flex', gap: '10px', alignItems: 'flex-start',
+                      borderLeft: `3px solid ${isUnread ? n.color : 'transparent'}`,
+                    }}
+                  >
+                    <span style={{ fontSize: '18px', flexShrink: 0, marginTop: '1px' }}>{n.icon}</span>
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ color: '#e6edf3', fontSize: '13px', fontWeight: isUnread ? '700' : '500', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                        {n.title}
+                      </div>
+                      <div style={{ color: '#8b949e', fontSize: '11px', lineHeight: 1.4, overflow: 'hidden', textOverflow: 'ellipsis', display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', marginTop: 2 }}>
+                        {n.body}
+                      </div>
+                      <div style={{ color: n.color, fontSize: '10px', marginTop: '4px', fontWeight: 600, letterSpacing: 0.3 }}>
+                        {n.kind.toUpperCase()} · {timeAgo(n.timestamp)}
+                      </div>
+                    </div>
+                  </button>
+                )
+              })
+            )}
+          </div>
+
+          <button
+            onClick={() => { setOpen(false); onViewAllAnnouncements() }}
+            style={{
+              borderTop: '1px solid #21262d', background: 'transparent', border: 'none',
+              color: '#58a6ff', padding: '12px', fontSize: '12px', fontWeight: '600',
+              cursor: 'pointer', textAlign: 'center',
+            }}
+          >
+            View full announcement history →
+          </button>
+        </div>
+      )}
+    </div>
+  )
+}
+
+const timeAgo = (iso: string) => {
+  const mins = Math.floor((Date.now() - new Date(iso).getTime()) / 60000)
+  if (mins < 1)    return 'just now'
+  if (mins < 60)   return `${mins}m ago`
+  if (mins < 1440) return `${Math.floor(mins / 60)}h ago`
+  return `${Math.floor(mins / 1440)}d ago`
+}
+
+const ADMIN_ACTION_META: Record<string, { icon: string; color: string; title: string }> = {
+  ban:           { icon: '🚫', color: '#f85149', title: 'Your account was banned' },
+  unban:         { icon: '✅', color: '#4caf50', title: 'Your account was unbanned' },
+  grant_admin:   { icon: '🛡', color: '#a371f7', title: 'You were granted admin access' },
+  revoke_admin:  { icon: '🔓', color: '#8b949e', title: 'Your admin access was revoked' },
+  impersonate:   { icon: '👁️', color: '#e3b341', title: 'An admin previewed your account' },
+}
+
 /* ── Announcements Modal ── */
 const AnnouncementsModal: React.FC<{ onClose: () => void }> = ({ onClose }) => {
   const [announcements, setAnnouncements] = useState<Announcement[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+  const mountTime = useRef(Date.now())
 
   useEffect(() => {
     const fetchAnnouncements = async () => {
@@ -218,7 +605,6 @@ const AnnouncementsModal: React.FC<{ onClose: () => void }> = ({ onClose }) => {
     fetchAnnouncements()
   }, [])
 
-  // Close on Escape
   useEffect(() => {
     const handler = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose() }
     document.addEventListener('keydown', handler)
@@ -232,7 +618,10 @@ const AnnouncementsModal: React.FC<{ onClose: () => void }> = ({ onClose }) => {
 
   return (
     <div
-      onClick={onClose}
+      onMouseDown={(e) => {
+        if (Date.now() - mountTime.current < 200) return
+        if (e.target === e.currentTarget) onClose()
+      }}
       style={{
         position: 'fixed', inset: 0, zIndex: 2000,
         background: 'rgba(0,0,0,0.7)', backdropFilter: 'blur(6px)',
@@ -241,7 +630,6 @@ const AnnouncementsModal: React.FC<{ onClose: () => void }> = ({ onClose }) => {
       }}
     >
       <div
-        onClick={e => e.stopPropagation()}
         style={{
           width: '100%', maxWidth: '560px', margin: '20px',
           background: '#0d1117',
@@ -255,7 +643,6 @@ const AnnouncementsModal: React.FC<{ onClose: () => void }> = ({ onClose }) => {
           flexDirection: 'column',
         }}
       >
-        {/* Header */}
         <div style={{
           display: 'flex', alignItems: 'center', justifyContent: 'space-between',
           padding: '20px 24px',
@@ -286,7 +673,6 @@ const AnnouncementsModal: React.FC<{ onClose: () => void }> = ({ onClose }) => {
           >✕</button>
         </div>
 
-        {/* Body */}
         <div style={{ overflowY: 'auto', flex: 1, padding: '16px 24px' }}>
           {loading && (
             <div style={{ padding: '40px 0', textAlign: 'center' }}>
@@ -326,7 +712,6 @@ const AnnouncementsModal: React.FC<{ onClose: () => void }> = ({ onClose }) => {
                       position: 'relative',
                     }}
                   >
-                    {/* Pinned indicator */}
                     {ann.ispinned && (
                       <div style={{
                         position: 'absolute', top: '10px', right: '12px',
@@ -337,7 +722,6 @@ const AnnouncementsModal: React.FC<{ onClose: () => void }> = ({ onClose }) => {
                       }}>📌 PINNED</div>
                     )}
 
-                    {/* Priority badge + title */}
                     <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '8px', paddingRight: ann.ispinned ? '80px' : '0' }}>
                       <span style={{ fontSize: '15px' }}>{cfg.icon}</span>
                       <span style={{
@@ -349,13 +733,11 @@ const AnnouncementsModal: React.FC<{ onClose: () => void }> = ({ onClose }) => {
                       <span style={{ color: '#e6edf3', fontSize: '14px', fontWeight: '600' }}>{ann.title}</span>
                     </div>
 
-                    {/* Body */}
                     <p style={{
                       color: '#8b949e', fontSize: '13px', lineHeight: '1.65',
                       margin: '0 0 10px 0', whiteSpace: 'pre-wrap',
                     }}>{ann.body}</p>
 
-                    {/* Footer */}
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                       <span style={{ color: '#484f58', fontSize: '11px' }}>
                         By <span style={{ color: '#8b949e', fontWeight: '600' }}>{ann.author}</span>
@@ -369,7 +751,6 @@ const AnnouncementsModal: React.FC<{ onClose: () => void }> = ({ onClose }) => {
           )}
         </div>
 
-        {/* Footer */}
         <div style={{
           padding: '14px 24px',
           borderTop: '1px solid #21262d',
@@ -402,9 +783,264 @@ interface DashboardStats {
   levelProgress: number
 }
 
+const MAX_SEARCH_LENGTH = 100
+
+function sanitizeSearchQuery(q: string): string {
+  return q.slice(0, MAX_SEARCH_LENGTH).trim()
+}
+
+const RANK_ICONS: Record<string, { icon: string; color: string }> = {
+  Squire: { icon: '🛡️', color: '#8b949e' },
+  Knight: { icon: '⚔️', color: '#58a6ff' },
+  Lord:   { icon: '🌟', color: '#a371f7' },
+  Duke:   { icon: '👑', color: '#e3b341' },
+  King:   { icon: '🔱', color: '#ffd700' },
+}
+
+const MOTIVATIONAL_QUOTES = [
+  'Every bug you catch is a lesson the compiler never taught.',
+  'Deterministic code rewards patience — patience rewards mastery.',
+  'The best programmers read more than they write. Open that CFG.',
+  'Small, safe steps beat big, clever leaps. Iterate.',
+  'A quiet rule engine is the loudest compliment to your code.',
+  'Clarity today, velocity tomorrow.',
+  'Your future self will thank you for that extra comment.',
+  'Debug like a detective — follow the control flow.',
+]
+
+function useRotatingIndex(max: number, intervalMs: number): number {
+  const [idx, setIdx] = useState(0)
+  useEffect(() => {
+    const t = setInterval(() => setIdx(i => (i + 1) % max), intervalMs)
+    return () => clearInterval(t)
+  }, [max, intervalMs])
+  return idx
+}
+
+function timeBasedGreeting(): { label: string; emoji: string } {
+  const h = new Date().getHours()
+  if (h < 5)  return { label: 'Burning the midnight oil',      emoji: '🌙' }
+  if (h < 12) return { label: 'Good morning',                 emoji: '☀️' }
+  if (h < 17) return { label: 'Good afternoon',               emoji: '🌤' }
+  if (h < 21) return { label: 'Good evening',                 emoji: '🌇' }
+  return       { label: 'Good night',                          emoji: '🌙' }
+}
+
+const LiveClock: React.FC = () => {
+  const [now, setNow] = useState(new Date())
+  useEffect(() => {
+    const t = setInterval(() => setNow(new Date()), 30_000)
+    return () => clearInterval(t)
+  }, [])
+  return (
+    <>{now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</>
+  )
+}
+
+interface HeroProps {
+  isGuest: boolean
+  playerName: string
+  rankName: string
+  levelProgress: number
+  xpToNextLevel: number | null
+  totalXP: number
+  currentLevel: number
+}
+
+const AnimatedHero: React.FC<HeroProps> = ({
+  isGuest, playerName, rankName, levelProgress, xpToNextLevel, totalXP, currentLevel,
+}) => {
+  const rank = RANK_ICONS[rankName] ?? RANK_ICONS.Squire
+  const greet = timeBasedGreeting()
+  const quoteIdx = useRotatingIndex(MOTIVATIONAL_QUOTES.length, 7000)
+  const heroRef = useRef<HTMLDivElement>(null)
+  const [tilt, setTilt] = useState<{ rx: number; ry: number }>({ rx: 0, ry: 0 })
+
+  const onMouseMove = (e: React.MouseEvent<HTMLDivElement>) => {
+    const el = heroRef.current
+    if (!el) return
+    const r = el.getBoundingClientRect()
+    const x = (e.clientX - r.left) / r.width
+    const y = (e.clientY - r.top)  / r.height
+    setTilt({ ry: (x - 0.5) * 12, rx: (0.5 - y) * 8 })
+  }
+  const onMouseLeave = () => setTilt({ rx: 0, ry: 0 })
+
+  const R = 38, C = 2 * Math.PI * R
+  const dash = (levelProgress / 100) * C
+
+  return (
+    <div
+      ref={heroRef}
+      onMouseMove={onMouseMove}
+      onMouseLeave={onMouseLeave}
+      style={{
+        position: 'relative', overflow: 'hidden',
+        borderRadius: 16, padding: '36px 32px',
+        border: '1px solid #30363d',
+        background: 'linear-gradient(135deg, rgba(22,27,34,0.95) 0%, rgba(30,36,47,0.95) 100%)',
+        transform: `perspective(1000px) rotateX(${tilt.rx}deg) rotateY(${tilt.ry}deg)`,
+        transition: 'transform 0.18s ease, box-shadow 0.3s ease',
+        boxShadow: '0 10px 40px rgba(0,0,0,0.35)',
+        flex: 1, display: 'flex', flexDirection: 'column', justifyContent: 'center',
+        minHeight: 380,
+      }}
+    >
+      <div className="hero-stars" />
+      <div className="hero-orb"   style={{ background: `radial-gradient(circle, ${rank.color}22 0%, transparent 70%)` }} />
+      <div className="hero-orb-2" style={{ background: `radial-gradient(circle, rgba(76,175,80,0.18) 0%, transparent 70%)` }} />
+      <div className="hero-grid" />
+
+      <style>{`
+        @keyframes heroFloat      { 0%,100% { transform: translateY(0) rotate(-4deg); } 50% { transform: translateY(-10px) rotate(6deg); } }
+        @keyframes heroPulse      { 0%,100% { transform: scale(1); box-shadow: 0 0 0 0 ${rank.color}66; } 50% { transform: scale(1.06); box-shadow: 0 0 0 10px ${rank.color}00; } }
+        @keyframes heroStarDrift  { from { transform: translate3d(0,0,0); } to { transform: translate3d(-200px,-120px,0); } }
+        @keyframes heroOrbSpin    { from { transform: rotate(0deg) translateX(80px) rotate(0deg); } to { transform: rotate(360deg) translateX(80px) rotate(-360deg); } }
+        @keyframes heroOrbSpin2   { from { transform: rotate(360deg) translateX(60px) rotate(-360deg); } to { transform: rotate(0deg) translateX(60px) rotate(0deg); } }
+        @keyframes heroGradShift  { 0%,100% { background-position: 0% 50%; } 50% { background-position: 100% 50%; } }
+        @keyframes heroGlow       { 0%,100% { filter: drop-shadow(0 0 8px ${rank.color}88); } 50% { filter: drop-shadow(0 0 22px ${rank.color}); } }
+        @keyframes heroQuoteFade  { 0% { opacity: 0; transform: translateY(6px); } 10%,90% { opacity: 1; transform: translateY(0); } 100% { opacity: 0; transform: translateY(-6px); } }
+        @keyframes heroCountUp    { from { opacity: 0; transform: scale(0.85); } to { opacity: 1; transform: scale(1); } }
+        @keyframes heroRingFill   { from { stroke-dashoffset: ${C}; } to { stroke-dashoffset: ${C - dash}; } }
+
+        .hero-stars {
+          position: absolute; inset: -100px;
+          background-image:
+            radial-gradient(1px 1px at 20px 30px, rgba(255,255,255,0.6), transparent),
+            radial-gradient(1px 1px at 60px 80px, rgba(255,255,255,0.4), transparent),
+            radial-gradient(2px 2px at 120px 120px, rgba(100,181,246,0.6), transparent),
+            radial-gradient(1px 1px at 180px 50px, rgba(255,255,255,0.55), transparent),
+            radial-gradient(1px 1px at 240px 180px, rgba(76,175,80,0.5), transparent),
+            radial-gradient(2px 2px at 300px 100px, rgba(255,193,7,0.45), transparent),
+            radial-gradient(1px 1px at 380px 220px, rgba(255,255,255,0.5), transparent);
+          background-repeat: repeat;
+          background-size: 400px 240px;
+          animation: heroStarDrift 30s linear infinite;
+          opacity: 0.55;
+          pointer-events: none;
+        }
+        .hero-grid {
+          position: absolute; inset: 0;
+          background-image:
+            linear-gradient(rgba(255,255,255,0.04) 1px, transparent 1px),
+            linear-gradient(90deg, rgba(255,255,255,0.04) 1px, transparent 1px);
+          background-size: 44px 44px;
+          mask-image: radial-gradient(ellipse at center, black 30%, transparent 70%);
+          pointer-events: none;
+        }
+        .hero-orb {
+          position: absolute; width: 240px; height: 240px; border-radius: 50%;
+          top: 10%; left: 70%; pointer-events: none;
+          animation: heroOrbSpin 20s linear infinite;
+          filter: blur(10px);
+        }
+        .hero-orb-2 {
+          position: absolute; width: 180px; height: 180px; border-radius: 50%;
+          bottom: 5%; left: 10%; pointer-events: none;
+          animation: heroOrbSpin2 26s linear infinite;
+          filter: blur(8px);
+        }
+        .hero-name {
+          font-size: 34px; font-weight: 800; margin: 0;
+          background: linear-gradient(90deg, #64b5f6, ${rank.color}, #4caf50, #64b5f6);
+          background-size: 300% 100%;
+          -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+          background-clip: text;
+          animation: heroGradShift 8s ease-in-out infinite;
+          letter-spacing: -0.5px;
+        }
+        .hero-rank-badge {
+          display: inline-flex; align-items: center; gap: 6px;
+          padding: 3px 10px; border-radius: 20px;
+          background: ${rank.color}1A; border: 1px solid ${rank.color}55;
+          color: ${rank.color}; font-size: 12px; font-weight: 800;
+          letter-spacing: 0.4px; animation: heroPulse 3s ease-in-out infinite;
+        }
+        .hero-rocket  { animation: heroFloat 4s ease-in-out infinite, heroGlow 3s ease-in-out infinite; transition: transform 0.2s; cursor: default; }
+        .hero-rocket:hover { animation: none; transform: scale(1.18) rotate(12deg); }
+        .hero-quote { animation: heroQuoteFade 7s ease-in-out; }
+        .hero-stat-chip {
+          display: inline-flex; align-items: center; gap: 6px;
+          padding: 6px 12px; border-radius: 10px;
+          background: rgba(255,255,255,0.04); border: 1px solid #30363d;
+          font-size: 11px; color: #8b949e; font-weight: 600;
+          transition: all 0.15s;
+          animation: heroCountUp 0.5s ease both;
+        }
+        .hero-stat-chip:hover {
+          background: rgba(255,255,255,0.08); transform: translateY(-2px);
+          border-color: ${rank.color}55; color: #e6edf3;
+        }
+      `}</style>
+
+      <div style={{ position: 'relative', zIndex: 1, textAlign: 'center' }}>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8, marginBottom: 12, color: '#8b949e', fontSize: 13, fontWeight: 600, letterSpacing: 0.3 }}>
+          <span>{greet.emoji}</span>
+          <span>{greet.label} · <LiveClock /></span>
+        </div>
+
+        <div className="hero-rocket" style={{ fontSize: 54, marginBottom: 14, display: 'inline-block' }}>🚀</div>
+
+        <h2 className="hero-name">
+          {isGuest ? 'Welcome, Guest!' : `Welcome back, ${playerName}!`}
+        </h2>
+
+        {!isGuest && (
+          <div style={{ marginTop: 10, display: 'flex', justifyContent: 'center', gap: 8, flexWrap: 'wrap' }}>
+            <span className="hero-rank-badge">
+              {rank.icon} {rankName}
+            </span>
+          </div>
+        )}
+
+        <p className="hero-quote" key={quoteIdx} style={{
+          color: '#c9d1d9', fontSize: 14, margin: '18px auto 22px',
+          maxWidth: 420, lineHeight: 1.55, minHeight: 44, fontStyle: 'italic',
+        }}>
+          {isGuest
+            ? 'Explore the sandbox freely. Sign up to save your progress!'
+            : `"${MOTIVATIONAL_QUOTES[quoteIdx]}"`}
+        </p>
+
+        {!isGuest && (
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 18, marginBottom: 18 }}>
+            <div style={{ position: 'relative', width: 90, height: 90 }}>
+              <svg width={90} height={90} style={{ transform: 'rotate(-90deg)' }}>
+                <circle cx={45} cy={45} r={R} fill="none" stroke="rgba(255,255,255,0.06)" strokeWidth={6} />
+                <circle cx={45} cy={45} r={R} fill="none" stroke={rank.color} strokeWidth={6}
+                  strokeDasharray={`${C} ${C}`} strokeDashoffset={C - dash} strokeLinecap="round"
+                  style={{ animation: 'heroRingFill 1.2s cubic-bezier(0.4,0,0.2,1) forwards' }} />
+              </svg>
+              <div style={{
+                position: 'absolute', inset: 0, display: 'flex',
+                flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
+              }}>
+                <div style={{ color: rank.color, fontSize: 18, fontWeight: 800 }}>{levelProgress}%</div>
+                <div style={{ color: '#8b949e', fontSize: 9, letterSpacing: 0.5, textTransform: 'uppercase' }}>to Lv{Math.min(currentLevel + 1, 5)}</div>
+              </div>
+            </div>
+
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 6, alignItems: 'flex-start' }}>
+              <span className="hero-stat-chip" style={{ animationDelay: '0.1s' }}>
+                ⭐ <b style={{ color: '#ffc107' }}>{totalXP.toLocaleString()}</b>&nbsp;XP
+              </span>
+              <span className="hero-stat-chip" style={{ animationDelay: '0.2s' }}>
+                {rank.icon} Level&nbsp;<b style={{ color: rank.color }}>{currentLevel}</b>
+              </span>
+              <span className="hero-stat-chip" style={{ animationDelay: '0.3s' }}>
+                🎯 {xpToNextLevel === null ? 'Max rank' : <><b style={{ color: '#4caf50' }}>{xpToNextLevel.toLocaleString()}</b>&nbsp;to next</>}
+              </span>
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  )
+}
+
 export const HomeDashboard: React.FC = () => {
   const navigate = useNavigate();
-  const { user, isGuest, logout } = useAuth();
+  const { user, isGuest, logout, isAdmin, maintenanceMode, maintenanceMessage, refreshMaintenanceMode } = useAuth();
 
   const [stats, setStats] = useState<DashboardStats>({ sandboxRuns: 0, questsCompleted: 0, xpToNextLevel: null, levelProgress: 0 })
   const [statsLoading, setStatsLoading] = useState(true)
@@ -414,8 +1050,10 @@ export const HomeDashboard: React.FC = () => {
   const [profileMenuOpen, setProfileMenuOpen] = useState(false)
   const profileMenuRef = useRef<HTMLDivElement>(null)
 
-  // ── NEW: announcements modal state ──
   const [announcementsOpen, setAnnouncementsOpen] = useState(false)
+  const [lastSnippet, setLastSnippet] = useState<{ sourcecode: string; createdat: string } | null>(null)
+  const [showOnboarding, setShowOnboarding] = useState(false)
+  const [peekUserId, setPeekUserId] = useState<string | null>(null)
 
   const [searchQuery, setSearchQuery] = useState('')
   const [searchOpen, setSearchOpen] = useState(false)
@@ -448,8 +1086,17 @@ export const HomeDashboard: React.FC = () => {
   }, [user?.id])
 
   useEffect(() => {
+    if (!user || isGuest) return
+    try {
+      if (localStorage.getItem(ONBOARD_KEY) !== 'done') {
+        const t = setTimeout(() => setShowOnboarding(true), 600)
+        return () => clearTimeout(t)
+      }
+    } catch { /* localStorage unavailable */ }
+  }, [user?.id, isGuest])
+
+  useEffect(() => {
     const handler = (e: MouseEvent) => {
-      if (profileMenuRef.current && !profileMenuRef.current.contains(e.target as Node)) setProfileMenuOpen(false)
       if (searchRef.current && !searchRef.current.contains(e.target as Node)) setSearchOpen(false)
     }
     document.addEventListener('mousedown', handler)
@@ -459,7 +1106,7 @@ export const HomeDashboard: React.FC = () => {
   useEffect(() => {
     if (!searchQuery.trim()) { setSearchResults({ actions: [], players: [], quests: [], reports: [] }); setSearchOpen(false); return }
     setSearchOpen(true)
-    const timer = setTimeout(() => runSearch(searchQuery.trim()), 300)
+    const timer = setTimeout(() => runSearch(sanitizeSearchQuery(searchQuery)), 300)
     return () => clearTimeout(timer)
   }, [searchQuery])
 
@@ -478,11 +1125,9 @@ export const HomeDashboard: React.FC = () => {
     { label: 'System Announcements', icon: '📢', desc: 'View latest updates and notices',  path: '',          keywords: ['announcement','announcements','news','update','notice','system'] },
   ]
 
-  // ── FIX (Issue #6): AbortController ref — cancels stale search requests ──
   const searchAbortRef = useRef<AbortController | null>(null)
 
   const runSearch = async (q: string) => {
-    // Cancel any in-flight request before starting a new one
     if (searchAbortRef.current) searchAbortRef.current.abort()
     const controller = new AbortController()
     searchAbortRef.current = controller
@@ -509,16 +1154,16 @@ export const HomeDashboard: React.FC = () => {
         ;[...((byMode as any).data ?? []), ...((byCode as any).data ?? [])].forEach((r: any) => rm.set(r.id, r))
         reportsData = Array.from(rm.values()).slice(0, 5)
       }
-      // Include announcements action if search matches
       const matchedActions = QUICK_ACTIONS.filter(a =>
         a.keywords.some(k => k.includes(ql) || ql.includes(k)) || a.label.toLowerCase().includes(ql)
       )
-      setSearchResults({ actions: matchedActions, players: players ?? [], quests: Array.from(questMap.values()).slice(0, 5), reports: reportsData })
+
+      if (searchAbortRef.current === controller) {
+        setSearchResults({ actions: matchedActions, players: players ?? [], quests: Array.from(questMap.values()).slice(0, 5), reports: reportsData })
+      }
     } catch (e: any) {
-      // AbortError is expected when a newer search supersedes this one
       if (e?.name !== 'AbortError') console.error('Search error:', e)
     } finally {
-      // Only clear loading if this is still the active controller
       if (searchAbortRef.current === controller) setSearchLoading(false)
     }
   }
@@ -539,30 +1184,55 @@ export const HomeDashboard: React.FC = () => {
     } catch (e) { console.error('Leaderboard fetch error:', e) }
   }
 
+  const fetchAvatar = async (cancelled?: { current: boolean }) => {
+    if (!user?.id) return
+    try {
+      const { data: avatarFiles } = await supabase.storage.from('Avatars').list(user.id, { limit: 1 })
+      if (cancelled?.current) return
+      if (avatarFiles && avatarFiles.length > 0) {
+        const { data: urlData } = supabase.storage.from('Avatars').getPublicUrl(`${user.id}/${avatarFiles[0].name}`)
+        if (!cancelled?.current) setAvatarUrl(urlData.publicUrl)
+      }
+    } catch (e) { console.error('Avatar fetch error:', e) }
+  }
+
   const fetchStats = async () => {
     if (!user) return
     try {
       const { data: profile } = await supabase.from('users').select('totalxp, currentlevel, sandbox_runs').eq('id', user.id).single()
-      const { count: questsCompleted } = await supabase.from('mission_progress').select('*', { count: 'exact', head: true }).eq('userid', user.id).eq('status', 'completed')
+      const { count: questsCompleted } = await supabase
+        .from('mission_progress')
+        .select('*', { count: 'exact', head: true })
+        .eq('userid', user.id)
+        .eq('status', 'completed')
       if (profile) setStats({ sandboxRuns: profile.sandbox_runs ?? 0, questsCompleted: questsCompleted ?? 0, xpToNextLevel: getXPToNextLevel(profile.totalxp ?? 0), levelProgress: getLevelProgress(profile.totalxp ?? 0) })
-      const { data: avatarFiles } = await supabase.storage.from('Avatars').list(user.id, { limit: 1 })
-      if (avatarFiles && avatarFiles.length > 0) {
-        const { data: urlData } = supabase.storage.from('Avatars').getPublicUrl(`${user.id}/${avatarFiles[0].name}`)
-        setAvatarUrl(urlData.publicUrl + '?t=' + Date.now())
-      }
+      const { data: snippet } = await supabase
+        .from('reports')
+        .select('sourcecode, createdat')
+        .eq('userid', user.id)
+        .order('createdat', { ascending: false })
+        .limit(1)
+        .maybeSingle()
+      if (snippet?.sourcecode) setLastSnippet({ sourcecode: snippet.sourcecode, createdat: snippet.createdat })
       await fetchLeaderboard()
     } catch (error) { console.error('Failed to fetch stats:', error) }
     finally { setStatsLoading(false) }
   }
+
+  useEffect(() => {
+    if (!user?.id) return
+    const cancelled = { current: false }
+    fetchAvatar(cancelled)
+    return () => { cancelled.current = true }
+  }, [user?.id])
 
   const handleExit = async () => {
     if (isGuest) { sessionStorage.removeItem('guestMode'); navigate('/', { replace: true }) }
     else { logout(); await new Promise(r => setTimeout(r, 50)); navigate('/', { replace: true }) }
   }
 
-  const currentLevelName = user ? getLevelName((user.currentLevel as 1 | 2 | 3 | 4) || 1) : 'Squire'
+  const currentLevelName = user ? getLevelName((user.currentLevel as 1 | 2 | 3 | 4 | 5) || 1) : 'Squire'
 
-  // Handler for search action clicks — announcements open modal, others navigate
   const handleSearchActionClick = (action: Pick<typeof QUICK_ACTIONS[0], 'label' | 'path'>) => {
     setSearchOpen(false)
     setSearchQuery('')
@@ -576,11 +1246,41 @@ export const HomeDashboard: React.FC = () => {
   return (
     <div style={{ minHeight: '100vh', width: '100%', background: 'linear-gradient(135deg, #0d1117 0%, #1a1f2e 100%)', display: 'flex', flexDirection: 'column', alignItems: 'center', paddingBottom: '40px' }}>
 
-      {/* ── ANNOUNCEMENTS MODAL ── */}
       {announcementsOpen && <AnnouncementsModal onClose={() => setAnnouncementsOpen(false)} />}
 
-      {/* ── HEADER ── */}
-      <header style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '16px 32px', background: 'rgba(22,27,34,0.95)', backdropFilter: 'blur(12px)', borderRadius: '14px', margin: '20px 0 30px 0', border: '1px solid #30363d', width: '95%', maxWidth: '1280px', boxSizing: 'border-box', gap: '16px' }}>
+      {/* ── PROFILE MENU BACKDROP — rendered at root level outside all stacking contexts ── */}
+      {profileMenuOpen && (
+        <div
+          onMouseDown={(e) => { e.preventDefault(); setProfileMenuOpen(false); }}
+          style={{ position: 'fixed', inset: 0, zIndex: 998 }}
+        />
+      )}
+
+      {showOnboarding && (
+        <OnboardingWalkthrough
+          isAdmin={isAdmin}
+          onFinish={() => setShowOnboarding(false)}
+        />
+      )}
+      {peekUserId && (
+        <PlayerDetailModal
+          userId={peekUserId}
+          currentUserId={user?.id}
+          onClose={() => setPeekUserId(null)}
+        />
+      )}
+
+      {/* ── HEADER — no backdropFilter so it doesn't create a stacking context ── */}
+      <header style={{
+        display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+        padding: '16px 32px',
+        background: 'rgba(22,27,34,0.95)',
+        borderRadius: '14px', margin: '20px 0 30px 0',
+        border: '1px solid #30363d',
+        width: '95%', maxWidth: '1280px', boxSizing: 'border-box', gap: '16px',
+        position: 'relative',
+        zIndex: 999,
+      }}>
 
         <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexShrink: 0 }}>
           <span style={{ fontSize: '22px' }}>🧠</span>
@@ -595,8 +1295,14 @@ export const HomeDashboard: React.FC = () => {
             <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#484f58" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0 }}>
               <circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/>
             </svg>
-            <input ref={searchInputRef} value={searchQuery} onChange={e => setSearchQuery(e.target.value)} onFocus={() => { if (searchQuery.trim()) setSearchOpen(true) }}
-              placeholder="Search..." style={{ flex: 1, background: 'transparent', border: 'none', outline: 'none', color: '#e6edf3', fontSize: '13px', minWidth: 0 }} />
+            <input
+              ref={searchInputRef}
+              value={searchQuery}
+              onChange={e => setSearchQuery(e.target.value.slice(0, MAX_SEARCH_LENGTH))}
+              onFocus={() => { if (searchQuery.trim()) setSearchOpen(true) }}
+              placeholder="Search..."
+              style={{ flex: 1, background: 'transparent', border: 'none', outline: 'none', color: '#e6edf3', fontSize: '13px', minWidth: 0 }}
+            />
             {searchQuery && (
               <button className="cs-btn" onClick={() => { setSearchQuery(''); setSearchOpen(false) }}
                 style={{ background: 'rgba(255,255,255,0.08)', border: 'none', color: '#8b949e', cursor: 'pointer', fontSize: '11px', padding: '2px 5px', lineHeight: 1, borderRadius: '4px' }}>✕</button>
@@ -631,14 +1337,18 @@ export const HomeDashboard: React.FC = () => {
                 {searchResults.players.length > 0 && (<div>
                   <div style={{ padding: '8px 16px 4px', color: '#8b949e', fontSize: '10px', fontWeight: '700', letterSpacing: '1.5px', textTransform: 'uppercase' }}>Players</div>
                   {searchResults.players.map(p => (
-                    <button key={p.id} className="cs-search-result-btn" onClick={() => { setSearchOpen(false); setSearchQuery(''); navigate('/profile') }}
+                    <button key={p.id} className="cs-search-result-btn" onClick={() => {
+                      setSearchOpen(false); setSearchQuery('');
+                      if (p.id === user?.id) navigate('/profile')
+                      else                   setPeekUserId(p.id)
+                    }}
                       style={{ width: '100%', background: 'transparent', border: 'none', padding: '10px 16px', display: 'flex', alignItems: 'center', gap: '12px', cursor: 'pointer', textAlign: 'left' }}>
                       <div style={{ width: '32px', height: '32px', borderRadius: '50%', background: 'linear-gradient(135deg,#4caf50,#2d7a2d)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
                         <span style={{ color: 'white', fontSize: '13px', fontWeight: '700' }}>{p.playername.charAt(0).toUpperCase()}</span>
                       </div>
                       <div style={{ flex: 1 }}>
                         <div style={{ color: '#e6edf3', fontSize: '13px', fontWeight: '600' }}>{p.playername}</div>
-                        <div style={{ color: '#8b949e', fontSize: '11px' }}>{getLevelName(p.currentlevel as 1|2|3|4)} · {p.totalxp} XP</div>
+                        <div style={{ color: '#8b949e', fontSize: '11px' }}>{getLevelName(p.currentlevel as 1|2|3|4|5)} · {p.totalxp} XP</div>
                       </div>
                       <span style={{ color: '#484f58', fontSize: '11px' }}>👤</span>
                     </button>
@@ -692,16 +1402,25 @@ export const HomeDashboard: React.FC = () => {
 
         {/* Right icons */}
         <div style={{ display: 'flex', gap: '4px', alignItems: 'center', flexShrink: 0 }}>
-          <button className="cs-icon-btn" style={{ background: 'transparent', border: 'none', color: '#8b949e', fontSize: '18px', cursor: 'pointer', padding: '8px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>🔔</button>
+          <NotificationBell userId={user?.id} onViewAllAnnouncements={() => setAnnouncementsOpen(true)} />
 
-          <div ref={profileMenuRef} style={{ position: 'relative' }}>
-            <button className="cs-avatar-btn" onClick={() => setProfileMenuOpen(p => !p)}
-              style={{ background: 'transparent', border: profileMenuOpen ? '2px solid #4caf50' : '2px solid transparent', borderRadius: '50%', cursor: 'pointer', padding: '2px', width: '38px', height: '38px', display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'hidden' }}>
+          <div ref={profileMenuRef} style={{ position: 'relative', zIndex: 1000 }}>
+            <button
+              className="cs-avatar-btn"
+              onMouseDown={(e) => { e.preventDefault(); setProfileMenuOpen(p => !p); }}
+              style={{ background: 'transparent', border: profileMenuOpen ? '2px solid #4caf50' : '2px solid transparent', borderRadius: '50%', cursor: 'pointer', padding: '2px', width: '38px', height: '38px', display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'hidden' }}
+            >
               {avatarUrl ? <img src={avatarUrl} alt="avatar" style={{ width: '30px', height: '30px', borderRadius: '50%', objectFit: 'cover' }} /> : <span style={{ fontSize: '20px' }}>👤</span>}
             </button>
 
             {profileMenuOpen && (
-              <div className="cs-dropdown" style={{ position: 'absolute', top: 'calc(100% + 10px)', right: 0, background: '#161b22', border: '1px solid #30363d', borderRadius: '14px', minWidth: '210px', boxShadow: '0 20px 50px rgba(0,0,0,0.6)', zIndex: 1000, overflow: 'hidden' }}>
+              <div className="cs-dropdown" style={{
+                position: 'absolute', top: 'calc(100% + 10px)', right: 0,
+                background: '#0d1117',
+                border: '1px solid #30363d', borderRadius: '14px', minWidth: '240px',
+                boxShadow: '0 20px 50px rgba(0,0,0,0.95)',
+                zIndex: 1000, overflow: 'hidden',
+              }}>
                 <div style={{ padding: '14px 16px', borderBottom: '1px solid #21262d', display: 'flex', alignItems: 'center', gap: '10px' }}>
                   <div style={{ width: '38px', height: '38px', borderRadius: '50%', overflow: 'hidden', flexShrink: 0, background: avatarUrl ? 'transparent' : 'linear-gradient(135deg,#4caf50,#2d7a2d)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
                     {avatarUrl ? <img src={avatarUrl} alt="avatar" style={{ width: '100%', height: '100%', objectFit: 'cover' }} /> : <span style={{ color: 'white', fontWeight: '700', fontSize: '16px' }}>{user?.playerName?.charAt(0).toUpperCase()}</span>}
@@ -712,15 +1431,44 @@ export const HomeDashboard: React.FC = () => {
                   </div>
                 </div>
                 {[
-                  { icon: '🖼️', label: 'Profile Image',          action: () => { navigate('/profile');  setProfileMenuOpen(false) } },
-                  // ── CHANGED: "Details Information" → "System Announcements" ──
-                  { icon: '📢', label: 'System Announcements',   action: () => { setProfileMenuOpen(false); setAnnouncementsOpen(true) } },
-                  { icon: '📊', label: 'Progress Report',         action: () => { navigate('/progress'); setProfileMenuOpen(false) } },
-                  { icon: 'ℹ️', label: 'About',                  action: () => { navigate('/profile');  setProfileMenuOpen(false) } },
-                ].map(item => (
+                  ...(!isGuest ? [{
+                    icon: '⚡', tint: '#facc15',
+                    label: lastSnippet ? 'Quick Start — Last Snippet' : 'Quick Start — Fresh Sandbox',
+                    sublabel: lastSnippet
+                      ? `Resume ${Math.max(1, Math.floor((Date.now() - new Date(lastSnippet.createdat).getTime()) / 60000))}-min-old analysis`
+                      : 'Open the sandbox with a clean editor',
+                    action: () => {
+                      if (lastSnippet?.sourcecode) {
+                        try { sessionStorage.setItem('cs-sandbox-restore', lastSnippet.sourcecode) } catch { /* quota */ }
+                      }
+                      navigate('/sandbox'); setProfileMenuOpen(false)
+                    },
+                  }] : []),
+                  { icon: '🖼️', tint: '#58a6ff', label: 'Profile Image',         action: () => { navigate('/profile');   setProfileMenuOpen(false) } },
+                  { icon: '📢', tint: '#ffa726', label: 'System Announcements',  action: () => { setProfileMenuOpen(false); setAnnouncementsOpen(true) } },
+                  { icon: '📊', tint: '#3fb950', label: 'Progress Report',        action: () => { navigate('/progress');  setProfileMenuOpen(false) } },
+                  { icon: '🎓', tint: '#a371f7', label: 'Tutorials',              action: () => { navigate('/tutorials'); setProfileMenuOpen(false) } },
+                  { icon: '📘', tint: '#26c6da', label: 'User Manual',            action: () => { navigate('/manual');    setProfileMenuOpen(false) } },
+                  { icon: '🗺️', tint: '#e3b341', label: 'Replay Welcome Tour',    action: () => { setProfileMenuOpen(false); setShowOnboarding(true) } },
+                  ...(isAdmin ? [{ icon: '🛡️', tint: '#f85149', label: 'Admin Panel', action: () => { navigate('/admin'); setProfileMenuOpen(false) } }] : []),
+                ].map((item: any) => (
                   <button key={item.label} className="cs-menu-item" onClick={item.action}
-                    style={{ width: '100%', background: 'transparent', border: 'none', color: '#e6edf3', padding: '11px 16px', fontSize: '13px', cursor: 'pointer', textAlign: 'left', display: 'flex', alignItems: 'center', gap: '10px' }}>
-                    <span style={{ fontSize: '15px' }}>{item.icon}</span>{item.label}
+                    style={{ width: '100%', background: 'transparent', border: 'none', color: '#e6edf3', padding: '10px 14px', fontSize: '13px', cursor: 'pointer', textAlign: 'left', display: 'flex', alignItems: 'center', gap: '12px' }}>
+                    <span style={{
+                      width: 28, height: 28, borderRadius: 8, flexShrink: 0,
+                      display: 'flex', alignItems: 'center', justifyContent: 'center',
+                      fontSize: 14,
+                      background: `${item.tint}1a`,
+                      border: `1px solid ${item.tint}33`,
+                    }}>{item.icon}</span>
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{item.label}</div>
+                      {item.sublabel && (
+                        <div style={{ fontSize: '10px', color: '#8b949e', marginTop: '2px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                          {item.sublabel}
+                        </div>
+                      )}
+                    </div>
                   </button>
                 ))}
                 <div style={{ borderTop: '1px solid #21262d' }}>
@@ -735,47 +1483,179 @@ export const HomeDashboard: React.FC = () => {
         </div>
       </header>
 
+      {/* ── MAINTENANCE BANNER ── */}
+      {maintenanceMode && (
+        <div style={{ width: '95%', maxWidth: '1280px', marginBottom: '0' }}>
+          <MaintenanceBanner
+            message={maintenanceMessage}
+            isAdmin={isAdmin}
+            onDisable={isAdmin ? async () => {
+              await supabase.from('system_settings').upsert({ key: 'maintenance_mode', value: false })
+              await refreshMaintenanceMode()
+            } : undefined}
+          />
+        </div>
+      )}
+
       {/* ── MAIN GRID ── */}
       <div style={{ width: '95%', maxWidth: '1280px', display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '24px', margin: '0 auto', boxSizing: 'border-box', alignItems: 'stretch' }}>
 
         {/* LEFT COLUMN */}
         <div style={{ display: 'flex', flexDirection: 'column', gap: '24px', minWidth: 0, height: '100%' }}>
 
-          {/* Hero */}
-          <div style={{ ...heroSectionStyle, flex: 1 }}>
-            <div style={radialOverlayStyle} />
-            <div style={{ position: 'relative', textAlign: 'center', zIndex: 1, animation: 'fadeSlideUp 0.5s ease' }}>
-              <div style={{ fontSize: '48px', marginBottom: '20px' }}>🚀</div>
-              <h2 style={heroTitleStyle}>{isGuest ? 'Welcome, Guest!' : `Welcome back, ${user?.playerName || 'Explorer'}!`}</h2>
-              <p style={{ color: '#8b949e', fontSize: '16px', margin: 0 }}>
-                {isGuest ? 'Explore the sandbox freely. Sign up to save your progress!' : `Continue your journey to master code safety as a ${currentLevelName}.`}
-              </p>
+          <AnimatedHero
+            isGuest={isGuest}
+            playerName={user?.playerName || 'Explorer'}
+            rankName={currentLevelName}
+            levelProgress={stats.levelProgress}
+            xpToNextLevel={stats.xpToNextLevel}
+            totalXP={user?.totalXP ?? 0}
+            currentLevel={user?.currentLevel ?? 1}
+          />
+
+          <style>{`
+            @keyframes mcShimmer { 0%,100%{opacity:0.35;transform:translateX(-20%)} 50%{opacity:0.6;transform:translateX(20%)} }
+            @keyframes mcPulse   { 0%,100%{transform:scale(1)} 50%{transform:scale(1.08)} }
+            @keyframes mcFloat   { 0%,100%{transform:translateY(0)} 50%{transform:translateY(-4px)} }
+            .mc-card { position:relative; overflow:hidden; cursor:pointer; border-radius:16px; padding:26px 24px; border:2px solid; transition:transform 0.2s ease, box-shadow 0.25s ease, border-color 0.2s ease; }
+            .mc-card:hover { transform:translateY(-5px) scale(1.01); }
+            .mc-card .mc-shimmer { position:absolute; inset:0; background:linear-gradient(120deg, transparent 30%, currentColor 50%, transparent 70%); opacity:0; pointer-events:none; transition:opacity 0.3s; }
+            .mc-card:hover .mc-shimmer { animation:mcShimmer 2s ease-in-out infinite; }
+            .mc-card .mc-emoji { display:inline-block; animation:mcFloat 3s ease-in-out infinite; }
+            .mc-card:hover .mc-emoji { animation:mcPulse 0.8s ease-in-out infinite; }
+            .mc-chip { display:inline-flex; align-items:center; gap:4px; padding:3px 9px; border-radius:12px; font-size:10px; font-weight:700; letter-spacing:0.3px; }
+            .mc-cta { display:inline-flex; align-items:center; gap:6px; padding:9px 18px; border-radius:10px; font-size:12px; font-weight:800; letter-spacing:0.8px; border:none; cursor:pointer; transition:all 0.2s; }
+            .mc-cta:hover:not(:disabled) { transform:translateX(3px); }
+            .mc-cta:disabled { opacity:0.5; cursor:not-allowed; }
+          `}</style>
+
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '20px' }}>
+            {/* ── SANDBOX ── */}
+            <div
+              className="mc-card"
+              onClick={() => navigate('/sandbox')}
+              style={{
+                background: 'linear-gradient(135deg, rgba(76,175,80,0.18) 0%, rgba(76,175,80,0.04) 100%)',
+                borderColor: '#4caf50', color: '#4caf50',
+                boxShadow: '0 0 0 rgba(76,175,80,0)',
+              }}
+              onMouseEnter={e => { e.currentTarget.style.boxShadow = '0 12px 40px rgba(76,175,80,0.25)' }}
+              onMouseLeave={e => { e.currentTarget.style.boxShadow = '0 0 0 rgba(76,175,80,0)' }}
+            >
+              <div className="mc-shimmer" />
+              <div style={{ position: 'relative', zIndex: 1 }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 14 }}>
+                  <span className="mc-emoji" style={{ fontSize: 40 }}>🔬</span>
+                  {!isGuest && stats.sandboxRuns > 0 && (
+                    <span className="mc-chip" style={{ background: 'rgba(76,175,80,0.2)', color: '#4caf50', border: '1px solid rgba(76,175,80,0.4)' }}>
+                      {stats.sandboxRuns} run{stats.sandboxRuns !== 1 ? 's' : ''}
+                    </span>
+                  )}
+                </div>
+                <h3 style={{ color: 'white', fontSize: 22, fontWeight: 800, margin: '0 0 6px', letterSpacing: -0.2 }}>Sandbox</h3>
+                <p style={{ color: '#8b949e', fontSize: 13, lineHeight: 1.55, margin: '0 0 18px' }}>
+                  Experiment freely with C++. Run the analyser, inspect the CFG, no rules.
+                </p>
+                <div style={{ display: 'flex', gap: 6, marginBottom: 16, flexWrap: 'wrap' }}>
+                  <span className="mc-chip" style={{ background: 'rgba(255,255,255,0.05)', color: '#8b949e' }}>🔤 7 analyzer tabs</span>
+                  <span className="mc-chip" style={{ background: 'rgba(255,255,255,0.05)', color: '#8b949e' }}>🧩 Build Mode</span>
+                </div>
+                <button className="mc-cta" style={{ background: '#4caf50', color: 'white' }}>
+                  EXPLORE <span>→</span>
+                </button>
+              </div>
+            </div>
+
+            {/* ── CAMPAIGN ── */}
+            <div
+              className="mc-card"
+              onClick={() => !isGuest && navigate('/campaign')}
+              style={{
+                background: isGuest
+                  ? 'linear-gradient(135deg, rgba(139,148,158,0.08) 0%, rgba(139,148,158,0.02) 100%)'
+                  : 'linear-gradient(135deg, rgba(255,167,38,0.18) 0%, rgba(255,167,38,0.04) 100%)',
+                borderColor: isGuest ? '#30363d' : '#ffa726',
+                color: isGuest ? '#484f58' : '#ffa726',
+                cursor: isGuest ? 'not-allowed' : 'pointer',
+                boxShadow: '0 0 0 rgba(255,167,38,0)',
+              }}
+              onMouseEnter={e => { if (!isGuest) e.currentTarget.style.boxShadow = '0 12px 40px rgba(255,167,38,0.25)' }}
+              onMouseLeave={e => { if (!isGuest) e.currentTarget.style.boxShadow = '0 0 0 rgba(255,167,38,0)' }}
+            >
+              <div className="mc-shimmer" />
+              <div style={{ position: 'relative', zIndex: 1 }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 14 }}>
+                  <span className="mc-emoji" style={{ fontSize: 40, filter: isGuest ? 'grayscale(1)' : 'none' }}>⚔️</span>
+                  {!isGuest && stats.questsCompleted > 0 && (
+                    <span className="mc-chip" style={{ background: 'rgba(255,167,38,0.2)', color: '#ffa726', border: '1px solid rgba(255,167,38,0.4)' }}>
+                      {stats.questsCompleted} quest{stats.questsCompleted !== 1 ? 's' : ''} done
+                    </span>
+                  )}
+                  {isGuest && (
+                    <span className="mc-chip" style={{ background: 'rgba(139,148,158,0.1)', color: '#8b949e', border: '1px solid #30363d' }}>
+                      🔒 LOCKED
+                    </span>
+                  )}
+                </div>
+                <h3 style={{ color: isGuest ? '#8b949e' : 'white', fontSize: 22, fontWeight: 800, margin: '0 0 6px', letterSpacing: -0.2 }}>
+                  Campaign Mode
+                </h3>
+                <p style={{ color: '#8b949e', fontSize: 13, lineHeight: 1.55, margin: '0 0 18px' }}>
+                  {isGuest
+                    ? 'Sign up to unlock quests, earn XP, and climb the ranks.'
+                    : 'Complete guided quests, earn XP, and climb from Squire to King.'}
+                </p>
+                <div style={{ display: 'flex', gap: 6, marginBottom: 16, flexWrap: 'wrap' }}>
+                  <span className="mc-chip" style={{ background: 'rgba(255,255,255,0.05)', color: '#8b949e' }}>🌱 3 phases</span>
+                  <span className="mc-chip" style={{ background: 'rgba(255,255,255,0.05)', color: '#8b949e' }}>⭐ XP rewards</span>
+                  <span className="mc-chip" style={{ background: 'rgba(255,255,255,0.05)', color: '#8b949e' }}>🏅 Badges</span>
+                </div>
+                <button
+                  disabled={isGuest}
+                  className="mc-cta"
+                  style={{
+                    background: isGuest ? 'transparent' : '#ffa726',
+                    color: isGuest ? '#484f58' : 'white',
+                    border: isGuest ? '1px solid #30363d' : 'none',
+                  }}
+                >
+                  {isGuest ? '🔒 LOCKED' : <>LEARN <span>→</span></>}
+                </button>
+              </div>
             </div>
           </div>
 
-          {/* Mode Cards */}
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '20px' }}>
-            <div className="cs-card" style={modeCardStyle('#4caf50')} onClick={() => navigate('/sandbox')}>
-              <h3 style={cardTitleStyle}>Sandbox</h3>
-              <p style={cardParaStyle}>Experiment freely with code. No rules, just logic.</p>
-              <button className="cs-btn cs-explore-btn" style={cardBtnStyle('#4caf50')}>EXPLORE</button>
-            </div>
-            <div className={isGuest ? '' : 'cs-card'} style={isGuest ? lockedCardStyle : modeCardStyle('#ffa726')} onClick={() => !isGuest && navigate('/campaign')}>
-              <h3 style={cardTitleStyle}>Campaign Mode</h3>
-              <p style={cardParaStyle}>Start your journey. Complete missions to level up.</p>
-              <button disabled={isGuest} className={isGuest ? '' : 'cs-btn cs-learn-btn'} style={cardBtnStyle(isGuest ? '#30363d' : '#ffa726')}>
-                {isGuest ? 'LOCKED' : 'LEARN'}
-              </button>
-            </div>
-          </div>
         </div>
 
         {/* RIGHT COLUMN */}
         <div style={{ display: 'flex', flexDirection: 'column', gap: '24px', minWidth: 0 }}>
 
-          {/* Leaderboard */}
+          {/* ── Leaderboard (mini) ── */}
+          <style>{`
+            @keyframes lbCrown      { 0%,100%{transform:translateY(0) rotate(-5deg)} 50%{transform:translateY(-3px) rotate(5deg)} }
+            @keyframes lbGoldGlow   { 0%,100%{box-shadow:0 0 0 rgba(255,215,0,0.4)} 50%{box-shadow:0 0 20px rgba(255,215,0,0.6)} }
+            .lb-row { transition: all 0.15s ease; position: relative; }
+            .lb-row:hover:not(.lb-me) { transform: translateX(3px); }
+            .lb-row.top1 { animation: lbGoldGlow 3s ease-in-out infinite; }
+            .lb-crown { display: inline-block; animation: lbCrown 2.4s ease-in-out infinite; }
+          `}</style>
           <div style={sidebarCardStyle}>
-            <h3 style={sidebarTitleStyle}><span>🏆</span> USER LEADERBOARD</h3>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
+              <h3 style={{ ...sidebarTitleStyle, marginBottom: 0 }}><span>🏆</span> LEADERBOARD</h3>
+              {!isGuest && myRank && (
+                <span style={{
+                  background: myRank <= 3 ? 'rgba(255,193,7,0.15)' : 'rgba(100,181,246,0.15)',
+                  border: `1px solid ${myRank <= 3 ? 'rgba(255,193,7,0.4)' : 'rgba(100,181,246,0.4)'}`,
+                  color: myRank <= 3 ? '#ffc107' : '#64b5f6',
+                  padding: '3px 10px', borderRadius: 10,
+                  fontSize: 10, fontWeight: 800, letterSpacing: 0.5,
+                  fontFamily: "'IBM Plex Mono', monospace",
+                }}>
+                  YOU · #{myRank}
+                </span>
+              )}
+            </div>
+
             {isGuest ? (
               <div style={guestPlaceholderStyle}>
                 <div style={{ fontSize: '48px', marginBottom: '12px' }}>🔒</div>
@@ -788,87 +1668,211 @@ export const HomeDashboard: React.FC = () => {
               <div style={{ color: '#484f58', fontSize: '12px', textAlign: 'center', padding: '20px' }}>No players yet</div>
             ) : (
               <>
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', marginBottom: '12px' }}>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '5px', marginBottom: '14px' }}>
                   {leaderboard.map((player, i) => {
                     const isMe = player.id === user?.id
                     const rank = i + 1
+                    const isTop3 = rank <= 3
                     const medal = rank === 1 ? '🥇' : rank === 2 ? '🥈' : rank === 3 ? '🥉' : null
+                    const medalColor = rank === 1 ? '#ffd700' : rank === 2 ? '#c0c0c0' : rank === 3 ? '#cd7f32' : '#8b949e'
                     return (
-                      <div key={player.id} className="cs-leaderboard-row" style={{
-                        display: 'flex', alignItems: 'center', gap: '10px', padding: '8px 10px',
-                        background: isMe ? 'rgba(76,175,80,0.1)' : i % 2 === 0 ? 'rgba(255,255,255,0.02)' : 'transparent',
-                        border: isMe ? '1px solid rgba(76,175,80,0.3)' : '1px solid transparent',
-                      }}>
-                        <span style={{ fontSize: medal ? '16px' : '11px', minWidth: '24px', textAlign: 'center', color: '#8b949e', fontWeight: '700' }}>{medal ?? `#${rank}`}</span>
-                        <div style={{ width: '28px', height: '28px', borderRadius: '50%', flexShrink: 0, background: isMe ? 'linear-gradient(135deg,#4caf50,#2d7a2d)' : 'rgba(100,181,246,0.15)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                          <span style={{ fontSize: '12px', fontWeight: '700', color: isMe ? 'white' : '#64b5f6' }}>{player.playername.charAt(0).toUpperCase()}</span>
-                        </div>
-                        <span style={{ flex: 1, fontSize: '12px', color: isMe ? '#4caf50' : '#e6edf3', fontWeight: isMe ? '700' : '400', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                          {player.playername}{isMe && <span style={{ fontSize: '10px', color: '#4caf50', marginLeft: '4px', opacity: 0.8 }}>(you)</span>}
+                      <div key={player.id}
+                        className={`lb-row ${isMe ? 'lb-me' : ''} ${rank === 1 ? 'top1' : ''}`}
+                        onClick={() => { if (isMe) navigate('/profile'); else setPeekUserId(player.id) }}
+                        title={isMe ? 'Open your profile' : `View ${player.playername}'s profile`}
+                        style={{
+                          display: 'flex', alignItems: 'center', gap: '10px', padding: '9px 10px',
+                          background: isMe ? 'linear-gradient(90deg, rgba(76,175,80,0.15), rgba(76,175,80,0.05))'
+                                    : isTop3 ? `linear-gradient(90deg, ${medalColor}18, transparent)`
+                                    : i % 2 === 0 ? 'rgba(255,255,255,0.02)' : 'transparent',
+                          border: isMe ? '1px solid rgba(76,175,80,0.4)'
+                                 : rank === 1 ? '1px solid rgba(255,215,0,0.25)'
+                                 : '1px solid transparent',
+                          cursor: 'pointer', borderRadius: 8,
+                          borderLeft: isTop3 ? `3px solid ${medalColor}` : (isMe ? '3px solid #4caf50' : '3px solid transparent'),
+                        }}
+                      >
+                        <span style={{ fontSize: medal ? 18 : 11, minWidth: 24, textAlign: 'center', color: medalColor, fontWeight: 700 }}>
+                          {medal ?? `#${rank}`}
                         </span>
-                        <span style={{ fontSize: '11px', color: '#ffc107', fontWeight: '600', whiteSpace: 'nowrap' }}>{player.totalxp} XP</span>
+                        <div style={{
+                          width: 30, height: 30, borderRadius: '50%', flexShrink: 0,
+                          background: isMe ? 'linear-gradient(135deg,#4caf50,#2d7a2d)'
+                                     : rank === 1 ? 'linear-gradient(135deg,#ffd700,#ff8f00)'
+                                     : rank === 2 ? 'linear-gradient(135deg,#c0c0c0,#9e9e9e)'
+                                     : rank === 3 ? 'linear-gradient(135deg,#cd7f32,#8b5a2b)'
+                                     : 'rgba(100,181,246,0.15)',
+                          display: 'flex', alignItems: 'center', justifyContent: 'center',
+                          border: rank === 1 ? '2px solid #ffd700' : '2px solid transparent',
+                        }}>
+                          <span style={{ fontSize: 13, fontWeight: 800, color: isTop3 || isMe ? 'white' : '#64b5f6' }}>
+                            {player.playername.charAt(0).toUpperCase()}
+                          </span>
+                        </div>
+                        <div style={{ flex: 1, minWidth: 0 }}>
+                          <div style={{ fontSize: 12.5, color: isMe ? '#4caf50' : '#e6edf3', fontWeight: (isMe || isTop3) ? 700 : 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                            {player.playername}
+                            {rank === 1 && <span className="lb-crown" style={{ marginLeft: 4 }}>👑</span>}
+                            {isMe && <span style={{ fontSize: 10, color: '#4caf50', marginLeft: 5, opacity: 0.85 }}>(you)</span>}
+                          </div>
+                          <div style={{ fontSize: 10, color: '#484f58', marginTop: 1 }}>
+                            {getLevelName((player.currentlevel as 1|2|3|4|5) || 1)}
+                          </div>
+                        </div>
+                        <div style={{ textAlign: 'right' }}>
+                          <div style={{ fontSize: 12, color: '#ffc107', fontWeight: 700 }}>{player.totalxp.toLocaleString()}</div>
+                          <div style={{ fontSize: 9, color: '#484f58', letterSpacing: 0.3 }}>XP</div>
+                        </div>
                       </div>
                     )
                   })}
                   {myRank && myRank > 10 && (
-                    <div style={{ marginTop: '4px', padding: '7px 10px', borderRadius: '8px', background: 'rgba(76,175,80,0.08)', border: '1px solid rgba(76,175,80,0.2)', display: 'flex', justifyContent: 'space-between' }}>
-                      <span style={{ fontSize: '11px', color: '#4caf50' }}>Your rank: #{myRank}</span>
-                      <span style={{ fontSize: '11px', color: '#ffc107' }}>{user?.totalXP ?? 0} XP</span>
+                    <div style={{
+                      marginTop: 6, padding: '8px 10px', borderRadius: 8,
+                      background: 'linear-gradient(90deg, rgba(76,175,80,0.12), rgba(76,175,80,0.04))',
+                      border: '1px solid rgba(76,175,80,0.3)',
+                      borderLeft: '3px solid #4caf50',
+                      display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+                    }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                        <span style={{ fontSize: 11, color: '#4caf50', fontWeight: 700 }}>#{myRank}</span>
+                        <span style={{ fontSize: 11, color: '#e6edf3' }}>{user?.playerName}</span>
+                        <span style={{ fontSize: 10, color: '#4caf50', fontWeight: 600 }}>(you)</span>
+                      </div>
+                      <span style={{ fontSize: 11, color: '#ffc107', fontWeight: 700 }}>{(user?.totalXP ?? 0).toLocaleString()} XP</span>
                     </div>
                   )}
                 </div>
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                  <button className="cs-btn cs-gold-btn" onClick={() => navigate('/leaderboard')} style={{ ...fullProfileBtnStyle, color: '#ffc107', borderColor: '#ffc107' }}>
-                    🏆 View Full Leaderboard
-                  </button>
-                </div>
+                <button className="cs-btn cs-gold-btn" onClick={() => navigate('/leaderboard')}
+                  style={{
+                    width: '100%', background: 'linear-gradient(90deg, rgba(255,193,7,0.1), rgba(255,193,7,0.04))',
+                    color: '#ffc107', border: '1px solid rgba(255,193,7,0.4)',
+                    borderRadius: 8, padding: 10, fontWeight: 700, cursor: 'pointer', fontSize: 12,
+                    letterSpacing: 0.4, transition: 'all 0.15s',
+                  }}
+                  onMouseEnter={e => { e.currentTarget.style.background = 'linear-gradient(90deg, rgba(255,193,7,0.2), rgba(255,193,7,0.08))' }}
+                  onMouseLeave={e => { e.currentTarget.style.background = 'linear-gradient(90deg, rgba(255,193,7,0.1), rgba(255,193,7,0.04))' }}
+                >
+                  🏆 View Full Leaderboard →
+                </button>
               </>
             )}
           </div>
 
-          {/* Progress Report */}
+          {/* ── Progress Report ── */}
+          <style>{`
+            @keyframes prRingFill    { from { stroke-dashoffset: 226; } }
+            @keyframes prFadeIn      { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: translateY(0); } }
+            @keyframes prCountUp     { from { opacity: 0; transform: scale(0.8); } to { opacity: 1; transform: scale(1); } }
+            .pr-stat {
+              background: rgba(255,255,255,0.03); border: 1px solid #30363d;
+              border-radius: 10px; padding: 10px 12px; cursor: pointer;
+              transition: all 0.18s ease;
+              animation: prFadeIn 0.4s ease both;
+            }
+            .pr-stat:hover { transform: translateY(-3px); background: rgba(255,255,255,0.06); }
+          `}</style>
           <div style={sidebarCardStyle}>
-            <h3 style={sidebarTitleStyle}><span>📊</span> PROGRESS REPORT</h3>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14 }}>
+              <h3 style={{ ...sidebarTitleStyle, marginBottom: 0 }}><span>📊</span> PROGRESS</h3>
+              {!isGuest && !statsLoading && (
+                <span style={{
+                  fontSize: 10, fontWeight: 800, letterSpacing: 0.6,
+                  color: '#4caf50', background: 'rgba(76,175,80,0.12)',
+                  border: '1px solid rgba(76,175,80,0.3)',
+                  padding: '3px 9px', borderRadius: 10,
+                  fontFamily: "'IBM Plex Mono', monospace",
+                }}>
+                  {currentLevelName.toUpperCase()}
+                </span>
+              )}
+            </div>
+
             {isGuest ? (
               <div style={guestPlaceholderStyle}><p>Sign up to track progress</p></div>
             ) : statsLoading ? (
-              <div style={{ color: '#8b949e', fontSize: '13px', textAlign: 'center', padding: '20px' }}>Loading progress...</div>
+              <div style={{ color: '#8b949e', fontSize: 13, textAlign: 'center', padding: 20 }}>Loading progress…</div>
             ) : (
               <div>
-                <div style={{ marginBottom: '16px' }}>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '6px' }}>
-                    <span style={{ color: '#8b949e', fontSize: '12px' }}>XP to next rank</span>
-                    <span style={{ color: 'white', fontSize: '12px', fontWeight: '600' }}>
-                      {stats.xpToNextLevel === null ? 'MAX RANK 👑' : `${stats.xpToNextLevel} XP remaining`}
-                    </span>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 14, marginBottom: 18 }}>
+                  <div style={{ position: 'relative', width: 80, height: 80, flexShrink: 0 }}>
+                    <svg width={80} height={80} style={{ transform: 'rotate(-90deg)' }}>
+                      <circle cx={40} cy={40} r={36} fill="none" stroke="rgba(255,255,255,0.06)" strokeWidth={6} />
+                      <circle cx={40} cy={40} r={36} fill="none" stroke="#4caf50" strokeWidth={6}
+                        strokeDasharray={`${226} 226`}
+                        strokeDashoffset={226 - (stats.levelProgress / 100) * 226}
+                        strokeLinecap="round"
+                        style={{ animation: 'prRingFill 1.1s cubic-bezier(0.4,0,0.2,1) forwards', transition: 'stroke-dashoffset 1s ease' }} />
+                    </svg>
+                    <div style={{
+                      position: 'absolute', inset: 0, display: 'flex',
+                      flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
+                    }}>
+                      <div style={{ color: '#4caf50', fontSize: 16, fontWeight: 800 }}>{stats.levelProgress}%</div>
+                      <div style={{ color: '#484f58', fontSize: 8, letterSpacing: 0.4, textTransform: 'uppercase' }}>to Lv{Math.min((user?.currentLevel ?? 1) + 1, 5)}</div>
+                    </div>
                   </div>
-                  <div style={progressBarContainerStyle}>
-                    <div style={{ width: `${stats.levelProgress}%`, height: '100%', background: 'linear-gradient(90deg,#4caf50 0%,#66bb6a 100%)', transition: 'width 0.9s cubic-bezier(0.4,0,0.2,1)', borderRadius: '4px' }} />
-                  </div>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: '4px' }}>
-                    <span style={{ color: '#484f58', fontSize: '10px' }}>Lvl {user?.currentLevel}</span>
-                    <span style={{ color: '#484f58', fontSize: '10px' }}>{stats.levelProgress}%</span>
-                    <span style={{ color: '#484f58', fontSize: '10px' }}>Lvl {Math.min((user?.currentLevel ?? 1) + 1, 4)}</span>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ color: '#e6edf3', fontSize: 13, fontWeight: 700, marginBottom: 4 }}>
+                      {stats.xpToNextLevel === null ? '🌟 MAX RANK' : 'Next rank in'}
+                    </div>
+                    <div style={{ color: '#ffc107', fontSize: 20, fontWeight: 800, fontFamily: "'IBM Plex Mono', monospace", letterSpacing: -0.5 }}>
+                      {stats.xpToNextLevel === null ? 'KING 🔱' : `${stats.xpToNextLevel.toLocaleString()}`}
+                    </div>
+                    {stats.xpToNextLevel !== null && (
+                      <div style={{ color: '#8b949e', fontSize: 10, marginTop: 2 }}>XP remaining</div>
+                    )}
                   </div>
                 </div>
 
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px', marginBottom: '16px' }}>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 8, marginBottom: 14 }}>
                   {[
-                    { icon: '🔬', value: stats.sandboxRuns,     label: 'Sandbox Runs' },
-                    { icon: '⚔️', value: stats.questsCompleted, label: 'Quests Done'  },
-                  ].map(s => (
-                    <div key={s.label} className="cs-stat-box"
-                      style={{ background: 'rgba(255,255,255,0.03)', border: '1px solid #30363d', borderRadius: '8px', padding: '12px', textAlign: 'center', cursor: 'default' }}>
-                      <div style={{ fontSize: '18px', marginBottom: '4px' }}>{s.icon}</div>
-                      <div style={{ color: 'white', fontWeight: '700', fontSize: '16px' }}>{s.value}</div>
-                      <div style={{ color: '#8b949e', fontSize: '10px' }}>{s.label}</div>
-                    </div>
+                    { icon: '🔬', value: stats.sandboxRuns,     label: 'Analyses', color: '#4caf50', path: '/sandbox' },
+                    { icon: '⚔️', value: stats.questsCompleted, label: 'Quests',   color: '#ffa726', path: '/campaign' },
+                    { icon: '🏆', value: myRank ? `#${myRank}` : '—', label: 'Rank', color: '#ffc107', path: '/leaderboard' },
+                  ].map((s, i) => (
+                    <button
+                      key={s.label}
+                      className="pr-stat"
+                      onClick={() => navigate(s.path)}
+                      style={{ animationDelay: `${i * 0.08}s`, textAlign: 'center' }}
+                      title={`Open ${s.label}`}
+                    >
+                      <div style={{ fontSize: 16, marginBottom: 3 }}>{s.icon}</div>
+                      <div style={{ color: s.color, fontWeight: 800, fontSize: 16, animation: 'prCountUp 0.5s ease' }}>{s.value}</div>
+                      <div style={{ color: '#8b949e', fontSize: 9, letterSpacing: 0.4, textTransform: 'uppercase' }}>{s.label}</div>
+                    </button>
                   ))}
                 </div>
 
-                <button className="cs-btn cs-progress-btn" onClick={() => navigate('/progress')}
-                  style={{ width: '100%', background: 'transparent', color: '#4caf50', border: '1px solid #4caf50', borderRadius: '8px', padding: '10px', fontWeight: '600', cursor: 'pointer', fontSize: '13px' }}>
-                  📊 View Full Progress Report
+                <div style={{ marginBottom: 14 }}>
+                  <div style={{ background: 'rgba(100,181,246,0.1)', borderRadius: 4, height: 6, overflow: 'hidden' }}>
+                    <div style={{
+                      width: `${stats.levelProgress}%`, height: '100%',
+                      background: 'linear-gradient(90deg,#4caf50 0%,#66bb6a 50%,#ffc107 100%)',
+                      transition: 'width 0.9s cubic-bezier(0.4,0,0.2,1)', borderRadius: 4,
+                      boxShadow: '0 0 8px rgba(76,175,80,0.4)',
+                    }} />
+                  </div>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 4 }}>
+                    <span style={{ color: '#484f58', fontSize: 9, letterSpacing: 0.3 }}>Lvl {user?.currentLevel}</span>
+                    <span style={{ color: '#484f58', fontSize: 9 }}>{(user?.totalXP ?? 0).toLocaleString()} XP</span>
+                    <span style={{ color: '#484f58', fontSize: 9, letterSpacing: 0.3 }}>Lvl {Math.min((user?.currentLevel ?? 1) + 1, 5)}</span>
+                  </div>
+                </div>
+
+                <button onClick={() => navigate('/progress')}
+                  style={{
+                    width: '100%',
+                    background: 'linear-gradient(90deg, rgba(76,175,80,0.1), rgba(76,175,80,0.04))',
+                    color: '#4caf50', border: '1px solid rgba(76,175,80,0.4)',
+                    borderRadius: 8, padding: 10, fontWeight: 700, cursor: 'pointer', fontSize: 12,
+                    letterSpacing: 0.4, transition: 'all 0.15s',
+                  }}
+                  onMouseEnter={e => { e.currentTarget.style.background = 'linear-gradient(90deg, rgba(76,175,80,0.2), rgba(76,175,80,0.08))' }}
+                  onMouseLeave={e => { e.currentTarget.style.background = 'linear-gradient(90deg, rgba(76,175,80,0.1), rgba(76,175,80,0.04))' }}
+                >
+                  📊 View Full Progress Report →
                 </button>
               </div>
             )}
@@ -880,17 +1884,7 @@ export const HomeDashboard: React.FC = () => {
   );
 };
 
-const heroSectionStyle: React.CSSProperties = { background: 'linear-gradient(135deg, rgba(22,27,34,0.9) 0%, rgba(30,36,47,0.9) 100%)', borderRadius: '16px', padding: '80px 40px', border: '1px solid #30363d', position: 'relative', overflow: 'hidden', minHeight: '380px', display: 'flex', alignItems: 'center', justifyContent: 'center' };
-const radialOverlayStyle: React.CSSProperties = { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, background: 'radial-gradient(circle at 50% 50%, rgba(100,181,246,0.1) 0%, transparent 70%)' };
-const heroTitleStyle: React.CSSProperties = { color: 'white', fontSize: '32px', fontWeight: '700', marginBottom: '12px', background: 'linear-gradient(135deg, #64b5f6 0%, #42a5f5 100%)', WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent' };
-const modeCardStyle = (color: string): React.CSSProperties => ({ background: `linear-gradient(135deg, ${color}26 0%, ${color}0D 100%)`, border: `2px solid ${color}`, borderRadius: '16px', padding: '36px 24px', cursor: 'pointer' });
-const lockedCardStyle: React.CSSProperties = { background: 'rgba(139,148,158,0.05)', border: '2px solid #30363d', borderRadius: '16px', padding: '36px 24px', cursor: 'not-allowed', opacity: 0.6 };
-const cardTitleStyle: React.CSSProperties = { color: 'white', fontSize: '22px', fontWeight: '600', marginBottom: '12px' };
-const cardParaStyle: React.CSSProperties = { color: '#8b949e', fontSize: '14px', marginBottom: '20px', lineHeight: '1.6' };
-const cardBtnStyle = (bg: string): React.CSSProperties => ({ background: bg, color: 'white', border: 'none', borderRadius: '8px', padding: '10px 24px', fontWeight: '600', cursor: 'pointer' });
 const sidebarCardStyle: React.CSSProperties = { background: 'rgba(22,27,34,0.9)', border: '1px solid #30363d', borderRadius: '16px', padding: '24px' };
 const sidebarTitleStyle: React.CSSProperties = { color: 'white', fontSize: '16px', fontWeight: '600', marginBottom: '16px', display: 'flex', alignItems: 'center', gap: '8px' };
 const guestPlaceholderStyle: React.CSSProperties = { textAlign: 'center', padding: '20px', color: '#8b949e' };
 const signupBtnStyle: React.CSSProperties = { background: '#4caf50', color: 'white', border: 'none', borderRadius: '8px', padding: '10px 24px', fontWeight: '600', cursor: 'pointer', marginTop: '10px' };
-const fullProfileBtnStyle: React.CSSProperties = { width: '100%', background: 'transparent', color: '#64b5f6', border: '1px solid #64b5f6', borderRadius: '8px', padding: '10px', fontWeight: '600', cursor: 'pointer' };
-const progressBarContainerStyle: React.CSSProperties = { width: '100%', height: '8px', background: 'rgba(100,181,246,0.2)', borderRadius: '4px', overflow: 'hidden' };

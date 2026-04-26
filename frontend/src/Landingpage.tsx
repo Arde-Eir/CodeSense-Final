@@ -1,9 +1,15 @@
 import React, { useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-
+import { useAuth } from './components/AuthScreen';
 
 export const LandingPage: React.FC = () => {
   const navigate = useNavigate();
+  const { isAuthenticated } = useAuth();
+
+  // Authenticated users who land here (e.g. via the "About" button) go home
+  useEffect(() => {
+    if (isAuthenticated) navigate('/home', { replace: true });
+  }, [isAuthenticated, navigate]);
 
   // Override layout.css overflow:hidden so page can scroll
   useEffect(() => {
