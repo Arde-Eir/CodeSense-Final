@@ -375,6 +375,19 @@ const finalVal: SymbolicValue = allDims.length > 0
   private visitWhileLoop(node: WhileLoopNode): SymbolicValue {
     this.detectInfiniteLoop(node);
 
+    // FIX #6: ALWAYS_FALSE — evaluate the condition with the current concrete
+    // variable state. If it resolves to a concrete false at entry, the body
+    // will never execute, which is almost certainly a bug.
+    const condValue = this.evalConcreteCondition(node.condition);
+    if (condValue === false) {
+      this.addSafetyCheck(
+        (node as any).line || 0, 'loop', 'WARNING',
+        `Unreachable loop body: the condition '${this.expressionToString(node.condition)}' ` +
+        `is false on entry — the while loop will never execute. ` +
+        `Check your variable values or the comparison operator.`,
+      );
+    }
+
     const condVars = this.extractVariables(node.condition);
     condVars.forEach(v => this.checkLoopBodyForZeroRisk(node.body, v));
 
@@ -383,6 +396,50 @@ const finalVal: SymbolicValue = allDims.length > 0
     this.state = this.mergeStates(preState, this.cloneState());
 
     return { type: 'unknown' as const };
+  }
+
+  /**
+   * FIX #6 helper: evaluate a condition AST using the current concrete state.
+   * Returns true/false when the outcome is provably concrete, or null when
+   * the condition depends on unknown/symbolic values and we can't decide.
+   */
+  private evalConcreteCondition(cond: any): boolean | null {
+    if (!cond) return null;
+    // Literal booleans
+    if (cond.type === 'Boolean')      return !!cond.value;
+    if (cond.type === 'Integer')      return cond.value !== 0;
+    // Identifier resolving to a concrete number/bool
+    if (cond.type === 'Identifier') {
+      const v = this.state.variables.get(cond.name);
+      if (v?.type === 'concrete') return !!v.value;
+      return null;
+    }
+    // Binary comparison
+    if (cond.type === 'BinaryOp' && ['<','>','<=','>=','==','!='].includes(cond.operator)) {
+      const l = this.resolveConcrete(cond.left);
+      const r = this.resolveConcrete(cond.right);
+      if (l === null || r === null) return null;
+      switch (cond.operator) {
+        case '<':  return l <  r;
+        case '>':  return l >  r;
+        case '<=': return l <= r;
+        case '>=': return l >= r;
+        case '==': return l === r;
+        case '!=': return l !== r;
+      }
+    }
+    return null;
+  }
+
+  private resolveConcrete(node: any): number | null {
+    if (!node) return null;
+    if (node.type === 'Integer' || node.type === 'Float') return node.value;
+    if (node.type === 'Boolean') return node.value ? 1 : 0;
+    if (node.type === 'Identifier') {
+      const v = this.state.variables.get(node.name);
+      if (v?.type === 'concrete' && typeof v.value === 'number') return v.value;
+    }
+    return null;
   }
 
   private visitDoWhileLoop(node: DoWhileLoopNode): SymbolicValue {
@@ -481,12 +538,35 @@ const finalVal: SymbolicValue = allDims.length > 0
     const left  = resolveUnknown(leftRaw,  node.left);
     const right = resolveUnknown(rightRaw, node.right);
 
+    // FIX #5: UNINITIALIZED_READ — if a binary op uses a variable that has
+    // been declared but never assigned a value, emit a loud safety warning.
+    // Garbage memory reads are a classic C++ bug that the user must see.
+    const checkUninit = (operand: any, resolved: SymbolicValue) => {
+      if (resolved.type !== 'unknown') return;
+      const name = typeof operand === 'string' ? operand : operand?.name;
+      if (!name) return;
+      // The symbol exists but has never been added to initialized set.
+      if (this.state.variables.has(name) && !this.state.initialized.has(name)) {
+        this.addSafetyCheck(
+          (node as any).line || 0, 'uninitialized', 'WARNING',
+          `Uninitialized read: variable '${name}' is used before being assigned a value — ` +
+          `this reads whatever garbage happens to be in memory. Initialize it at declaration (e.g. int ${name} = 0;).`,
+        );
+      }
+    };
+    checkUninit(node.left,  leftRaw);
+    checkUninit(node.right, rightRaw);
+
     if (node.operator === '/' || node.operator === '%') {
+      // FIX #7: use operator-specific phrasing so Modulo-by-zero is reported
+      // as "Modulo by zero" (not the generic "Division by zero").
+      const opName = node.operator === '%' ? 'Modulo by zero' : 'Division by zero';
+      const opType = node.operator === '%' ? 'modulo'        : 'arithmetic';
       // Concrete zero check
       if (right?.type === 'concrete' && right.value === 0) {
         this.addSafetyCheck(
-          (node as any).line || 0, 'arithmetic', 'UNSAFE',
-          `Division by zero: '${this.expressionToString(node.right)}' evaluates to 0`,
+          (node as any).line || 0, opType, 'UNSAFE',
+          `${opName}: '${this.expressionToString(node.right)}' evaluates to 0`,
         );
       }
       // Variable resolving to zero check — e.g. int b = 0; a / b;
@@ -496,8 +576,8 @@ const finalVal: SymbolicValue = allDims.length > 0
           const resolvedRight = this.state.variables.get(rightName);
           if (resolvedRight?.type === 'concrete' && resolvedRight.value === 0) {
             this.addSafetyCheck(
-              (node as any).line || 0, 'arithmetic', 'UNSAFE',
-              `Division by zero: variable '${rightName}' is 0`,
+              (node as any).line || 0, opType, 'UNSAFE',
+              `${opName}: variable '${rightName}' is 0`,
             );
           }
         }

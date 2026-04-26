@@ -36,6 +36,24 @@ export class CFGGenerator {
   private currentNodeId = 0;
   private mentor = new Translator();
 
+  /**
+   * FIX (user bug #3): A statement that unconditionally transfers control
+   * (return / throw / break / continue) ends the current linear flow. Any
+   * sibling statements after it in the same block are UNREACHABLE and must
+   * NOT be wired into the CFG — otherwise we get visible arrows from
+   * "Return" to the next line, which is wrong in C++ semantics.
+   */
+  private isTerminator(stmt: ASTNode | undefined | null): boolean {
+    if (!stmt) return false;
+    const t = (stmt as any).type;
+    if (t === 'ReturnStatement' || t === 'ThrowStatement') return true;
+    if (t === 'LoopControl') {
+      const v = (stmt as any).value;
+      return v === 'break' || v === 'continue';
+    }
+    return false;
+  }
+
   // ── FIX 4: Track current function entry node and name for recursion back-edges
   private currentFunctionEntry: ControlFlowNode | null = null;
   private currentFunctionName: string = '';
@@ -228,27 +246,25 @@ export class CFGGenerator {
   // Fallback — but ONLY if no method matched (prevents double-visit)
   const anyNode = node as any;
   let lastNode = current;
-  if (Array.isArray(anyNode.body)) {
-    anyNode.body.forEach((stmt: ASTNode) => {
-      lastNode = this.visit(stmt, lastNode, exit);
-    });
-  } else if (Array.isArray(anyNode.statements)) {
-    anyNode.statements.forEach((stmt: ASTNode) => {
-      lastNode = this.visit(stmt, lastNode, exit);
-    });
+  const siblings: ASTNode[] = Array.isArray(anyNode.body) ? anyNode.body
+                           : Array.isArray(anyNode.statements) ? anyNode.statements
+                           : [];
+  for (const stmt of siblings) {
+    lastNode = this.visit(stmt, lastNode, exit);
+    if (this.isTerminator(stmt)) break; // FIX #3
   }
   return lastNode;
 }
 
   // ── Program ───────────────────────────────────────────────────────────────
   private visitProgram(node: any, current: ControlFlowNode, exit: ControlFlowNode): ControlFlowNode {
-  let lastNode = current;
-  (node.body || []).forEach((stmt: ASTNode) => {
-    lastNode = this.visit(stmt, lastNode, exit);
-  });
-  // MISSING: connect last node to exit
-  return lastNode;
-}
+    let lastNode = current;
+    for (const stmt of (node.body || []) as ASTNode[]) {
+      lastNode = this.visit(stmt, lastNode, exit);
+      if (this.isTerminator(stmt)) break; // FIX #3
+    }
+    return lastNode;
+  }
 
   // ── If ────────────────────────────────────────────────────────────────────
   private visitIfStatement(
@@ -263,17 +279,22 @@ export class CFGGenerator {
     this.connect(current, decision);
 
     let truePath = decision;
-    (node.thenBranch || []).forEach(stmt => {
+    let trueReturned = false;
+    for (const stmt of (node.thenBranch || [])) {
       truePath = this.visit(stmt, truePath, merge);
-    });
-    this.connect(truePath, merge, 'True');
+      if (this.isTerminator(stmt)) { trueReturned = true; break; } // FIX #3
+    }
+    // Only connect to merge if the branch didn't already terminate
+    if (!trueReturned) this.connect(truePath, merge, 'True');
 
     if (node.elseBranch && node.elseBranch.length > 0) {
       let falsePath = decision;
-      node.elseBranch.forEach(stmt => {
+      let falseReturned = false;
+      for (const stmt of node.elseBranch) {
         falsePath = this.visit(stmt, falsePath, merge);
-      });
-      this.connect(falsePath, merge, 'False');
+        if (this.isTerminator(stmt)) { falseReturned = true; break; } // FIX #3
+      }
+      if (!falseReturned) this.connect(falsePath, merge, 'False');
     } else {
       this.connect(decision, merge, 'False');
     }
@@ -489,9 +510,10 @@ export class CFGGenerator {
     this.connect(current, funcStart);
     let lastNode = funcStart;
     if (Array.isArray(node.body)) {
-      node.body.forEach(stmt => {
+      for (const stmt of node.body) {
         lastNode = this.visit(stmt, lastNode, funcEnd);
-      });
+        if (this.isTerminator(stmt)) break; // FIX #3
+      }
     }
     // If the function body doesn't explicitly return, connect to funcEnd
     if (lastNode !== funcEnd) {
@@ -531,9 +553,10 @@ export class CFGGenerator {
     exit: ControlFlowNode,
   ): ControlFlowNode {
     let lastNode = current;
-    (node.statements || []).forEach(stmt => {
+    for (const stmt of (node.statements || [])) {
       lastNode = this.visit(stmt, lastNode, exit);
-    });
+      if (this.isTerminator(stmt)) break; // FIX #3: unreachable code — stop
+    }
     return lastNode;
   }
 

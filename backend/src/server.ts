@@ -5,7 +5,6 @@ import analyzeRoutes from './routes/analyze';
 
 const app = express();
 
-app.use(cors());
 // Vercel provides process.env.PORT; 3000 is our local fallback
 const PORT = process.env.PORT || 3000;
 
@@ -42,8 +41,8 @@ app.use(cors({
     credentials: true
 }));
 
-// Enable parsing of JSON bodies
-app.use(bodyParser.json());
+// Enable parsing of JSON bodies (1 MB max to guard against oversized payloads)
+app.use(bodyParser.json({ limit: '1mb' }));
 
 /**
  * 2. REQUEST LOGGING
@@ -63,12 +62,8 @@ app.use((req: Request, _res: Response, next: NextFunction) => {
 app.use('/api', analyzeRoutes);
 
 // Simple Health Check for Vercel
-app.get('/', (req, res) => {
+app.get('/', (_req, res) => {
     res.status(200).send('CodeSense Analysis Engine is Online.');
-});
-
-app.get('/', (req, res) => {
-  res.status(200).send('CodeSense Analysis Engine is Online.');
 });
 
 // ✅ ADD THIS — catches any unmatched route
@@ -93,32 +88,12 @@ app.use((req: Request, res: Response) => {
   });
 });
 
-// Global error handler (keep this LAST)
-app.use((err: any, _req: Request, res: Response, _next: NextFunction) => {
-  console.error(`🔥 Backend Error: ${err.message}`);
-  res.status(200).json({
-    success: false,
-    errors: [{
-      type: 'syntactic',
-      message: err.message,
-      line: err.location?.start?.line || 0
-    }],
-    safetyChecks: [],
-    cfg: { nodes: [], edges: [] },
-    explanations: ['The engine encountered an unexpected structure.']
-  });
-});
-
 /**
  * 4. GLOBAL ERROR HANDLER
  */
 app.use((err: any, _req: Request, res: Response, _next: NextFunction) => {
-    console.error(`🔥 Backend Error Caught: ${err.message}`);
-
-    console.error("DEBUG FULL ERROR:", err);
-
+    console.error(`🔥 Backend Error: ${err.message}`, err);
     const isSyntactic = err.name === 'SyntaxError' || err.message.includes('Expected');
-
     res.status(200).json({
         success: false,
         errors: [{

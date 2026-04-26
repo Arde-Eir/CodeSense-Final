@@ -497,7 +497,7 @@ export interface TutorialHint {
 
 export interface MissionProgress {
   questId: string;
-  status: 'locked' | 'in-progress' | 'completed';
+  status: 'active' | 'completed' | 'locked';
   attempts: number;
   hintsUsed: number;
   completedAt?: Date;
@@ -578,11 +578,6 @@ export interface LayeredGraph {
   height: number;
 }
 
-export interface GraphEdge {
-  from: string;
-  to: string;
-  label?: string;
-}
 // ============================================================================
 // NEW AST Node Types (Phase 2 grammar extensions)
 // ============================================================================

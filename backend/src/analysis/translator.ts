@@ -32,6 +32,23 @@ export class Translator {
   private explanations: string[] = [];
   private indentLevel: number = 0;
   private currentFunctionName: string = '';
+  /**
+   * FIX (user bug #4): Many "💡 Mentor Tip" phrases were emitted once per
+   * occurrence of their parent statement, so an else-if chain repeated the
+   * same "Like choosing a path at a crossroads" line for every branch.
+   * This set holds the text of every 💡 tip already emitted in the current
+   * translate() call; pushTipOnce() uses it to skip duplicates.
+   */
+  private emittedTips: Set<string> = new Set();
+
+  /** Push a tip (anything with 💡), but only the first time its text is seen
+   *  within a single translate() call. Indentation is ignored for the key. */
+  private pushTipOnce(line: string): void {
+    const key = line.trim();
+    if (this.emittedTips.has(key)) return;
+    this.emittedTips.add(key);
+    this.explanations.push(line);
+  }
 
   private cleanName(name: any): string {
   if (!name) return 'unknown';
@@ -48,6 +65,7 @@ export class Translator {
   translate(ast: ASTNode): string[] {
     this.explanations = [];
     this.indentLevel = 0;
+    this.emittedTips = new Set(); // FIX #4: reset the tip-dedupe set per call
     this.visit(ast);
     return this.explanations;
   }
@@ -145,7 +163,7 @@ export class Translator {
       const size = node.dimensions?.[0] ? this.formatExpr(node.dimensions[0]) : '?';
       this.explanations.push(`${this.indent()}📦 **Array: '${name}[${size}]'** (element type: ${node.varType})`);
       this.explanations.push(`${this.indent()}   Like a row of ${size} numbered lockers, each holding one ${node.varType}.`);
-      this.explanations.push(`${this.indent()}   💡 *Mentor Tip: Remember that C++ starts counting at locker [0]!*`);
+      this.pushTipOnce(`${this.indent()}   💡 *Mentor Tip: Remember that C++ starts counting at locker [0]!*`);
     } else {
       this.explanations.push(`${this.indent()}📦 **Variable: '${name}'** (type: ${node.varType})`);
     }
@@ -290,7 +308,7 @@ export class Translator {
       node.elseBranch.forEach(stmt => this.visit(stmt));
       this.indentLevel--;
     }
-    this.explanations.push(`${this.indent()}💡 Like choosing a path at a crossroads.`);
+    this.pushTipOnce(`${this.indent()}💡 Like choosing a path at a crossroads.`);
     this.explanations.push('');
   }
 
@@ -405,7 +423,7 @@ export class Translator {
       this.explanations.push(`${this.indent()}🗑️  **Free Dynamic Object: delete ${target}**`);
       this.explanations.push(`${this.indent()}   Returns memory for the single object back to the system.`);
     }
-    this.explanations.push(`${this.indent()}   💡 After delete, the pointer is dangling — don't use it!`);
+    this.pushTipOnce(`${this.indent()}   💡 After delete, the pointer is dangling — don't use it!`);
     this.explanations.push('');
   }
 
@@ -418,7 +436,7 @@ export class Translator {
     const indices = node.indices.map(i => this.formatExpr(i)).join('][');
     this.explanations.push(`${this.indent()}🔍 **Read Array Element: ${name}[${indices}]**`);
     this.explanations.push(`${this.indent()}   Accessing box number ${indices} inside '${name}'.`);
-    this.explanations.push(`${this.indent()}   💡 Remember: C++ counts from **0**. So [0] is the 1st element, and [1] is the 2nd!`);
+    this.pushTipOnce(`${this.indent()}   💡 Remember: C++ counts from **0**. So [0] is the 1st element, and [1] is the 2nd!`);
     this.explanations.push('');
   }
 
