@@ -3,7 +3,7 @@ import React, { useEffect, useState, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from './components/AuthScreen';
 import { supabase } from './services/supabase';
-import { getLevelProgress, getXPToNextLevel, getLevelName, XP_LEVELS } from './types'
+import { getLevelProgress, getXPToNextLevel, getLevelName, XP_LEVELS, getRank } from './types'
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -358,7 +358,8 @@ export const ProgressPage: React.FC = () => {
   }
   if (!stats) return null
 
-  const levelName = getLevelName((stats.currentLevel as 1|2|3|4|5))
+  // Rank from XP, not from stale `currentlevel`. See types/index.ts getRank().
+  const levelName = getRank(stats.totalXP ?? 0).name
   const maxCount = Math.max(...weeklyData.map(d => d.count), 1)
 
   const heatColor = (count: number) => {

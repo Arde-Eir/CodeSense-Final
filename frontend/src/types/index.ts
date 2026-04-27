@@ -527,6 +527,37 @@ export function calculateLevel(totalXP: number): 1 | 2 | 3 | 4 | 5 {
   return 1
 }
 
+// ─── Rank: single source of truth ────────────────────────────────────────────
+// Derive everything from XP, not from the persisted `currentlevel` column.
+// `currentlevel` may be stale on legacy rows (the old RPC used `1 + xp/500`
+// which produced level=3 at just 1000 XP, mapping to "Lord" instead of
+// "Knight"). Using XP avoids that drift entirely.
+export interface RankInfo {
+  level: 1 | 2 | 3 | 4 | 5
+  name:  'Squire' | 'Knight' | 'Lord' | 'Duke' | 'King'
+  icon:  string
+  color: string
+}
+
+const RANK_TABLE: Record<1 | 2 | 3 | 4 | 5, RankInfo> = {
+  1: { level: 1, name: 'Squire', icon: '🛡️', color: '#8b949e' },
+  2: { level: 2, name: 'Knight', icon: '⚔️', color: '#58a6ff' },
+  3: { level: 3, name: 'Lord',   icon: '🌟', color: '#a371f7' },
+  4: { level: 4, name: 'Duke',   icon: '👑', color: '#e3b341' },
+  5: { level: 5, name: 'King',   icon: '🔱', color: '#ffd700' },
+}
+
+/** Returns the rank label, icon, and color for a given XP total. Use this
+ *  instead of trusting `users.currentlevel`, which can be stale. */
+export function getRank(totalXP: number): RankInfo {
+  return RANK_TABLE[calculateLevel(totalXP)]
+}
+
+/** Convenience accessor when you already have a level number. */
+export function getRankByLevel(level: 1 | 2 | 3 | 4 | 5): RankInfo {
+  return RANK_TABLE[level]
+}
+
 // ============================================================================
 // API Request/Response Types
 // ============================================================================

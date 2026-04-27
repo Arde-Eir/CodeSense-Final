@@ -3,7 +3,7 @@ import React, { useEffect, useState, useRef, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from './components/AuthScreen';
 import { supabase } from './services/supabase';
-import { getLevelProgress, getXPToNextLevel, getLevelName } from './types'
+import { getLevelProgress, getXPToNextLevel, getRank } from './types'
 import { OnboardingWalkthrough, ONBOARD_KEY } from './components/OnboardingWalkthrough'
 import { PlayerDetailModal } from './components/PlayerDetailModal'
 
@@ -1231,7 +1231,9 @@ export const HomeDashboard: React.FC = () => {
     else { logout(); await new Promise(r => setTimeout(r, 50)); navigate('/', { replace: true }) }
   }
 
-  const currentLevelName = user ? getLevelName((user.currentLevel as 1 | 2 | 3 | 4 | 5) || 1) : 'Squire'
+  // Derive rank name from XP, NOT from `currentlevel` — legacy rows can have
+  // a stale level number (the old RPC used `1 + xp/500`). XP is the source of truth.
+  const currentLevelName = user ? getRank(user.totalXP ?? 0).name : 'Squire'
 
   const handleSearchActionClick = (action: Pick<typeof QUICK_ACTIONS[0], 'label' | 'path'>) => {
     setSearchOpen(false)
@@ -1348,7 +1350,7 @@ export const HomeDashboard: React.FC = () => {
                       </div>
                       <div style={{ flex: 1 }}>
                         <div style={{ color: '#e6edf3', fontSize: '13px', fontWeight: '600' }}>{p.playername}</div>
-                        <div style={{ color: '#8b949e', fontSize: '11px' }}>{getLevelName(p.currentlevel as 1|2|3|4|5)} · {p.totalxp} XP</div>
+                        <div style={{ color: '#8b949e', fontSize: '11px' }}>{getRank(p.totalxp ?? 0).name} · {p.totalxp} XP</div>
                       </div>
                       <span style={{ color: '#484f58', fontSize: '11px' }}>👤</span>
                     </button>
@@ -1716,7 +1718,7 @@ export const HomeDashboard: React.FC = () => {
                             {isMe && <span style={{ fontSize: 10, color: '#4caf50', marginLeft: 5, opacity: 0.85 }}>(you)</span>}
                           </div>
                           <div style={{ fontSize: 10, color: '#484f58', marginTop: 1 }}>
-                            {getLevelName((player.currentlevel as 1|2|3|4|5) || 1)}
+                            {getRank(player.totalxp ?? 0).name}
                           </div>
                         </div>
                         <div style={{ textAlign: 'right' }}>

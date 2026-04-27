@@ -3,7 +3,7 @@ import React, { useEffect, useState, useRef, useMemo } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useAuth } from './components/AuthScreen'
 import { supabase } from './services/supabase'
-import { getLevelName, getLevelProgress, getXPToNextLevel } from './types'
+import { getLevelProgress, getXPToNextLevel, getRank } from './types'
 
 interface Player {
   id: string
@@ -73,7 +73,8 @@ const PlayerDetailModal: React.FC<{ player: Player; currentUserId?: string; onCl
     return () => document.removeEventListener('keydown', onKey)
   }, [onClose])
 
-  const level = Math.min(Math.max(player.currentlevel || 1, 1), 5) as 1|2|3|4|5
+  // Rank from XP, not from `currentlevel` — see types/index.ts getRank().
+  const rank     = getRank(player.totalxp ?? 0)
   const progress = getLevelProgress(player.totalxp)
   const xpToNext = getXPToNextLevel(player.totalxp)
   const isMe = currentUserId === player.id
@@ -119,7 +120,7 @@ const PlayerDetailModal: React.FC<{ player: Player; currentUserId?: string; onCl
               {isMe && <span style={{ fontSize: '11px', color: '#4caf50', marginLeft: '6px', fontWeight: '700' }}>(you)</span>}
             </div>
             <div style={{ color: '#8b949e', fontSize: '12px', marginTop: '4px' }}>
-              {getLevelName(level)} · Joined {new Date(player.createdat).toLocaleDateString([], { month: 'short', year: 'numeric' })}
+              {rank.name} · Joined {new Date(player.createdat).toLocaleDateString([], { month: 'short', year: 'numeric' })}
             </div>
             <div style={{ marginTop: '6px', display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
               {player.user_type && (
@@ -331,7 +332,7 @@ export const LeaderboardPage: React.FC = () => {
 
   const shareMyRank = () => {
     if (!myPlayer || !myRank) return
-    const txt = `🏆 CodeSense Leaderboard\nRank #${myRank} · ${myPlayer.playername}\n⭐ ${myPlayer.totalxp} XP · ${getLevelName(myPlayer.currentlevel as 1|2|3|4|5)} · 🔬 ${myPlayer.sandbox_runs} analyses`
+    const txt = `🏆 CodeSense Leaderboard\nRank #${myRank} · ${myPlayer.playername}\n⭐ ${myPlayer.totalxp} XP · ${getRank(myPlayer.totalxp ?? 0).name} · 🔬 ${myPlayer.sandbox_runs} analyses`
     navigator.clipboard?.writeText(txt).then(() => {
       setShareMsg('Copied to clipboard!')
       setTimeout(() => setShareMsg(''), 2500)
@@ -421,7 +422,7 @@ export const LeaderboardPage: React.FC = () => {
                 {myPlayer.playername} <span style={{ fontSize: '11px', opacity: 0.7 }}>(you)</span>
               </div>
               <div style={{ color: '#8b949e', fontSize: '12px', marginTop: '2px' }}>
-                {getLevelName(myPlayer.currentlevel as 1|2|3|4|5)} · {myPlayer.totalxp.toLocaleString()} XP · {myPlayer.sandbox_runs} sandbox runs
+                {getRank(myPlayer.totalxp ?? 0).name} · {myPlayer.totalxp.toLocaleString()} XP · {myPlayer.sandbox_runs} sandbox runs
               </div>
             </div>
             <div style={{ textAlign: 'right' }}>
@@ -660,7 +661,7 @@ export const LeaderboardPage: React.FC = () => {
                   {/* Level */}
                   <div style={{ display: 'flex', alignItems: 'center' }}>
                     <span style={{ color: '#64b5f6', fontSize: '12px', fontWeight: '600' }}>
-                      {getLevelName(player.currentlevel as 1|2|3|4|5)}
+                      {getRank(player.totalxp ?? 0).name}
                     </span>
                   </div>
 

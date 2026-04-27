@@ -23,6 +23,7 @@ import React, { useState, useEffect, useCallback, useRef } from 'react';
 import {
   ReactFlow, Background, Controls, MarkerType,
   Handle, Position, applyNodeChanges, applyEdgeChanges, addEdge,
+  useReactFlow, ReactFlowProvider,
 } from '@xyflow/react';
 import type { Connection, Edge, Node, NodeProps } from '@xyflow/react';
 import ELK from 'elkjs/lib/elk.bundled.js';
@@ -58,7 +59,8 @@ interface EdgeEditState { edgeId: string; label: string; x: number; y: number; }
 type FlowNodeType =
   | 'terminator' | 'process'    | 'decision' | 'io'
   | 'predefined' | 'connector'  | 'document'
-  | 'manual_input' | 'delay'   | 'database';
+  | 'manual_input' | 'delay'   | 'database'
+  | 'junction';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // §2  CONSTANTS
@@ -79,6 +81,7 @@ const NODE_COLORS: Record<FlowNodeType, string> = {
   manual_input: '#ff7043',
   delay:        '#78909c',
   database:     '#66bb6a',
+  junction:     '#e040fb',
 };
 
 const DEFAULT_LABELS: Record<FlowNodeType, string> = {
@@ -92,6 +95,7 @@ const DEFAULT_LABELS: Record<FlowNodeType, string> = {
   manual_input: 'Input',
   delay:        'Delay',
   database:     'Data Store',
+  junction:     '⬡',
 };
 
 const NODE_SIZES: Record<FlowNodeType, { width: number; height: number }> = {
@@ -105,6 +109,7 @@ const NODE_SIZES: Record<FlowNodeType, { width: number; height: number }> = {
   manual_input: { width: 185, height: 75  },
   delay:        { width: 185, height: 70  },
   database:     { width: 175, height: 95  },
+  junction:     { width: 36,  height: 36  },
 };
 
 const EDITOR_ACCENT: Record<string, string> = {
@@ -113,6 +118,7 @@ const EDITOR_ACCENT: Record<string, string> = {
   predefined:   '#ab47bc', connector:    '#26c6da',
   document:     '#ef5350', manual_input: '#ff7043',
   delay:        '#78909c', database:     '#66bb6a',
+  junction:     '#e040fb',
 };
 
 const EDITOR_TITLE: Record<string, string> = {
@@ -126,6 +132,7 @@ const EDITOR_TITLE: Record<string, string> = {
   manual_input: 'Manual Input (cin)',
   delay:        'Delay / Wait',
   database:     'Database / Data Store',
+  junction:     'Junction (Offset / Merge Point)',
 };
 
 const CODE_PLACEHOLDER: Record<string, string> = {
@@ -139,6 +146,7 @@ const CODE_PLACEHOLDER: Record<string, string> = {
   delay:        'e.g.  sleep(1000);',
   database:     'e.g.  scores[i]',
   terminator:   '',
+  junction:     '',
 };
 
 const PALETTE_ITEMS: {
@@ -216,6 +224,16 @@ const PALETTE_ITEMS: {
         <rect x="2" y="5" width="32" height="14" fill="#050d05" stroke="#66bb6a" strokeWidth="1.5" />
         <ellipse cx="18" cy="19" rx="16" ry="4" fill="#050d05" stroke="#66bb6a" strokeWidth="1.5" />
         <ellipse cx="18" cy="5"  rx="16" ry="4" fill="#0d220d" stroke="#66bb6a" strokeWidth="1.5" />
+      </svg>
+    ),
+  },
+  {
+    type: 'junction', label: 'Junction (Offset)', iso: 'ISO: Junction / Merge',
+    shape: (
+      <svg width={28} height={28} viewBox="0 0 28 28" style={{ flexShrink: 0 }}>
+        {/* Offset shape: like a small rotated square shifted slightly — used as a merge/split point */}
+        <polygon points="14,3 25,14 14,25 3,14" fill="#1a0820" stroke="#e040fb" strokeWidth="1.5" />
+        <circle cx="14" cy="14" r="3.5" fill="#e040fb" opacity="0.85" />
       </svg>
     ),
   },
@@ -534,12 +552,52 @@ const DatabaseNode = ({ data, selected }: NodeProps<Node<ExtendedNodeData>>) => 
   );
 };
 
+// ── 11. JUNCTION — small offset diamond (merge / split point) ─────────────────
+// This is the "Offset Shape" from ISO 5807 / ANSI — a tiny filled diamond used
+// as a junction where multiple flow lines meet or branch. It renders all four
+// cardinal handles so edges can arrive/depart from any direction.
+const JunctionNode = ({ data, selected }: NodeProps<Node<ExtendedNodeData>>) => {
+  const S = 36; // overall bounding box (square)
+  const { color } = useNodeAppearance('junction', data);
+  const fill = data.violation ? '#2d0820' : data.visited ? '#1a0d2e' : '#1a0820';
+  const points = `${S/2},3 ${S-3},${S/2} ${S/2},${S-3} 3,${S/2}`;
+  return (
+    <BaseNode
+      data={data}
+      selected={selected}
+      style={{ width: S, height: S }}
+    >
+      <svg
+        width={S} height={S}
+        viewBox={`0 0 ${S} ${S}`}
+        style={{ position: 'absolute', inset: 0, filter: `drop-shadow(0 2px 8px ${color}88)` }}
+      >
+        <polygon
+          points={points}
+          fill={fill}
+          stroke={color}
+          strokeWidth={selected ? 2.5 : 2}
+          strokeLinejoin="round"
+        />
+        {/* Centre dot to visually signal "junction" */}
+        <circle cx={S/2} cy={S/2} r={4} fill={color} opacity={0.9} />
+      </svg>
+      {/* Four cardinal handles — junctions accept / emit from all sides */}
+      <Handle type="target" position={Position.Top}    id="t" style={{ ...handleStyle(color), top: -2,    left: '50%', transform: 'translateX(-50%)' }} />
+      <Handle type="target" position={Position.Left}   id="l" style={{ ...handleStyle(color), left: -2,   top: '50%',  transform: 'translateY(-50%)' }} />
+      <Handle type="source" position={Position.Bottom} id="b" style={{ ...handleStyle(color), bottom: -2, left: '50%', transform: 'translateX(-50%)' }} />
+      <Handle type="source" position={Position.Right}  id="r" style={{ ...handleStyle(color), right: -2,  top: '50%',  transform: 'translateY(-50%)' }} />
+    </BaseNode>
+  );
+};
+
 const nodeTypes = {
   terminator:   TerminatorNode, process:      ProcessNode,
   decision:     DecisionNode,   io:           IONode,
   predefined:   PredefinedNode, connector:    ConnectorNode,
   document:     DocumentNode,   manual_input: ManualInputNode,
   delay:        DelayNode,      database:     DatabaseNode,
+  junction:     JunctionNode,
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -605,7 +663,7 @@ const NodePalette: React.FC<{
 
           {/* Keyboard shortcut hints */}
           <div style={{ padding: '5px 4px', fontSize: 9, color: '#484f58', lineHeight: 1.7, borderTop: '1px solid #21262d', marginTop: 2 }}>
-            <strong style={{ color: '#3d444d' }}>Tips:</strong> Double-click a node to edit it · Double-click an edge to label it · Press <kbd style={{ background: '#1c2128', border: '1px solid #30363d', borderRadius: 3, padding: '0 3px', fontSize: 8 }}>Backspace</kbd> to delete the selected item
+            <strong style={{ color: '#3d444d' }}>Tips:</strong> Double-click a node to edit it · Double-click an edge to label it · Press <kbd style={{ background: '#1c2128', border: '1px solid #30363d', borderRadius: 3, padding: '0 3px', fontSize: 8 }}>Backspace</kbd> to delete the selected item · <strong style={{ color: '#e040fb' }}>Alt+click</strong> an edge to insert a Junction at that point
           </div>
         </div>
       )}
@@ -1168,7 +1226,7 @@ const EdgeLabelEditor: React.FC<{
 // Safety cap — above this, we still render, but we warn the user and defer ELK
 const MAX_NODES_SAFE = 200;
 
-export const FlowGraph: React.FC<Props> = ({
+const FlowGraphInner: React.FC<Props> = ({
   cfg, safetyChecks = [], onNodeClick,
   isDrawerOpen = false, onGraphChange, onCodeGenerated,
 }) => {
@@ -1185,6 +1243,72 @@ export const FlowGraph: React.FC<Props> = ({
   const [editState,     setEditState]     = useState<EditState | null>(null);
   const [edgeEditState, setEdgeEditState] = useState<EdgeEditState | null>(null);
   const [isDirty, setIsDirty]             = useState(false);
+
+  // Used by mid-segment anchoring to convert screen → flow coordinates
+  const { screenToFlowPosition } = useReactFlow();
+
+  // ── Mid-segment anchoring ──────────────────────────────────────────────────
+  // Alt+Click on any edge inserts a Junction node at the click point and splits
+  // the edge: original_source → junction → original_target. The user can then
+  // draw new edges from the junction to achieve edge-to-point connections.
+  const handleEdgeClick = useCallback((evt: React.MouseEvent, edge: Edge) => {
+    if (!evt.altKey) return; // regular click falls through to double-click handler
+    evt.preventDefault();
+    evt.stopPropagation();
+
+    // Place the junction at the cursor position in flow coordinates
+    const flowPos = screenToFlowPosition({ x: evt.clientX, y: evt.clientY });
+    const junctionId = `junction-${Date.now()}`;
+
+    const junctionNode: Node<ExtendedNodeData> = {
+      id:   junctionId,
+      type: 'junction',
+      position: { x: flowPos.x - 18, y: flowPos.y - 18 }, // centre on cursor
+      data: {
+        id:    junctionId,
+        label: '⬡',
+        code:  '',
+        line:  -1,
+        onHover: setHoverInfo,
+        onEdit:  (nid: string) => handleOpenEditRef.current(nid),
+      } as ExtendedNodeData,
+      draggable: true,
+    };
+
+    const edgeStyle  = { stroke: '#e040fb', strokeWidth: 2 };
+    const markerEnd  = { type: MarkerType.ArrowClosed, color: '#e040fb' };
+    const sharedOpts = { type: 'default', style: edgeStyle, markerEnd,
+                         labelStyle: { fill: '#ffffff', fontSize: '11px', fontWeight: '600' },
+                         labelBgStyle: { fill: '#0d1117', fillOpacity: 0.9 },
+                         labelBgPadding: [5, 8] as [number, number] };
+
+    // Edge A: original source → junction (inherits original label so user sees it)
+    const edgeA: Edge = {
+      id:     `${junctionId}-a`,
+      source: edge.source,
+      sourceHandle: edge.sourceHandle ?? undefined,
+      target: junctionId,
+      label:  edge.label ?? '',
+      ...sharedOpts,
+    };
+    // Edge B: junction → original target (no label needed, fresh segment)
+    const edgeB: Edge = {
+      id:     `${junctionId}-b`,
+      source: junctionId,
+      target: edge.target,
+      targetHandle: edge.targetHandle ?? undefined,
+      ...sharedOpts,
+    };
+
+    setNodes(nds => [...nds, junctionNode]);
+    setEdges(eds => {
+      // Remove the original edge, insert the two replacement segments
+      const next = [...eds.filter(e => e.id !== edge.id), edgeA, edgeB];
+      setNodes(nds2 => { onGraphChange?.(nds2, next); return nds2; });
+      return next;
+    });
+    setIsDirty(true);
+  }, [screenToFlowPosition, onGraphChange]);
 
   // ── Node edit handlers ─────────────────────────────────────────────────────
 
@@ -1568,12 +1692,12 @@ export const FlowGraph: React.FC<Props> = ({
         </div>
       )}
 
-      {/* Lock/Unlock toggle (top-left, separate from React Flow's interactivity control) */}
+      {/* Lock/Unlock toggle — bottom-right, above the React Flow zoom controls */}
       <button
         onClick={() => setIsLocked(l => !l)}
         title={isLocked ? 'Unlock — re-enable drag & pan' : 'Lock — freeze nodes & pan (zoom stays on)'}
         style={{
-          position: 'absolute', bottom: 12, left: 12, zIndex: 1001,
+          position: 'absolute', bottom: 130, right: 12, zIndex: 1001,
           background: isLocked ? 'rgba(248,81,73,0.15)' : 'rgba(13,17,23,0.9)',
           border: `1px solid ${isLocked ? 'rgba(248,81,73,0.45)' : '#30363d'}`,
           color: isLocked ? '#f85149' : '#8b949e',
@@ -1596,6 +1720,7 @@ export const FlowGraph: React.FC<Props> = ({
         onEdgesChange={onEdgesChangeHandler}
         onConnect={isBuildMode && !isLocked ? onConnectHandler : undefined}
         onNodeClick={handleNodeClick}
+        onEdgeClick={isBuildMode && !isLocked ? handleEdgeClick : undefined}
         onEdgeDoubleClick={isBuildMode && !isLocked ? handleEdgeDoubleClick : undefined}
         fitView
         fitViewOptions={{ padding: 0.25, includeHiddenNodes: true, minZoom: 0.1, maxZoom: 1.0, duration: 800 }}
@@ -1635,8 +1760,9 @@ export const FlowGraph: React.FC<Props> = ({
             <strong style={{ color: '#30363d', display: 'block', marginBottom: 6 }}>The canvas is empty</strong>
             {isBuildMode ? (
               <>
-                Use <strong style={{ color: '#58a6ff' }}>➕ ADD NODE</strong> — 10 ISO 5807 shapes are available.<br />
-                Label decision edges <strong style={{ color: '#4caf50' }}>true</strong> / <strong style={{ color: '#ff6b6b' }}>false</strong>, then click <strong style={{ color: '#a855f7' }}>⚡ GENERATE C++</strong>.
+                Use <strong style={{ color: '#58a6ff' }}>➕ ADD NODE</strong> — 11 ISO 5807 shapes are available.<br />
+                Label decision edges <strong style={{ color: '#4caf50' }}>true</strong> / <strong style={{ color: '#ff6b6b' }}>false</strong>, then click <strong style={{ color: '#a855f7' }}>⚡ GENERATE C++</strong>.<br />
+                <span style={{ fontSize: 10, color: '#3d444d' }}>💡 <strong style={{ color: '#e040fb' }}>Alt+click</strong> any edge to insert a Junction node at that point.</span>
               </>
             ) : (
               <>
@@ -1676,3 +1802,13 @@ export const FlowGraph: React.FC<Props> = ({
     </div>
   );
 };
+
+// ── Provider wrapper ──────────────────────────────────────────────────────────
+// useReactFlow() (used in FlowGraphInner for mid-segment anchoring) must be
+// called inside a ReactFlowProvider subtree. Wrapping here keeps the public
+// API unchanged — callers still import { FlowGraph }.
+export const FlowGraph: React.FC<Props> = (props) => (
+  <ReactFlowProvider>
+    <FlowGraphInner {...props} />
+  </ReactFlowProvider>
+);

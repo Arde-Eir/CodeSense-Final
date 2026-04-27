@@ -13,7 +13,7 @@
  */
 import React, { useEffect, useState } from 'react'
 import { supabase } from '../services/supabase'
-import { getLevelName, getLevelProgress, getXPToNextLevel } from '../types'
+import { getLevelProgress, getXPToNextLevel, getRank } from '../types'
 
 interface PlayerRow {
   id: string
@@ -88,7 +88,8 @@ export const PlayerDetailModal: React.FC<{
   }, [onClose])
 
   const isMe = currentUserId === userId
-  const level = player ? Math.min(Math.max(player.currentlevel || 1, 1), 5) as 1|2|3|4|5 : 1
+  // Rank from XP (not stale `currentlevel`) — see types/index.ts getRank().
+  const rank     = player ? getRank(player.totalxp ?? 0) : null
   const progress = player ? getLevelProgress(player.totalxp) : 0
   const xpToNext = player ? getXPToNextLevel(player.totalxp) : null
 
@@ -149,7 +150,7 @@ export const PlayerDetailModal: React.FC<{
                   {isMe && <span style={{ fontSize: '11px', color: '#4caf50', marginLeft: '6px', fontWeight: '700' }}>(you)</span>}
                 </div>
                 <div style={{ color: '#8b949e', fontSize: '12px', marginTop: '4px' }}>
-                  {getLevelName(level)} · Joined {new Date(player.createdat).toLocaleDateString([], { month: 'short', year: 'numeric' })}
+                  {rank?.name ?? 'Squire'} · Joined {new Date(player.createdat).toLocaleDateString([], { month: 'short', year: 'numeric' })}
                 </div>
                 <div style={{ marginTop: '6px', display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
                   {player.user_type && (

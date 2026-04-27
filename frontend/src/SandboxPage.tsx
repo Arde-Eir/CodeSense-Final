@@ -10,7 +10,7 @@ import { useAuth } from './components/AuthScreen';
 import { DataIsolationService } from './Dataisolationservice';
 import { DatabaseService } from './services/DatabaseService';
 import { supabase } from './services/supabase';
-import { getLevelName, getLevelProgress, getXPToNextLevel } from './types';
+import { getLevelProgress, getXPToNextLevel, getRank } from './types';
 import type { AnalysisResult, SymbolInfo } from './types';
 import { ASTViewer } from './components/Visualizer/Astviewer';
 import { MathTab } from './components/Visualizer/MathTab';
@@ -444,10 +444,11 @@ int main() {
   const fetchLiveStats = async () => {
     if (!user?.id) return;
     try {
-      const { data } = await supabase.from('users').select('totalxp, currentlevel, sandbox_runs').eq('id', user.id).single();
+      const { data } = await supabase.from('users').select('totalxp, sandbox_runs').eq('id', user.id).single();
       if (data) {
-        const level = Math.min(Math.max(data.currentlevel ?? 1, 1), 5) as 1 | 2 | 3 | 4 | 5;
-        setLiveStats({ totalXP: data.totalxp ?? 0, currentLevel: level, sandboxRuns: data.sandbox_runs ?? 0, rankName: getLevelName(level) });
+        // Rank derived from XP, not from `currentlevel` (which can be stale).
+        const rank = getRank(data.totalxp ?? 0);
+        setLiveStats({ totalXP: data.totalxp ?? 0, currentLevel: rank.level, sandboxRuns: data.sandbox_runs ?? 0, rankName: rank.name });
       }
     } catch (err) { console.error('Failed to fetch live stats:', err); }
   };
