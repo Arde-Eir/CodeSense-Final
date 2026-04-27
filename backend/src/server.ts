@@ -22,6 +22,7 @@ const allowedOrigins = [
     'http://localhost:4173',
     'https://code-sense-final-lsif.vercel.app',
     'https://codesense-4f57.up.railway.app',
+    'https://ubiquitous-peony-399ebd.netlify.app',
     ...envOrigins,
 ];
 
