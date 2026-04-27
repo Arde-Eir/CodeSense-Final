@@ -12,11 +12,17 @@ const PORT = process.env.PORT || 3000;
  * 1. DYNAMIC CORS CONFIGURATION
  * Updated to allow local development, production, and VS Code Dev Tunnels.
  */
+const envOrigins = (process.env.CORS_ORIGINS ?? '')
+  .split(',')
+  .map(o => o.trim())
+  .filter(Boolean);
+
 const allowedOrigins = [
-    'http://localhost:5173', 
-    'https://code-sense-final-lsif.vercel.app', // Production URL
-    'https://l00qvddz-5173.asse.devtunnels.ms',  // Your current Dev Tunnel
-    'https://codesense-4f57.up.railway.app' // Railway Deployment
+    'http://localhost:5173',
+    'http://localhost:4173',
+    'https://code-sense-final-lsif.vercel.app',
+    'https://codesense-4f57.up.railway.app',
+    ...envOrigins,
 ];
 
 app.use(cors({
@@ -27,10 +33,11 @@ app.use(cors({
         // - It's a Vercel preview branch (.vercel.app)
         // - It's a VS Code Dev Tunnel (.devtunnels.ms)
         if (
-            !origin || 
-            allowedOrigins.includes(origin) || 
-            origin.endsWith('.vercel.app') || 
-            origin.endsWith('.devtunnels.ms') 
+            !origin ||
+            allowedOrigins.includes(origin) ||
+            origin.endsWith('.vercel.app') ||
+            origin.endsWith('.devtunnels.ms') ||
+            origin.endsWith('.netlify.app')
         ) {
             callback(null, true);
         } else {
