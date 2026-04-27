@@ -195,6 +195,8 @@ router.post('/analyze', (req, res) => {
           sym => e.message.includes(`'${sym}'`) && e.message.toLowerCase().includes('unused'),
         ),
     );
+    const extraWarnings = collectAstBeginnerWarnings(ast);
+    const combinedWarnings = dedupeWarnings([...semanticWarnings, ...extraWarnings]);
 
     if (semanticErrors.length > 0) {
       // Build partial CFG even on semantic error so the frontend can show
@@ -208,7 +210,7 @@ router.post('/analyze', (req, res) => {
         ast: getCleanAST(ast),
         symbolTable: filterUserSymbols(typeResult.symbolTable),
         errors: semanticErrors,
-        warnings: semanticWarnings,
+        warnings: combinedWarnings,
         safetyChecks: [],
         cfg: partialCfg,
         cognitiveComplexity: 0,
@@ -217,7 +219,7 @@ router.post('/analyze', (req, res) => {
         explanations: [
           '❌ **Status:** Semantic Analysis Failed',
           ...semanticErrors.map(e => `🚨 **Error (L${e.line}):** ${e.message}`),
-          ...semanticWarnings.map(w => `⚠️ **Warning (L${w.line}):** ${w.message}`),
+          ...combinedWarnings.map(w => `⚠️ **Warning (L${w.line}):** ${w.message}`),
         ],
       });
     }
@@ -302,7 +304,7 @@ try {
     // CRITICAL: Adding this string triggers the PASS status in your LogsTab UI
     explanations: [
         "✅ **Status:** Analysis Successful", 
-        ...semanticWarnings.map(w => `⚠️ **WARNING (L${w.line}):** ${w.message}`),
+        ...combinedWarnings.map(w => `⚠️ **WARNING (L${w.line}):** ${w.message}`),
         ...mentorExplanations,
     ],
     // OPTIONAL: If your frontend specifically looks for a 'logs' key, add it here
@@ -312,7 +314,7 @@ try {
         { message: "Phase 3: Symbolic execution complete.", severity: "success" }
     ],
     errors: [],
-    warnings: semanticWarnings,
+    warnings: combinedWarnings,
     gamification: {
         xpEarned: reward.xp,
         qualityBonus: reward.bonus,
@@ -405,3 +407,72 @@ function getCleanAST(node: any): any {
 }
 
 export default router;
+
+function collectAstBeginnerWarnings(ast: any): AnalysisError[] {
+  const warnings: AnalysisError[] = [];
+  const pushed = new Set<string>();
+
+  const pushWarning = (line: number, message: string) => {
+    const key = `${line}|${message}`;
+    if (pushed.has(key)) return;
+    pushed.add(key);
+    warnings.push({
+      type: 'semantic',
+      severity: 'warning',
+      message,
+      line: line || 0,
+      column: 0,
+    });
+  };
+
+  const visit = (node: any) => {
+    if (!node || typeof node !== 'object') return;
+
+    if (node.type === 'IfStatement') {
+      const cond = node.condition;
+      if (cond?.type === 'Assignment' && cond.operator === '=') {
+        pushWarning(
+          cond.line || node.line || 0,
+          `Suspicious assignment in condition: use '==' for comparison instead of '='.`,
+        );
+      }
+    }
+
+    if (node.type === 'FunctionDecl' && node.name === 'main') {
+      const body = Array.isArray(node.body) ? node.body : [];
+      const hasLogic = body.some((s: any) => {
+        if (!s) return false;
+        if (s.type === 'ReturnStatement') return false;
+        if (s.type === 'Block' && Array.isArray(s.statements) && s.statements.length === 0) return false;
+        return true;
+      });
+      if (!hasLogic) {
+        pushWarning(
+          node.line || 0,
+          `No executable logic found in 'main' (only return/empty statements). Add at least one meaningful statement.`,
+        );
+      }
+    }
+
+    const candidates = [node.body, node.statements, node.thenBranch, node.elseBranch, node.cases, node.handlers];
+    candidates.forEach((c: any) => {
+      if (Array.isArray(c)) c.forEach(visit);
+    });
+    if (node.condition) visit(node.condition);
+  };
+
+  visit(ast);
+  return warnings;
+}
+
+function dedupeWarnings(warnings: AnalysisError[]): AnalysisError[] {
+  const seen = new Set<string>();
+  const out: AnalysisError[] = [];
+  for (const w of warnings) {
+    const key = `${w.line}|${w.message}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(w);
+  }
+  return out;
+}

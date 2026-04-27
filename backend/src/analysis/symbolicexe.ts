@@ -356,6 +356,16 @@ const finalVal: SymbolicValue = allDims.length > 0
   }
 
   private visitIfStatement(node: IfStatementNode): SymbolicValue {
+    const condAny = node.condition as any;
+    if (condAny?.type === 'Assignment' && condAny.operator === '=') {
+      this.addSafetyCheck(
+        (condAny as any).line || (node as any).line || 0,
+        'condition',
+        'WARNING',
+        `Suspicious assignment in condition: use '==' for comparison instead of '='.`,
+      );
+    }
+
     this.visit(node.condition);
     const preBranchState = this.cloneState();
 
@@ -578,6 +588,13 @@ const finalVal: SymbolicValue = allDims.length > 0
             this.addSafetyCheck(
               (node as any).line || 0, opType, 'UNSAFE',
               `${opName}: variable '${rightName}' is 0`,
+            );
+          }
+          // Runtime-input/symbolic values can still become zero.
+          if (resolvedRight?.type === 'symbolic' || resolvedRight?.type === 'unknown') {
+            this.addSafetyCheck(
+              (node as any).line || 0, opType, 'WARNING',
+              `Possible ${opName.toLowerCase()}: variable '${rightName}' is not concretely known and may become 0 at runtime.`,
             );
           }
         }
@@ -907,7 +924,8 @@ const finalVal: SymbolicValue = allDims.length > 0
   private visitNamespace(_n: any): SymbolicValue { return { type: 'unknown' as const }; }
 
   private visitCinStatement(node: any): SymbolicValue {
-    const targets: any[] = node.targets ?? (node.target ? [node.target] : []);
+    const rawTargets = node.targets ?? (node.target ? [node.target] : []);
+    const targets: any[] = Array.isArray(rawTargets) ? rawTargets : [rawTargets];
     targets.forEach(t => {
       const name = typeof t === 'string' ? t : t.name;
       if (name) {

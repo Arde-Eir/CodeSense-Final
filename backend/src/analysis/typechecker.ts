@@ -336,6 +336,13 @@ export class TypeChecker {
   });
 });
 
+    const executableMainStatements = (func.body || []).filter((s: ASTNode) => {
+      const t = (s as any)?.type;
+      if (t === 'ReturnStatement') return false;
+      if (t === 'Block' && Array.isArray((s as any)?.statements) && (s as any).statements.length === 0) return false;
+      return true;
+    }).length;
+
     if (Array.isArray(func.body)) {
       let returnSeen = false;
       func.body.forEach((s: ASTNode) => {
@@ -349,6 +356,13 @@ export class TypeChecker {
 
     // Strict return enforcement — now uses multi-path allPathsReturn()
     if (func.name === 'main') {
+      if (executableMainStatements === 0) {
+        this.addError(
+          node,
+          `No executable logic found in 'main' (only return/empty statements). Add at least one meaningful statement.`,
+          'warning',
+        );
+      }
       if (func.returnType !== 'int') {
         this.addError(node, "C++ Standard: 'main' must have return type 'int'", 'error');
       }
@@ -612,6 +626,14 @@ export class TypeChecker {
 
   private visitIfStatement(node: ASTNode): string | null {
     const ifn = node as IfStatementNode;
+    const condNode = ifn.condition as any;
+    if (condNode?.type === 'Assignment' && condNode.operator === '=') {
+      this.addError(
+        ifn.condition as any,
+        `Suspicious assignment in condition: use '==' for comparison instead of '='.`,
+        'warning',
+      );
+    }
     const ct = this.visit(ifn.condition);
     if (ct && !this.isContextuallyConvertibleToBool(ct)) {
       this.addError(ifn.condition, `If condition must be boolean-convertible, got '${ct}'`);
