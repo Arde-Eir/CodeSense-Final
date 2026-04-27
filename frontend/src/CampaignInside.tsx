@@ -53,6 +53,11 @@ const ACTIVITY_DESC: Record<string, string> = {
 const questTypeLabel = (t: string | null): string =>
   (t && ACTIVITY_LABEL[t]) ?? 'Lesson';
 
+const isMultipleChoiceType = (t: string | null | undefined): boolean => {
+  const n = String(t ?? '').trim().toLowerCase();
+  return n === 'multiple_choice' || n === 'multiple-choice' || n === 'mc' || n === 'mcq' || n === 'quiz';
+};
+
 // ─── Small UI bits ─────────────────────────────────────────────────────────
 const StatBar: React.FC<{
   icon: string; label: string; current: number; total: number; color: string;
@@ -186,7 +191,7 @@ const ActivityTypesPanel: React.FC<{ quests: QuestRow[] }> = ({ quests }) => {
     if (q.code_fill_items?.length) bump('code_fill');
     if (q.ordering_items?.length)  bump('ordering');
     if (q.mc_questions?.length) {
-      if (q.question_type === 'multiple_choice') bump('multiple_choice');
+      if (isMultipleChoiceType(q.question_type)) bump('multiple_choice');
       else                                       bump('pop_balloon');
     }
   }
@@ -216,15 +221,15 @@ const ActivityTypesPanel: React.FC<{ quests: QuestRow[] }> = ({ quests }) => {
 };
 
 const QuestMixPanel: React.FC<{ quests: QuestRow[] }> = ({ quests }) => {
-  const lessons = quests.filter(q => q.question_type !== 'multiple_choice').length;
-  const quizzes = quests.filter(q => q.question_type === 'multiple_choice').length;
+  const lessons = quests.filter(q => !isMultipleChoiceType(q.question_type)).length;
+  const quizzes = quests.filter(q => isMultipleChoiceType(q.question_type)).length;
   const totalXP = quests.reduce((s, q) => s + (q.basexp ?? 0), 0);
   const seen    = new Set<string>();
   for (const q of quests) {
     if (q.game_items?.length)      seen.add('drag_drop');
     if (q.code_fill_items?.length) seen.add('code_fill');
     if (q.ordering_items?.length)  seen.add('ordering');
-    if (q.mc_questions?.length)    seen.add(q.question_type === 'multiple_choice' ? 'multiple_choice' : 'pop_balloon');
+    if (q.mc_questions?.length)    seen.add(isMultipleChoiceType(q.question_type) ? 'multiple_choice' : 'pop_balloon');
   }
 
   const Row = ({ icon, label, value }: { icon: string; label: string; value: string | number }) => (

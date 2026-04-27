@@ -3,7 +3,7 @@
 // matched correctly to complete. Extracted verbatim from the original
 // implementation in lessonactivity.tsx — only the imports changed.
 
-import React, { useEffect } from 'react';
+import React from 'react';
 import type { GameItem, DropZone } from '../types/campaign';
 
 interface Props {
@@ -13,19 +13,13 @@ interface Props {
   resetSignal: number;
 }
 
-export const DragDropGame: React.FC<Props> = ({ items, zones, onComplete, resetSignal }) => {
+const DragDropGameInner: React.FC<{ items: GameItem[]; zones: DropZone[]; onComplete: (score: number, total: number) => void }> = ({ items, zones, onComplete }) => {
   const [dropped,   setDropped]   = React.useState<Record<string, string>>({});
   const [dragOver,  setDragOver]  = React.useState<string | null>(null);
   const [dragging,  setDragging]  = React.useState<string | null>(null);
   const [checked,   setChecked]   = React.useState(false);
   const [results,   setResults]   = React.useState<Record<string, boolean>>({});
   const [submitted, setSubmitted] = React.useState(false);
-
-  useEffect(() => {
-    if (resetSignal > 0) {
-      setDropped({}); setChecked(false); setResults({}); setSubmitted(false);
-    }
-  }, [resetSignal]);
 
   const usedIds   = new Set(Object.values(dropped));
   const allFilled = Object.keys(dropped).length >= zones.length;
@@ -114,6 +108,17 @@ export const DragDropGame: React.FC<Props> = ({ items, zones, onComplete, resetS
         </button>
       </div>
     </div>
+  );
+};
+
+export const DragDropGame: React.FC<Props> = ({ items, zones, onComplete, resetSignal }) => {
+  return (
+    <DragDropGameInner
+      key={resetSignal}
+      items={items}
+      zones={zones}
+      onComplete={onComplete}
+    />
   );
 };
 

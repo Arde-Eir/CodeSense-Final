@@ -402,6 +402,7 @@ int main() {
 
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [result, setResult] = useState<AnalysisResult | null>(null);
+  const [analysisRunKey, setAnalysisRunKey] = useState(0);
   const [isTokenDrawerOpen, setIsTokenDrawerOpen] = useState(false);
   const [activeTab, setActiveTab] = useState('lexical');
   const [tabFullscreen, setTabFullscreen] = useState(false);
@@ -480,6 +481,10 @@ int main() {
   const handleAnalyze = async () => {
     if (!user && !isGuest) return;
     DataIsolationService.saveSandboxCode(isGuest ? null : user?.id || null, code, 'main.cpp');
+    // Start a fresh visualization session per analyze click so old node/edge
+    // interaction state never leaks into the next run.
+    setResult(null);
+    setAnalysisRunKey(prev => prev + 1);
     setIsAnalyzing(true);
     try {
       const data = await analyzeCode(code);
@@ -733,7 +738,13 @@ int main() {
             )}
             <div className="visualizer-container">
               {result?.success && result.cfg ? (
-                <FlowGraph cfg={result.cfg} safetyChecks={result.safetyChecks} onNodeClick={handleNodeClick} isDrawerOpen={isTokenDrawerOpen} />
+                <FlowGraph
+                  key={analysisRunKey}
+                  cfg={result.cfg}
+                  safetyChecks={result.safetyChecks}
+                  onNodeClick={handleNodeClick}
+                  isDrawerOpen={isTokenDrawerOpen}
+                />
               ) : (
                 <div className="placeholder-msg">
                   Run ANALYZE CODE to generate<br />the Control Flow Graph

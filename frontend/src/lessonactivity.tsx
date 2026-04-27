@@ -20,6 +20,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom';
 import { useAuth } from './components/AuthScreen';
 import { supabase } from './services/supabase';
+import { calculateLevel } from './types';
 
 import { DragDropGame  } from './games/DragDropGame';
 import { CodeFillGame  } from './games/CodeFillGame';
@@ -66,11 +67,18 @@ const TAB_SUBTITLE: Record<ActivityTab, string> = {
 function computeAvailableTabs(quest: Quest | null): ActivityTab[] {
   if (!quest) return [];
   const out: ActivityTab[] = [];
+  const normalizedType = String(quest.question_type ?? '').trim().toLowerCase();
+  const isMC =
+    normalizedType === 'multiple_choice' ||
+    normalizedType === 'multiple-choice' ||
+    normalizedType === 'mc' ||
+    normalizedType === 'mcq' ||
+    normalizedType === 'quiz';
   if (quest.game_items?.length && quest.drop_zones?.length) out.push('drag');
   if (quest.code_fill_items?.length)                         out.push('code_fill');
   if (quest.ordering_items?.length)                          out.push('ordering');
   if (quest.mc_questions?.length) {
-    if (quest.question_type === 'multiple_choice') out.push('mc');
+    if (isMC) out.push('mc');
     else                                            out.push('balloon');
   }
   return out;
@@ -455,7 +463,8 @@ export const LessonActivity: React.FC = () => {
     const isFirstFullFinish = allDone && !isCompleted && !everCompletedRef.current.length;
 
     try {
-      const { data: rpcResult, error: rpcErr } = await supabase.rpc('complete_campaign_quest', {
+      let rpcResult: any = null;
+      const { data, error: rpcErr } = await supabase.rpc('complete_campaign_quest', {
         p_userid:               user.id,
         p_questid:              quest.id,
         p_xp_gained:            cumulativeXPRef.current,
@@ -464,7 +473,81 @@ export const LessonActivity: React.FC = () => {
         p_hintsused:            hintsUsedRef.current,
         p_is_full_completion:   allDone,
       });
-      if (rpcErr) throw new Error(rpcErr.message);
+
+      if (rpcErr) {
+        let firstCompletedAt: string | null = null;
+        if (allDone) {
+          const { data: existingProgress } = await supabase
+            .from('mission_progress')
+            .select('first_completed_at')
+            .eq('userid', user.id)
+            .eq('questid', quest.id)
+            .maybeSingle();
+          firstCompletedAt = existingProgress?.first_completed_at ?? new Date().toISOString();
+        }
+        const { error: fallbackProgressErr } = await supabase
+          .from('mission_progress')
+          .upsert({
+            userid:               user.id,
+            questid:              quest.id,
+            status:               allDone ? 'completed' : 'active',
+            xp_gained:            cumulativeXPRef.current,
+            completed_activities: newFinished,
+            hintsused:            hintsUsedRef.current,
+            completedat:          allDone ? firstCompletedAt : null,
+            first_completed_at:   allDone ? firstCompletedAt : null,
+            updatedat:            new Date().toISOString(),
+          }, { onConflict: 'userid,questid' });
+        if (fallbackProgressErr) throw new Error(fallbackProgressErr.message);
+
+        const { data: userRow, error: userFetchErr } = await supabase
+          .from('users')
+          .select('totalxp')
+          .eq('id', user.id)
+          .single();
+        if (userFetchErr) throw new Error(userFetchErr.message);
+        const totalXP = (userRow?.totalxp ?? 0) + xpGainedNow;
+        const { error: userUpdateErr } = await supabase
+          .from('users')
+          .update({
+            totalxp: totalXP,
+            currentlevel: calculateLevel(totalXP),
+            lastactive: new Date().toISOString(),
+          })
+          .eq('id', user.id);
+        if (userUpdateErr) throw new Error(userUpdateErr.message);
+
+        rpcResult = { levelled_up: false };
+      } else {
+        rpcResult = data;
+      }
+
+      // Some RPC deployments return success but don't persist first_completed_at.
+      // Campaign unlock logic depends on this field, so enforce it on full finish.
+      if (allDone) {
+        const { data: progressRow, error: progressFetchErr } = await supabase
+          .from('mission_progress')
+          .select('first_completed_at')
+          .eq('userid', user.id)
+          .eq('questid', quest.id)
+          .maybeSingle();
+        if (progressFetchErr) throw new Error(progressFetchErr.message);
+
+        if (!progressRow?.first_completed_at) {
+          const firstCompletedAt = new Date().toISOString();
+          const { error: enforceCompletionErr } = await supabase
+            .from('mission_progress')
+            .update({
+              status: 'completed',
+              completedat: firstCompletedAt,
+              first_completed_at: firstCompletedAt,
+              updatedat: firstCompletedAt,
+            })
+            .eq('userid', user.id)
+            .eq('questid', quest.id);
+          if (enforceCompletionErr) throw new Error(enforceCompletionErr.message);
+        }
+      }
 
       const levelledUp = rpcResult?.levelled_up === true;
       const newLevel   = rpcResult?.new_level;
@@ -503,11 +586,46 @@ export const LessonActivity: React.FC = () => {
   const handleRetake = useCallback(async () => {
     if (!user?.id || !quest) return;
     try {
-      const { error } = await supabase.rpc('reset_quest_for_retake', {
-        p_userid:  user.id,
-        p_questid: quest.id,
-      });
-      if (error) throw new Error(error.message);
+      const resetPayload = {
+        status: 'active',
+        completedat: null,
+        completed_activities: [],
+        xp_gained: 0,
+        hintsused: 0,
+        updatedat: new Date().toISOString(),
+      };
+
+      // Do not rely on reset_quest_for_retake RPC: if the function is broken
+      // (e.g. "control reached end of function without RETURN"), direct table
+      // reset keeps retake working.
+      const { error: resetErr } = await supabase
+        .from('mission_progress')
+        .update(resetPayload)
+        .eq('userid', user.id)
+        .eq('questid', quest.id);
+      if (resetErr) throw new Error(resetErr.message);
+
+      // Ensure a row exists for this quest after retake.
+      const { error: upsertErr } = await supabase
+        .from('mission_progress')
+        .upsert({
+          userid: user.id,
+          questid: quest.id,
+          ...resetPayload,
+        }, { onConflict: 'userid,questid' });
+      if (upsertErr) throw new Error(upsertErr.message);
+
+      // Verify we really moved out of completed state.
+      const { data: verifyRows, error: verifyErr } = await supabase
+        .from('mission_progress')
+        .select('status')
+        .eq('userid', user.id)
+        .eq('questid', quest.id)
+        .limit(1);
+      if (verifyErr) throw new Error(verifyErr.message);
+      if (!verifyRows?.length || verifyRows[0].status !== 'active') {
+        throw new Error('Retake reset did not persist status=active.');
+      }
     } catch (err) {
       console.error('reset_quest_for_retake failed', err);
       setFetchError(err instanceof Error ? err.message : 'Could not reset for retake');
@@ -528,7 +646,10 @@ export const LessonActivity: React.FC = () => {
     const tabs = computeAvailableTabs(quest);
     if (tabs.length > 0) setActiveTab(tabs[0]);
     setAppPhase('tutorial');
-  }, [user?.id, quest]);
+
+    // Re-sync from DB so UI state can't get stuck on stale completed status.
+    await doFetch();
+  }, [user?.id, quest, doFetch]);
 
   const handleReset  = () => setResetSignal(s => s + 1);
   const handleGoBack = () => setAppPhase('tutorial');

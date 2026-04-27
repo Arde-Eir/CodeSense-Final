@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useMemo } from 'react';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 interface LogsTabProps {
@@ -40,7 +40,7 @@ function parseEntry(raw: string, index: number): LogEntry {
   // Strip emoji/markdown bold markers for clean display
   const clean = raw
     .replace(/\*\*(.*?)\*\*/g, '$1')
-    .replace(/[❌✅⚠️🚨💡🔧📍🔬🛰🔤]/g, '')
+    .replace(/❌|✅|⚠️|🚨|💡|🔧|📍|🔬|🛰|🔤/gu, '')
     .trim();
 
   const phaseMatch = clean.match(/^(Status|Phase\s*\d*|Error|Warning|Line\s*\d+|L\d+)[:\s–-]/i);
@@ -161,27 +161,22 @@ export const LogsTab: React.FC<LogsTabProps> = ({
   explanations = [], 
   success, cognitiveComplexity, cyclomaticComplexity,
 }) => {
-  const [visible, setVisible] = useState(false);
+  const visible = explanations.length > 0;
   const [filter, setFilter] = useState<LogLevel | 'all'>('all');
   const bottomRef = useRef<HTMLDivElement>(null);
 
-  const entries: LogEntry[] = explanations.map((e, i) => parseEntry(e, i));
+  const entries: LogEntry[] = useMemo(
+    () => explanations.map((e, i) => parseEntry(e, i)),
+    [explanations],
+  );
   const hasContent = entries.length > 0;
-
-  useEffect(() => {
-    setVisible(false);
-    if (hasContent) {
-      const t = setTimeout(() => setVisible(true), 80);
-      return () => clearTimeout(t);
-    }
-  }, [explanations.length]);
 
   useEffect(() => {
     if (visible) {
       const t = setTimeout(() => bottomRef.current?.scrollIntoView({ behavior: 'smooth' }), entries.length * 40 + 200);
       return () => clearTimeout(t);
     }
-  }, [visible]);
+  }, [visible, entries.length]);
 
   const filtered = filter === 'all' ? entries : entries.filter(e => e.level === filter);
   const counts = {
@@ -236,13 +231,13 @@ export const LogsTab: React.FC<LogsTabProps> = ({
           borderBottom: 'none', flexShrink: 0, flexWrap: 'wrap',
         }}>
           {([
-            { id: 'all',     label: `ALL ${entries.length}`,           color: '#8b949e' },
-            counts.error   > 0 && { id: 'error',   label: `✗ ${counts.error}`,   color: '#f85149' },
-            counts.warning > 0 && { id: 'warning', label: `⚠ ${counts.warning}`, color: '#e3b341' },
-            counts.success > 0 && { id: 'success', label: `✓ ${counts.success}`, color: '#3fb950' },
-            counts.info    > 0 && { id: 'info',    label: `i ${counts.info}`,    color: '#79c0ff' },
-          ].filter(Boolean) as Array<{ id: string; label: string; color: string }>).map(({ id, label, color }) => (
-            <button key={id} onClick={() => setFilter(id as any)} style={{
+            { id: 'all' as const,     label: `ALL ${entries.length}`,           color: '#8b949e' },
+            counts.error   > 0 && { id: 'error' as const,   label: `✗ ${counts.error}`,   color: '#f85149' },
+            counts.warning > 0 && { id: 'warning' as const, label: `⚠ ${counts.warning}`, color: '#e3b341' },
+            counts.success > 0 && { id: 'success' as const, label: `✓ ${counts.success}`, color: '#3fb950' },
+            counts.info    > 0 && { id: 'info' as const,    label: `i ${counts.info}`,    color: '#79c0ff' },
+          ].filter(Boolean) as Array<{ id: LogLevel | 'all'; label: string; color: string }>).map(({ id, label, color }) => (
+            <button key={id} onClick={() => setFilter(id)} style={{
               padding: '3px 9px', borderRadius: '5px', border: 'none', cursor: 'pointer',
               fontSize: '10px', fontWeight: '700', fontFamily: 'IBM Plex Mono, monospace',
               background: filter === id ? `${color}20` : 'transparent',

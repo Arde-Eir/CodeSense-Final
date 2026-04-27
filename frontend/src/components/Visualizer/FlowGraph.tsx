@@ -25,7 +25,7 @@ import {
   Handle, Position, applyNodeChanges, applyEdgeChanges, addEdge,
   useReactFlow, ReactFlowProvider,
 } from '@xyflow/react';
-import type { Connection, Edge, Node, NodeProps } from '@xyflow/react';
+import type { Connection, Edge, Node, NodeProps, NodeChange, EdgeChange } from '@xyflow/react';
 import ELK from 'elkjs/lib/elk.bundled.js';
 import '@xyflow/react/dist/style.css';
 import type { CFG, SafetyCheck, ControlFlowNode } from '../../types';
@@ -826,12 +826,7 @@ const GenerateCodePanel: React.FC<{
   };
 
   // Re-validate whenever the graph changes so stale errors clear automatically
-  useEffect(() => {
-    if (!showValidation) return;
-    const result = validateGraph(nodes, edges);
-    setValidationResult(result);
-    if (result.all.length === 0) setShowValidation(false);
-  }, [nodes, edges, showValidation]);
+  const liveValidation = showValidation ? validateGraph(nodes, edges) : null;
 
   const handleCopy = () => {
     if (!generatedCode) return;
@@ -864,9 +859,10 @@ const GenerateCodePanel: React.FC<{
     }
   };
 
-  const hasErrors   = (validationResult?.errors.length  ?? 0) > 0;
-  const hasWarnings = (validationResult?.warnings.length ?? 0) > 0;
-  const hasIssues   = (validationResult?.all.length      ?? 0) > 0;
+  const activeValidation = liveValidation ?? validationResult;
+  const hasErrors   = (activeValidation?.errors.length  ?? 0) > 0;
+  const hasWarnings = (activeValidation?.warnings.length ?? 0) > 0;
+  const hasIssues   = (activeValidation?.all.length      ?? 0) > 0;
   const canGenerate = nodes.length > 0 && !hasErrors;
 
   const borderColor = hasErrors
@@ -880,7 +876,7 @@ const GenerateCodePanel: React.FC<{
   const generateLabel = nodes.length === 0
     ? 'Add nodes to the canvas first'
     : hasErrors
-    ? `🚫 Fix ${validationResult!.errors.length} error${validationResult!.errors.length > 1 ? 's' : ''} before generating`
+    ? `🚫 Fix ${activeValidation!.errors.length} error${activeValidation!.errors.length > 1 ? 's' : ''} before generating`
     : `⚡ Generate from ${nodes.length} node${nodes.length !== 1 ? 's' : ''}`;
 
   return (
@@ -912,9 +908,9 @@ const GenerateCodePanel: React.FC<{
         <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
 
           {/* Validation panel */}
-          {showValidation && validationResult && hasIssues && (
+          {showValidation && activeValidation && hasIssues && (
             <ValidationPanel
-              result={validationResult}
+              result={activeValidation}
               onDismiss={() => setShowValidation(false)}
             />
           )}
@@ -1013,10 +1009,14 @@ const NodeEditor: React.FC<{
 
   const accent    = EDITOR_ACCENT[editState.type] ?? '#58a6ff';
   const title     = EDITOR_TITLE[editState.type]  ?? 'Node';
-  const noCode    = editState.type === 'terminator' || editState.type === 'connector';
+  const noCode    =
+    editState.type === 'terminator' ||
+    editState.type === 'connector' ||
+    editState.type === 'junction';
   const fieldLabel =
     editState.type === 'decision'  ? 'Condition / Label' :
     editState.type === 'connector' ? 'Reference Letter'  :
+    editState.type === 'junction'  ? 'Junction Label'    :
     'Label';
   const placeholder =
     editState.type === 'connector'
@@ -1238,8 +1238,6 @@ const FlowGraphInner: React.FC<Props> = ({
   const [isLocked, setIsLocked]           = useState(false);
   const [hoverInfo, setHoverInfo]         = useState<string | null>(null);
   const [mousePos,  setMousePos]          = useState({ x: 0, y: 0 });
-  const [visitedNodes, setVisitedNodes]   = useState<Set<string>>(new Set());
-  const visitedNodesRef                   = useRef<Set<string>>(new Set());
   const [editState,     setEditState]     = useState<EditState | null>(null);
   const [edgeEditState, setEdgeEditState] = useState<EdgeEditState | null>(null);
   const [isDirty, setIsDirty]             = useState(false);
@@ -1266,11 +1264,22 @@ const FlowGraphInner: React.FC<Props> = ({
       position: { x: flowPos.x - 18, y: flowPos.y - 18 }, // centre on cursor
       data: {
         id:    junctionId,
+        type:  'process',
         label: '⬡',
         code:  '',
         line:  -1,
+        children: [],
+        x: 0,
+        y: 0,
         onHover: setHoverInfo,
-        onEdit:  (nid: string) => handleOpenEditRef.current(nid),
+        onEdit:  (nodeId: string) => {
+          setEditState({
+            nodeId,
+            label: '⬡',
+            code: '',
+            type: 'junction',
+          });
+        },
       } as ExtendedNodeData,
       draggable: true,
     };
@@ -1327,9 +1336,6 @@ const FlowGraphInner: React.FC<Props> = ({
     });
   }, []);
 
-  const handleOpenEditRef = useRef(handleOpenEdit);
-  handleOpenEditRef.current = handleOpenEdit;
-
   const handleSaveEdit = useCallback((newLabel: string, newCode: string) => {
     if (!editState) return;
     setNodes(current => {
@@ -1385,8 +1391,6 @@ const FlowGraphInner: React.FC<Props> = ({
     if (!window.confirm('Clear the entire canvas? This action cannot be undone.')) return;
     setNodes([]);
     setEdges([]);
-    setVisitedNodes(new Set());
-    visitedNodesRef.current = new Set();
     setIsDirty(false);
     onGraphChange?.([], []);
   }, [nodes.length, onGraphChange]);
@@ -1405,7 +1409,7 @@ const FlowGraphInner: React.FC<Props> = ({
         data: {
           id, label: initialLabel, code: '', line: -1,
           onHover: setHoverInfo,
-          onEdit:  (nid: string) => handleOpenEditRef.current(nid),
+          onEdit:  handleOpenEdit,
         } as ExtendedNodeData,
         draggable: true,
       };
@@ -1430,16 +1434,16 @@ const FlowGraphInner: React.FC<Props> = ({
     }, 50);
 
     setIsDirty(true);
-  }, []);
+  }, [handleOpenEdit]);
 
   // ── React Flow change handlers ─────────────────────────────────────────────
 
-  const onNodesChangeHandler = useCallback((changes: any[]) => {
+  const onNodesChangeHandler = useCallback((changes: NodeChange<Node<ExtendedNodeData>>[]) => {
     // Structural changes (add / remove / drag-end) are the only ones that
     // should bubble up via onGraphChange + isDirty. Mid-drag position updates,
     // selection flips, and dimension recalcs must NOT round-trip state or the
     // canvas jitters on large graphs.
-    const structural = changes.some((c: any) =>
+    const structural = changes.some((c: NodeChange<Node<ExtendedNodeData>>) =>
       c.type === 'add' ||
       c.type === 'remove' ||
       (c.type === 'position' && c.dragging === false)
@@ -1455,7 +1459,7 @@ const FlowGraphInner: React.FC<Props> = ({
     });
   }, [onGraphChange]);
 
-  const onEdgesChangeHandler = useCallback((changes: any) => {
+  const onEdgesChangeHandler = useCallback((changes: EdgeChange<Edge>[]) => {
     setEdges(eds => {
       const next = applyEdgeChanges(changes, eds);
       setNodes(nds => { onGraphChange?.(nds, next); return nds; });
@@ -1484,8 +1488,6 @@ const FlowGraphInner: React.FC<Props> = ({
   // ── Node click → mark as visited ──────────────────────────────────────────
 
   const handleNodeClick = useCallback((_: React.MouseEvent, node: Node<ExtendedNodeData>) => {
-    visitedNodesRef.current = new Set([...visitedNodesRef.current, node.id]);
-    setVisitedNodes(new Set(visitedNodesRef.current));
     setNodes(current =>
       current.map(n => n.id === node.id ? { ...n, data: { ...n.data, visited: true } } : n)
     );
@@ -1498,12 +1500,7 @@ const FlowGraphInner: React.FC<Props> = ({
   useEffect(() => {
     if (!cfg?.nodes?.length) return;
 
-    // ── FIX (user bug #1 & #2): Reset the visited-node tracker whenever a
-    // new CFG arrives. Without this, the "Nodes Explored" counter and green
-    // edge highlighting bleed over from the previous analysis, because IDs
-    // like "node_0" / "start" can collide across runs.
-    visitedNodesRef.current = new Set();
-    setVisitedNodes(new Set());
+    // New CFG starts with all nodes unexplored.
 
     const inferNodeType = (node: ControlFlowNode): FlowNodeType => {
       const lbl = String(node.label ?? '').toLowerCase();
@@ -1545,7 +1542,7 @@ const FlowGraphInner: React.FC<Props> = ({
       data: {
         ...node,
         violation: safetyChecks.some(c => c.line === node.line && c.status === 'UNSAFE'),
-        visited:   visitedNodesRef.current.has(node.id),
+        visited:   false,
         onHover:   setHoverInfo,
         onEdit:    handleOpenEdit,
       },
@@ -1557,7 +1554,7 @@ const FlowGraphInner: React.FC<Props> = ({
     const initialEdges: Edge[] = validCfgEdges.map((edge, i) => {
       const target       = capped.find(n => n.id === edge.to);
       const hasViolation = target && safetyChecks.some(c => c.line === target.line && c.status === 'UNSAFE');
-      const isVisited    = visitedNodesRef.current.has(edge.from) && visitedNodesRef.current.has(edge.to);
+      const isVisited    = false;
       const color = hasViolation ? '#ff4444' : isVisited ? '#4caf50' : '#64b5f6';
       return {
         id: `e-${i}`, source: edge.from, target: edge.to,
@@ -1613,17 +1610,10 @@ const FlowGraphInner: React.FC<Props> = ({
       });
   }, [cfg, safetyChecks]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Keep callbacks fresh after re-renders
-  useEffect(() => {
-    setNodes(nds => nds.map(n => ({
-      ...n,
-      data: { ...n.data, onHover: setHoverInfo, onEdit: handleOpenEdit },
-    })));
-  }, [handleOpenEdit]);
-
   // ── Derived values ─────────────────────────────────────────────────────────
 
   const totalNodes = nodes.length;
+  const visitedNodes = new Set(nodes.filter(n => n.data?.visited).map(n => n.id));
   const safeNodes  = nodes.filter(n => {
     const cfgNode = cfg?.nodes.find(cn => cn.id === n.id);
     return !cfgNode || !safetyChecks.some(c => c.line === cfgNode.line && c.status === 'UNSAFE');

@@ -1,7 +1,7 @@
 // frontend/src/games/OrderingGame.tsx
 // Drag rows up/down until their correct_order matches the visual position.
 
-import React, { useEffect } from 'react';
+import React from 'react';
 import type { OrderItem } from '../types/campaign';
 
 interface Props {
@@ -10,10 +10,35 @@ interface Props {
   resetSignal: number;
 }
 
-export const OrderingGame: React.FC<Props> = ({ items: rawItems, onComplete, resetSignal }) => {
+const OrderingGameInner: React.FC<{ rawItems: OrderItem[]; onComplete: (score: number, total: number) => void; resetSignal: number }> = ({ rawItems, onComplete, resetSignal }) => {
+  const [shuffleSeed, setShuffleSeed] = React.useState(0);
+  const seededShuffle = React.useCallback((items: OrderItem[], seed: number) => {
+    const arr = [...items];
+    let s = Math.max(1, seed | 0);
+    const nextRand = () => {
+      // Linear congruential generator (deterministic, render-safe).
+      s = (1664525 * s + 1013904223) >>> 0;
+      return s / 0x100000000;
+    };
+    for (let i = arr.length - 1; i > 0; i--) {
+      const j = Math.floor(nextRand() * (i + 1));
+      [arr[i], arr[j]] = [arr[j], arr[i]];
+    }
+    return arr;
+  }, []);
+
+  const seedBase = React.useMemo(
+    () =>
+      rawItems.reduce((acc, item) => {
+        const id = typeof item.id === 'string' ? item.id : String(item.id);
+        for (let i = 0; i < id.length; i++) acc = (acc * 31 + id.charCodeAt(i)) >>> 0;
+        return acc;
+      }, 17),
+    [rawItems],
+  );
   const shuffled = React.useMemo(
-    () => [...rawItems].sort(() => Math.random() - 0.5),
-    [rawItems]
+    () => seededShuffle(rawItems, seedBase + resetSignal + shuffleSeed + rawItems.length),
+    [rawItems, seedBase, resetSignal, shuffleSeed, seededShuffle],
   );
 
   const [order,     setOrder]     = React.useState<OrderItem[]>(shuffled);
@@ -21,13 +46,6 @@ export const OrderingGame: React.FC<Props> = ({ items: rawItems, onComplete, res
   const [checked,   setChecked]   = React.useState(false);
   const [correct,   setCorrect]   = React.useState(false);
   const [submitted, setSubmitted] = React.useState(false);
-
-  useEffect(() => {
-    if (resetSignal > 0) {
-      setOrder([...rawItems].sort(() => Math.random() - 0.5));
-      setChecked(false); setCorrect(false); setSubmitted(false); setDragging(null);
-    }
-  }, [resetSignal, rawItems]);
 
   const doCheck = () => {
     const isCorrect = order.every((item, i) => item.correct_order === i + 1);
@@ -77,10 +95,28 @@ export const OrderingGame: React.FC<Props> = ({ items: rawItems, onComplete, res
         </div>
       )}
       <div style={{ display: 'flex', gap: 10, marginTop: 4 }}>
-        {!submitted && <button onClick={() => { setOrder([...rawItems].sort(() => Math.random() - 0.5)); setChecked(false); }} style={{ padding: '11px 20px', borderRadius: 8, border: '2px solid #da3633', background: 'rgba(218,54,51,0.12)', color: '#f85149', fontWeight: 700, fontSize: 13, cursor: 'pointer', fontFamily: 'Inter,sans-serif' }}>Shuffle</button>}
+        {!submitted && <button onClick={() => {
+          setShuffleSeed(v => {
+            const next = v + 1;
+            setOrder(seededShuffle(rawItems, seedBase + resetSignal + next + rawItems.length));
+            return next;
+          });
+          setChecked(false);
+        }} style={{ padding: '11px 20px', borderRadius: 8, border: '2px solid #da3633', background: 'rgba(218,54,51,0.12)', color: '#f85149', fontWeight: 700, fontSize: 13, cursor: 'pointer', fontFamily: 'Inter,sans-serif' }}>Shuffle</button>}
         {!submitted && <button onClick={doCheck} style={{ flex: 1, padding: '11px', borderRadius: 8, border: 'none', background: 'linear-gradient(135deg,#a371f7,#8350d4)', color: '#fff', fontWeight: 700, fontSize: 13, cursor: 'pointer', fontFamily: 'Inter,sans-serif' }}>Check Order</button>}
       </div>
     </div>
+  );
+};
+
+export const OrderingGame: React.FC<Props> = ({ items: rawItems, onComplete, resetSignal }) => {
+  return (
+    <OrderingGameInner
+      key={resetSignal}
+      rawItems={rawItems}
+      onComplete={onComplete}
+      resetSignal={resetSignal}
+    />
   );
 };
 

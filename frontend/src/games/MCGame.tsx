@@ -2,7 +2,7 @@
 // Multiple-choice quiz. One question at a time, immediate feedback +
 // explanation reveal, advance through all of them.
 
-import React, { useEffect } from 'react';
+import React from 'react';
 import type { MCQ } from '../types/campaign';
 
 interface Props {
@@ -11,19 +11,13 @@ interface Props {
   resetSignal: number;
 }
 
-export const MCGame: React.FC<Props> = ({ questions, onComplete, resetSignal }) => {
+const MCGameInner: React.FC<{ questions: MCQ[]; onComplete: (score: number, total: number) => void }> = ({ questions, onComplete }) => {
   const [qIdx,     setQIdx]     = React.useState(0);
   const [selected, setSelected] = React.useState<number | null>(null);
   const [revealed, setRevealed] = React.useState(false);
   const [done,     setDone]     = React.useState(false);
-  const scoreRef = React.useRef(0);
-
-  useEffect(() => {
-    if (resetSignal > 0) {
-      setQIdx(0); setSelected(null); setRevealed(false); setDone(false);
-      scoreRef.current = 0;
-    }
-  }, [resetSignal]);
+  const [score, setScore] = React.useState(0);
+  const pendingScoreRef = React.useRef<number | null>(null);
 
   if (!questions.length) return (
     <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#484f58', fontSize: 13, fontFamily: 'Inter,sans-serif', textAlign: 'center', padding: 24 }}>
@@ -37,22 +31,32 @@ export const MCGame: React.FC<Props> = ({ questions, onComplete, resetSignal }) 
   const pick = (i: number) => {
     if (revealed) return;
     setSelected(i); setRevealed(true);
-    if (i === q.correct) scoreRef.current += 1;
+    if (i === q.correct) {
+      setScore(v => {
+        const next = v + 1;
+        pendingScoreRef.current = next;
+        return next;
+      });
+    } else {
+      pendingScoreRef.current = score;
+    }
   };
 
   const next = () => {
+    const effectiveScore = pendingScoreRef.current ?? score;
     if (isLast) {
       setDone(true);
-      setTimeout(() => onComplete(scoreRef.current, questions.length), 400);
+      setTimeout(() => onComplete(effectiveScore, questions.length), 400);
       return;
     }
+    pendingScoreRef.current = null;
     setQIdx(v => v + 1); setSelected(null); setRevealed(false);
   };
 
   if (done) return (
     <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 16 }}>
       <div style={{ fontSize: 48 }}>🎓</div>
-      <div style={{ fontSize: 22, fontWeight: 800, color: '#facc15', fontFamily: 'Inter,sans-serif' }}>{scoreRef.current}/{questions.length} correct</div>
+      <div style={{ fontSize: 22, fontWeight: 800, color: '#facc15', fontFamily: 'Inter,sans-serif' }}>{score}/{questions.length} correct</div>
     </div>
   );
 
@@ -96,6 +100,10 @@ export const MCGame: React.FC<Props> = ({ questions, onComplete, resetSignal }) 
       )}
     </div>
   );
+};
+
+export const MCGame: React.FC<Props> = ({ questions, onComplete, resetSignal }) => {
+  return <MCGameInner key={resetSignal} questions={questions} onComplete={onComplete} />;
 };
 
 export default MCGame;

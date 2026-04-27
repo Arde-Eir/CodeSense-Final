@@ -403,7 +403,8 @@ function resolveCode(node: Node<NodeData>): string {
 
 function collectAllCode(nodes: Node<NodeData>[]): string[] {
   return nodes
-    .filter(n => n.type !== 'terminator')
+    // Structural routing nodes don't emit C++ statements
+    .filter(n => !['terminator', 'connector', 'junction'].includes(String(n.type ?? '')))
     .map(n => resolveCode(n))
     .filter(Boolean);
 }
@@ -495,10 +496,12 @@ function traverse(
       continue;
     }
 
-    // ── Connector — on-page reference, emit a comment ────────────────────────
+    // ── Connector / Junction (offset) — structural only, no emitted code ────
     if (node.type === 'connector') {
-      const lbl = str(node.data.label);
-      output += `${indent}// → ${lbl}\n`;
+      currentId = outEdges[0]?.target;
+      continue;
+    }
+    if (node.type === 'junction') {
       currentId = outEdges[0]?.target;
       continue;
     }

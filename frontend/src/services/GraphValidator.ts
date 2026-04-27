@@ -79,6 +79,11 @@ export function validateGraph(nodes: Node[], edges: Edge[]): ValidationResult {
     outEdges.get(e.source)!.push(e);
   }
   const connectedIds = new Set([...edges.map(e => e.source), ...edges.map(e => e.target)]);
+  const inEdges = new Map<string, Edge[]>(nodes.map(n => [n.id, []]));
+  for (const e of edges) {
+    if (!inEdges.has(e.target)) inEdges.set(e.target, []);
+    inEdges.get(e.target)!.push(e);
+  }
 
   // ── 1. Empty canvas ────────────────────────────────────────────────────────
   if (nodes.length === 0) {
@@ -262,11 +267,37 @@ export function validateGraph(nodes: Node[], edges: Edge[]): ValidationResult {
       { edgeIds: dangling.map(e => e.id) });
   }
 
+  // ── 10b. Junction / Offset-shape structural checks ────────────────────────
+  const junctionNodes = nodes.filter(n => n.type === 'junction');
+  for (const j of junctionNodes) {
+    const inCount = (inEdges.get(j.id) ?? []).length;
+    const outCount = (outEdges.get(j.id) ?? []).length;
+
+    if (inCount === 0 || outCount === 0) {
+      push(
+        'error',
+        'JUNCTION_INCOMPLETE',
+        `Junction "${str(j.data?.label) || '⬡'}" must have at least one incoming and one outgoing edge.`,
+        { nodeIds: [j.id] },
+      );
+      continue;
+    }
+
+    if (outCount > 1) {
+      push(
+        'warning',
+        'JUNCTION_MULTI_OUT',
+        `Junction "${str(j.data?.label) || '⬡'}" has ${outCount} outgoing edges. Code generation follows the first path only; use a Decision node to branch.`,
+        { nodeIds: [j.id], edgeIds: (outEdges.get(j.id) ?? []).map(e => e.id) },
+      );
+    }
+  }
+
   // ── 11. Placeholder nodes with no real code ───────────────────────────────
   const PLACEHOLDERS = new Set(['Process', 'Output', 'Function Call', 'Input',
                                  'Delay', 'Data Store', 'Document', 'Condition']);
   const placeholder = nodes.filter(n => {
-    if (['terminator', 'connector', 'decision'].includes(n.type ?? '')) return false;
+    if (['terminator', 'connector', 'junction', 'decision'].includes(n.type ?? '')) return false;
     return PLACEHOLDERS.has(str(n.data?.label)) && !str(n.data?.code);
   });
   if (placeholder.length > 0) {

@@ -867,7 +867,9 @@ const AnimatedHero: React.FC<HeroProps> = ({
   const onMouseLeave = () => setTilt({ rx: 0, ry: 0 })
 
   const R = 38, C = 2 * Math.PI * R
-  const dash = (levelProgress / 100) * C
+  const clampedLevelProgress = Math.max(0, Math.min(100, levelProgress))
+  const dash = (clampedLevelProgress / 100) * C
+  const heroDashOffset = clampedLevelProgress >= 100 ? 0 : C - dash
 
   return (
     <div
@@ -901,7 +903,7 @@ const AnimatedHero: React.FC<HeroProps> = ({
         @keyframes heroGlow       { 0%,100% { filter: drop-shadow(0 0 8px ${rank.color}88); } 50% { filter: drop-shadow(0 0 22px ${rank.color}); } }
         @keyframes heroQuoteFade  { 0% { opacity: 0; transform: translateY(6px); } 10%,90% { opacity: 1; transform: translateY(0); } 100% { opacity: 0; transform: translateY(-6px); } }
         @keyframes heroCountUp    { from { opacity: 0; transform: scale(0.85); } to { opacity: 1; transform: scale(1); } }
-        @keyframes heroRingFill   { from { stroke-dashoffset: ${C}; } to { stroke-dashoffset: ${C - dash}; } }
+        @keyframes heroRingFill   { from { stroke-dashoffset: ${C}; } to { stroke-dashoffset: ${heroDashOffset}; } }
 
         .hero-stars {
           position: absolute; inset: -100px;
@@ -1008,14 +1010,15 @@ const AnimatedHero: React.FC<HeroProps> = ({
               <svg width={90} height={90} style={{ transform: 'rotate(-90deg)' }}>
                 <circle cx={45} cy={45} r={R} fill="none" stroke="rgba(255,255,255,0.06)" strokeWidth={6} />
                 <circle cx={45} cy={45} r={R} fill="none" stroke={rank.color} strokeWidth={6}
-                  strokeDasharray={`${C} ${C}`} strokeDashoffset={C - dash} strokeLinecap="round"
+                  strokeDasharray={`${C} ${C}`} strokeDashoffset={heroDashOffset}
+                  strokeLinecap={clampedLevelProgress >= 100 ? 'butt' : 'round'}
                   style={{ animation: 'heroRingFill 1.2s cubic-bezier(0.4,0,0.2,1) forwards' }} />
               </svg>
               <div style={{
                 position: 'absolute', inset: 0, display: 'flex',
                 flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
               }}>
-                <div style={{ color: rank.color, fontSize: 18, fontWeight: 800 }}>{levelProgress}%</div>
+                <div style={{ color: rank.color, fontSize: 18, fontWeight: 800 }}>{clampedLevelProgress}%</div>
                 <div style={{ color: '#8b949e', fontSize: 9, letterSpacing: 0.5, textTransform: 'uppercase' }}>to Lv{Math.min(currentLevel + 1, 5)}</div>
               </div>
             </div>
@@ -1801,16 +1804,20 @@ export const HomeDashboard: React.FC = () => {
                     <svg width={80} height={80} style={{ transform: 'rotate(-90deg)' }}>
                       <circle cx={40} cy={40} r={36} fill="none" stroke="rgba(255,255,255,0.06)" strokeWidth={6} />
                       <circle cx={40} cy={40} r={36} fill="none" stroke="#4caf50" strokeWidth={6}
-                        strokeDasharray={`${226} 226`}
-                        strokeDashoffset={226 - (stats.levelProgress / 100) * 226}
-                        strokeLinecap="round"
-                        style={{ animation: 'prRingFill 1.1s cubic-bezier(0.4,0,0.2,1) forwards', transition: 'stroke-dashoffset 1s ease' }} />
+                        strokeDasharray={`${2 * Math.PI * 36} ${2 * Math.PI * 36}`}
+                        strokeDashoffset={
+                          Math.max(0, Math.min(100, stats.levelProgress)) >= 100
+                            ? 0
+                            : (2 * Math.PI * 36) - (Math.max(0, Math.min(100, stats.levelProgress)) / 100) * (2 * Math.PI * 36)
+                        }
+                        strokeLinecap={Math.max(0, Math.min(100, stats.levelProgress)) >= 100 ? 'butt' : 'round'}
+                        style={{ transition: 'stroke-dashoffset 1s ease' }} />
                     </svg>
                     <div style={{
                       position: 'absolute', inset: 0, display: 'flex',
                       flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
                     }}>
-                      <div style={{ color: '#4caf50', fontSize: 16, fontWeight: 800 }}>{stats.levelProgress}%</div>
+                      <div style={{ color: '#4caf50', fontSize: 16, fontWeight: 800 }}>{Math.max(0, Math.min(100, stats.levelProgress))}%</div>
                       <div style={{ color: '#484f58', fontSize: 8, letterSpacing: 0.4, textTransform: 'uppercase' }}>to Lv{Math.min((user?.currentLevel ?? 1) + 1, 5)}</div>
                     </div>
                   </div>
