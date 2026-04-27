@@ -272,7 +272,7 @@ LoopControlStatement
 // ============================================================================
 
 VariableDeclaration
-  = mods:TypeModifier* _ type:Type __ first:VariableDeclarator
+  = mods:TypeModifier* _ type:Type _ first:VariableDeclarator
     rest:(_ "," _ VariableDeclarator)* _ ";" _ {
       const declarations = [first, ...rest.map(r => r[3])];
       if (declarations.length === 1) {
