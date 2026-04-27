@@ -1,8 +1,12 @@
 // frontend/src/services/api.ts
 import type { AnalysisResult } from '../types';
 
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:3000';
+const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL ?? '').trim().replace(/\/+$/, '');
 const TIMEOUT_MS = 30_000;
+const IS_PROD = import.meta.env.PROD;
+const ANALYZE_URL = API_BASE_URL
+  ? `${API_BASE_URL}/api/analyze`
+  : '/api/analyze';
 
 // Cancel any in-flight request when a new one is submitted
 let _activeController: AbortController | null = null;
@@ -11,6 +15,9 @@ export const analyzeCode = async (
   sourceCode: string,
   currentLevel?: number
 ): Promise<AnalysisResult> => {
+  if (IS_PROD && !API_BASE_URL) {
+    throw new Error('Missing VITE_API_BASE_URL in production build');
+  }
   // Abort the previous request if still pending
   if (_activeController) {
     _activeController.abort();
@@ -22,7 +29,7 @@ export const analyzeCode = async (
   const timeoutId = setTimeout(() => controller.abort(), TIMEOUT_MS);
 
   try {
-    const response = await fetch(`${API_BASE_URL}/api/analyze`, {
+    const response = await fetch(ANALYZE_URL, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
