@@ -297,7 +297,7 @@ export function validateGraph(nodes: Node[], edges: Edge[]): ValidationResult {
   const PLACEHOLDERS = new Set(['Process', 'Output', 'Function Call', 'Input',
                                  'Delay', 'Data Store', 'Document', 'Condition']);
   const placeholder = nodes.filter(n => {
-    if (['terminator', 'connector', 'junction', 'decision'].includes(n.type ?? '')) return false;
+    if (['terminator', 'connector', 'off_page_connector', 'junction', 'decision'].includes(n.type ?? '')) return false;
     return PLACEHOLDERS.has(str(n.data?.label)) && !str(n.data?.code);
   });
   if (placeholder.length > 0) {

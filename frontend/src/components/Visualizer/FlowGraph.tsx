@@ -58,7 +58,7 @@ interface EdgeEditState { edgeId: string; label: string; x: number; y: number; }
 // ── Union of all valid node type keys ────────────────────────────────────────
 type FlowNodeType =
   | 'terminator' | 'process'    | 'decision' | 'io'
-  | 'predefined' | 'connector'  | 'document'
+  | 'predefined' | 'connector'  | 'off_page_connector' | 'document'
   | 'manual_input' | 'delay'   | 'database'
   | 'junction';
 
@@ -71,82 +71,88 @@ let _nodeIdCounter = 1000;
 const newNodeId = () => `user-node-${++_nodeIdCounter}`;
 
 const NODE_COLORS: Record<FlowNodeType, string> = {
-  terminator:   '#42a5f5',
-  process:      '#4caf50',
-  decision:     '#ffa726',
-  io:           '#64b5f6',
-  predefined:   '#ab47bc',
-  connector:    '#26c6da',
-  document:     '#ef5350',
-  manual_input: '#ff7043',
-  delay:        '#78909c',
-  database:     '#66bb6a',
-  junction:     '#e040fb',
+  terminator:         '#42a5f5',
+  process:            '#4caf50',
+  decision:           '#ffa726',
+  io:                 '#64b5f6',
+  predefined:         '#ab47bc',
+  connector:          '#26c6da',
+  off_page_connector: '#ffca28',
+  document:           '#ef5350',
+  manual_input:       '#ff7043',
+  delay:              '#78909c',
+  database:           '#66bb6a',
+  junction:           '#e040fb',
 };
 
 const DEFAULT_LABELS: Record<FlowNodeType, string> = {
-  terminator:   'Start',
-  process:      'Process',
-  decision:     'Condition',
-  io:           'Output',
-  predefined:   'Function Call',
-  connector:    'A',
-  document:     'Document',
-  manual_input: 'Input',
-  delay:        'Delay',
-  database:     'Data Store',
-  junction:     '⬡',
+  terminator:         'Start',
+  process:            'Process',
+  decision:           'Condition',
+  io:                 'Output',
+  predefined:         'Function Call',
+  connector:          'A',
+  off_page_connector: '1',
+  document:           'Document',
+  manual_input:       'Input',
+  delay:              'Delay',
+  database:           'Data Store',
+  junction:           '⬡',
 };
 
 const NODE_SIZES: Record<FlowNodeType, { width: number; height: number }> = {
-  terminator:   { width: 160, height: 50  },
-  process:      { width: 180, height: 90  },
-  decision:     { width: 140, height: 140 },
-  io:           { width: 185, height: 70  },
-  predefined:   { width: 180, height: 90  },
-  connector:    { width: 60,  height: 60  },
-  document:     { width: 185, height: 90  },
-  manual_input: { width: 185, height: 75  },
-  delay:        { width: 185, height: 70  },
-  database:     { width: 175, height: 95  },
-  junction:     { width: 36,  height: 36  },
+  terminator:         { width: 160, height: 50  },
+  process:            { width: 180, height: 90  },
+  decision:           { width: 140, height: 140 },
+  io:                 { width: 185, height: 70  },
+  predefined:         { width: 180, height: 90  },
+  connector:          { width: 60,  height: 60  },
+  off_page_connector: { width: 70,  height: 70  },
+  document:           { width: 185, height: 90  },
+  manual_input:       { width: 185, height: 75  },
+  delay:              { width: 185, height: 70  },
+  database:           { width: 175, height: 95  },
+  junction:           { width: 36,  height: 36  },
 };
 
 const EDITOR_ACCENT: Record<string, string> = {
-  terminator:   '#42a5f5', process:      '#4caf50',
-  decision:     '#ffa726', io:           '#64b5f6',
-  predefined:   '#ab47bc', connector:    '#26c6da',
-  document:     '#ef5350', manual_input: '#ff7043',
-  delay:        '#78909c', database:     '#66bb6a',
-  junction:     '#e040fb',
+  terminator:         '#42a5f5', process:      '#4caf50',
+  decision:           '#ffa726', io:           '#64b5f6',
+  predefined:         '#ab47bc', connector:    '#26c6da',
+  off_page_connector: '#ffca28',
+  document:           '#ef5350', manual_input: '#ff7043',
+  delay:              '#78909c', database:     '#66bb6a',
+  junction:           '#e040fb',
 };
 
 const EDITOR_TITLE: Record<string, string> = {
-  terminator:   'Start / End',
-  process:      'Process',
-  decision:     'Decision',
-  io:           'Output (cout)',
-  predefined:   'Predefined Process (Function Call)',
-  connector:    'Connector (On-page Reference)',
-  document:     'Document / Output File',
-  manual_input: 'Manual Input (cin)',
-  delay:        'Delay / Wait',
-  database:     'Database / Data Store',
-  junction:     'Junction (Offset / Merge Point)',
+  terminator:         'Start / End',
+  process:            'Process',
+  decision:           'Decision',
+  io:                 'Output (cout)',
+  predefined:         'Predefined Process (Function Call)',
+  connector:          'Connector (On-page Reference)',
+  off_page_connector: 'Off-page Connector (Cross-page Reference)',
+  document:           'Document / Output File',
+  manual_input:       'Manual Input (cin)',
+  delay:              'Delay / Wait',
+  database:           'Database / Data Store',
+  junction:           'Junction (Offset / Merge Point)',
 };
 
 const CODE_PLACEHOLDER: Record<string, string> = {
-  process:      'e.g.  hp = hp - 10;',
-  decision:     'e.g.  hp > 0',
-  io:           'e.g.  cout << hp << endl;',
-  predefined:   'e.g.  calculateDamage(hp, atk);',
-  connector:    '',
-  document:     'e.g.  label or filename',
-  manual_input: 'e.g.  cin >> name;',
-  delay:        'e.g.  sleep(1000);',
-  database:     'e.g.  scores[i]',
-  terminator:   '',
-  junction:     '',
+  process:            'e.g.  hp = hp - 10;',
+  decision:           'e.g.  hp > 0',
+  io:                 'e.g.  cout << hp << endl;',
+  predefined:         'e.g.  calculateDamage(hp, atk);',
+  connector:          '',
+  off_page_connector: '',
+  document:           'e.g.  label or filename',
+  manual_input:       'e.g.  cin >> name;',
+  delay:              'e.g.  sleep(1000);',
+  database:           'e.g.  scores[i]',
+  terminator:         '',
+  junction:           '',
 };
 
 const PALETTE_ITEMS: {
@@ -192,6 +198,16 @@ const PALETTE_ITEMS: {
   {
     type: 'connector', label: 'Connector', iso: 'ISO: On-page Reference',
     shape: <div style={{ width: 22, height: 22, borderRadius: '50%', background: 'linear-gradient(135deg,#042a2e,#073540)', border: '2px solid #26c6da', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 8, color: 'white', fontWeight: 800, flexShrink: 0 }}>A</div>,
+  },
+  {
+    type: 'off_page_connector', label: 'Off-page Connector', iso: 'ISO: Off-page Reference',
+    shape: (
+      <svg width={26} height={24} viewBox="0 0 26 24" style={{ flexShrink: 0 }}>
+        {/* Home-plate / pentagon: flat top + sides, point at bottom */}
+        <polygon points="2,2 24,2 24,14 13,22 2,14" fill="#2a2008" stroke="#ffca28" strokeWidth="1.5" strokeLinejoin="round" />
+        <text x="13" y="13" textAnchor="middle" fontSize="7" fill="white" fontWeight="800">1</text>
+      </svg>
+    ),
   },
   {
     type: 'document', label: 'Document', iso: 'ISO: Document',
@@ -455,6 +471,33 @@ const ConnectorNode = ({ data, selected }: NodeProps<Node<ExtendedNodeData>>) =>
   );
 };
 
+// ── 6b. OFF-PAGE CONNECTOR — pentagon / home-plate ───────────────────────────
+// ISO 5807 "Off-page Reference": flat top + sides, point at bottom — used to
+// jump flow to/from another page (cross-page reference). Distinct from the
+// on-page Connector circle: the home-plate shape signals an off-page link.
+const OffPageConnectorNode = ({ data, selected }: NodeProps<Node<ExtendedNodeData>>) => {
+  const W = 70, H = 70;
+  const { color } = useNodeAppearance('off_page_connector', data);
+  const fill = data.violation ? '#2d0a0a' : data.visited ? '#1a2e1a' : '#2a2008';
+  const points = `4,4 ${W-4},4 ${W-4},${H*0.6} ${W/2},${H-4} 4,${H*0.6}`;
+  return (
+    <BaseNode data={data} selected={selected} style={{ width: W, height: H }}>
+      <EditHint />
+      {data.violation && <ViolationBadge />}
+      <svg width={W} height={H} viewBox={`0 0 ${W} ${H}`} style={{ position: 'absolute', inset: 0, filter: `drop-shadow(0 3px 14px ${color}55)` }}>
+        <polygon points={points} fill={fill} stroke={color} strokeWidth={selected ? 3 : 2.5} strokeLinejoin="round" />
+      </svg>
+      <Handle type="target" position={Position.Top}    style={{ ...handleStyle(color), top: 0, zIndex: 5 }} />
+      <div style={{ position: 'absolute', top: '38%', left: '50%', transform: 'translate(-50%,-50%)', zIndex: 1, pointerEvents: 'none', userSelect: 'none' }}>
+        <span style={{ color: 'white', fontSize: 14, fontWeight: 800, textShadow: '0 2px 4px rgba(0,0,0,0.6)' }}>
+          {String(data.label ?? '1')}
+        </span>
+      </div>
+      <Handle type="source" position={Position.Bottom} style={{ ...handleStyle(color), bottom: 0, zIndex: 5 }} />
+    </BaseNode>
+  );
+};
+
 // ── 7. DOCUMENT — rectangle with wavy bottom ─────────────────────────────────
 const DocumentNode = ({ data, selected }: NodeProps<Node<ExtendedNodeData>>) => {
   const W = 185, H = 90;
@@ -592,12 +635,13 @@ const JunctionNode = ({ data, selected }: NodeProps<Node<ExtendedNodeData>>) => 
 };
 
 const nodeTypes = {
-  terminator:   TerminatorNode, process:      ProcessNode,
-  decision:     DecisionNode,   io:           IONode,
-  predefined:   PredefinedNode, connector:    ConnectorNode,
-  document:     DocumentNode,   manual_input: ManualInputNode,
-  delay:        DelayNode,      database:     DatabaseNode,
-  junction:     JunctionNode,
+  terminator:         TerminatorNode, process:      ProcessNode,
+  decision:           DecisionNode,   io:           IONode,
+  predefined:         PredefinedNode, connector:    ConnectorNode,
+  off_page_connector: OffPageConnectorNode,
+  document:           DocumentNode,   manual_input: ManualInputNode,
+  delay:              DelayNode,      database:     DatabaseNode,
+  junction:           JunctionNode,
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -1012,16 +1056,18 @@ const NodeEditor: React.FC<{
   const noCode    =
     editState.type === 'terminator' ||
     editState.type === 'connector' ||
+    editState.type === 'off_page_connector' ||
     editState.type === 'junction';
   const fieldLabel =
-    editState.type === 'decision'  ? 'Condition / Label' :
-    editState.type === 'connector' ? 'Reference Letter'  :
-    editState.type === 'junction'  ? 'Junction Label'    :
+    editState.type === 'decision'           ? 'Condition / Label'   :
+    editState.type === 'connector'          ? 'Reference Letter'    :
+    editState.type === 'off_page_connector' ? 'Page / Reference ID' :
+    editState.type === 'junction'           ? 'Junction Label'      :
     'Label';
   const placeholder =
-    editState.type === 'connector'
-      ? 'e.g. A, B, 1'
-      : `e.g. ${DEFAULT_LABELS[editState.type as FlowNodeType] ?? 'Label'}`;
+    editState.type === 'connector'          ? 'e.g. A, B, 1'                  :
+    editState.type === 'off_page_connector' ? 'e.g. P2, page-2, 1'             :
+    `e.g. ${DEFAULT_LABELS[editState.type as FlowNodeType] ?? 'Label'}`;
 
   const inputBase: React.CSSProperties = {
     width: '100%', boxSizing: 'border-box',
@@ -1504,11 +1550,23 @@ const FlowGraphInner: React.FC<Props> = ({
 
     const inferNodeType = (node: ControlFlowNode): FlowNodeType => {
       const lbl = String(node.label ?? '').toLowerCase();
+      const code = String(node.code ?? '').toLowerCase();
+
+      // Honor authoritative types from the CFG generator first — these are
+      // produced by the AST visitor and are more reliable than label
+      // pattern-matching, especially for `Func: main` / `Return` / etc.
+      if (node.type === 'start' || node.type === 'end') return 'terminator';
+      if (node.type === 'decision')                     return 'decision';
+      if (node.type === 'output')                       return 'io';
+      if (node.type === 'input')                        return 'manual_input';
+
+      // Label/code-based inference for plain process nodes
       if (lbl === 'start' || lbl === 'end')                                    return 'terminator';
-      if (node.type === 'decision')                                             return 'decision';
-      if (lbl.includes('cin')    || lbl.includes('scanf'))                     return 'manual_input';
-      if (lbl.includes('cout')   || lbl.includes('printf')
-       || lbl.includes('print')  || lbl.includes('output'))                    return 'io';
+      if (code.includes('cin')    || code.includes('scanf')
+       || lbl.includes('cin')     || lbl.includes('scanf'))                    return 'manual_input';
+      if (code.includes('cout')   || code.includes('printf')
+       || lbl.includes('cout')    || lbl.includes('printf')
+       || lbl.includes('print')   || lbl.includes('output'))                   return 'io';
       if (lbl.includes('write')  || lbl.includes('file')
        || lbl.includes('document') || lbl.includes('report'))                  return 'document';
       if (lbl.includes('array')  || lbl.includes('vector')

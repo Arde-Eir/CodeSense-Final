@@ -184,7 +184,7 @@ function parseVarDecl(code: string): VarDecl | null {
     if (!isValidIdentifier(name)) return null;
     return {
       modifiers,
-      varType: modifiers.join(' ') + (modifiers.length ? ' ' : '') + matchedType + ptrSuffix,
+      varType: matchedType + ptrSuffix,
       name, isArray: true,
       arraySize: arrayMatch[2].trim(),
       value: arrayMatch[3]?.trim(),
@@ -197,7 +197,7 @@ function parseVarDecl(code: string): VarDecl | null {
     if (!isValidIdentifier(name)) return null;
     return {
       modifiers,
-      varType: modifiers.join(' ') + (modifiers.length ? ' ' : '') + matchedType + ptrSuffix,
+      varType: matchedType + ptrSuffix,
       name, isArray: false,
       value: assignMatch[2]?.trim(),
     };
@@ -404,7 +404,7 @@ function resolveCode(node: Node<NodeData>): string {
 function collectAllCode(nodes: Node<NodeData>[]): string[] {
   return nodes
     // Structural routing nodes don't emit C++ statements
-    .filter(n => !['terminator', 'connector', 'junction'].includes(String(n.type ?? '')))
+    .filter(n => !['terminator', 'connector', 'off_page_connector', 'junction'].includes(String(n.type ?? '')))
     .map(n => resolveCode(n))
     .filter(Boolean);
 }
@@ -440,33 +440,40 @@ function findMergeNode(
 
 // ─── Loop Detection ───────────────────────────────────────────────────────────
 
+function reachesNode(startId: string, targetId: string, adj: Map<string, Edge[]>): boolean {
+  if (startId === targetId) return true;
+  const visited = new Set<string>();
+  const queue: string[] = [startId];
+  while (queue.length) {
+    const id = queue.shift()!;
+    if (id === targetId) return true;
+    if (visited.has(id)) continue;
+    visited.add(id);
+    for (const e of adj.get(id) ?? []) {
+      if (!visited.has(e.target)) queue.push(e.target);
+    }
+  }
+  return false;
+}
+
+/**
+ * A decision node represents a loop only when EXACTLY ONE branch loops back to
+ * it. If both branches eventually loop back, the decision is an `if` nested
+ * inside an outer loop (the outer loop is what makes both branches return).
+ * If neither branch loops back, it's a plain `if`.
+ */
 function detectLoop(
   nodeId: string,
   trueEdge: Edge | undefined,
   falseEdge: Edge | undefined,
   adj: Map<string, Edge[]>
-): boolean {
-  // HARDENED: proper BFS with visited set. The previous implementation used
-  // `visited.has(id) ? continue : visited.add(id)` AFTER enqueueing children,
-  // which meant a single node could be enqueued many times on diamond graphs
-  // and the 50-hop cap was hitting false before detecting real back-edges.
-  const checkBackEdge = (startId: string): boolean => {
-    const visited = new Set<string>();
-    const queue: string[] = [startId];
-    while (queue.length) {
-      const id = queue.shift()!;
-      if (id === nodeId) return true;
-      if (visited.has(id)) continue;
-      visited.add(id);
-      for (const e of adj.get(id) ?? []) {
-        if (!visited.has(e.target)) queue.push(e.target);
-      }
-    }
-    return false;
-  };
-  if (trueEdge && checkBackEdge(trueEdge.target)) return true;
-  if (falseEdge && checkBackEdge(falseEdge.target)) return true;
-  return false;
+): { isLoop: boolean; bodyEdge?: Edge; exitEdge?: Edge } {
+  const trueLoops  = !!(trueEdge  && reachesNode(trueEdge.target,  nodeId, adj));
+  const falseLoops = !!(falseEdge && reachesNode(falseEdge.target, nodeId, adj));
+
+  if (trueLoops && !falseLoops) return { isLoop: true,  bodyEdge: trueEdge,  exitEdge: falseEdge };
+  if (falseLoops && !trueLoops) return { isLoop: true,  bodyEdge: falseEdge, exitEdge: trueEdge  };
+  return { isLoop: false };
 }
 
 // ─── Main Traversal ───────────────────────────────────────────────────────────
@@ -496,8 +503,8 @@ function traverse(
       continue;
     }
 
-    // ── Connector / Junction (offset) — structural only, no emitted code ────
-    if (node.type === 'connector') {
+    // ── Connector / Off-page / Junction — structural only, no emitted code ─
+    if (node.type === 'connector' || node.type === 'off_page_connector') {
       currentId = outEdges[0]?.target;
       continue;
     }
@@ -523,29 +530,46 @@ function traverse(
         return l === 'false' || l === 'no';
       }) ?? outEdges[1];
 
-      const isLoop = detectLoop(currentId, trueEdge, falseEdge, adj);
-      const mergeNode = findMergeNode(trueEdge?.target, falseEdge?.target, adj);
-      const mergeSet = mergeNode ? new Set([mergeNode]) : new Set<string>();
+      const loopInfo = detectLoop(currentId, trueEdge, falseEdge, adj);
 
-      if (isLoop) {
-        output += `${indent}while (${condition}) {\n`;
-        if (trueEdge) {
-          output += traverse(trueEdge.target, nodeMap, adj, new Set(visited), indent + '    ', mergeSet, declaredVars);
+      if (loopInfo.isLoop) {
+        // The body is the branch that loops back to the decision; the exit is
+        // the other branch (where execution continues after the loop). If the
+        // looping branch is the FALSE branch, we negate the condition so the
+        // emitted while reads naturally.
+        const bodyEdge = loopInfo.bodyEdge;
+        const exitEdge = loopInfo.exitEdge;
+        const negate   = bodyEdge === falseEdge;
+        const whileCondition = negate ? `!(${condition})` : condition;
+
+        output += `${indent}while (${whileCondition}) {\n`;
+        if (bodyEdge) {
+          // Body must terminate when it reaches back to the decision — pass
+          // the decision node id as a stop so we don't re-emit it.
+          const stopAtBody = new Set([currentId]);
+          output += traverse(bodyEdge.target, nodeMap, adj, new Set(visited), indent + '    ', stopAtBody, declaredVars);
         }
         output += `${indent}}\n`;
-      } else {
-        output += `${indent}if (${condition}) {\n`;
-        if (trueEdge) {
-          output += traverse(trueEdge.target, nodeMap, adj, new Set(visited), indent + '    ', mergeSet, declaredVars);
-        }
-        output += `${indent}}`;
-        if (falseEdge && falseEdge.target !== mergeNode) {
-          output += ` else {\n`;
-          output += traverse(falseEdge.target, nodeMap, adj, new Set(visited), indent + '    ', mergeSet, declaredVars);
-          output += `${indent}}`;
-        }
-        output += '\n';
+
+        currentId = exitEdge?.target;
+        continue;
       }
+
+      // Plain if / if-else
+      const mergeNode = findMergeNode(trueEdge?.target, falseEdge?.target, adj);
+      const mergeSet  = mergeNode ? new Set([mergeNode]) : new Set<string>();
+
+      output += `${indent}if (${condition}) {\n`;
+      if (trueEdge && trueEdge.target !== mergeNode) {
+        output += traverse(trueEdge.target, nodeMap, adj, new Set(visited), indent + '    ', mergeSet, declaredVars);
+      }
+      output += `${indent}}`;
+      if (falseEdge && falseEdge.target !== mergeNode) {
+        output += ` else {\n`;
+        output += traverse(falseEdge.target, nodeMap, adj, new Set(visited), indent + '    ', mergeSet, declaredVars);
+        output += `${indent}}`;
+      }
+      output += '\n';
 
       currentId = mergeNode;
       continue;
@@ -616,10 +640,10 @@ function traverse(
             const modPart = decl.modifiers.length ? decl.modifiers.join(' ') + ' ' : '';
             if (decl.isArray) {
               const init = decl.value ? ` = ${decl.value}` : '';
-              output += `${indent}${modPart}${decl.varType.replace(/^(const |static )*/, '')} ${decl.name}[${decl.arraySize}]${init};\n`;
+              output += `${indent}${modPart}${decl.varType} ${decl.name}[${decl.arraySize}]${init};\n`;
             } else {
               const init = decl.value !== undefined ? ` = ${decl.value}` : '';
-              output += `${indent}${modPart}${decl.varType.replace(/^(const |static )*/, '')} ${decl.name}${init};\n`;
+              output += `${indent}${modPart}${decl.varType} ${decl.name}${init};\n`;
             }
           }
         } else {

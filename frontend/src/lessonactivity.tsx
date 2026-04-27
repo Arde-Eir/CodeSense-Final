@@ -212,10 +212,17 @@ const GameSidePanel: React.FC<{
   isCompleted:     boolean;
   onTakeHint:      () => void;
   activeTab:       ActivityTab;
-}> = ({ quest, hintsUsed, maxHints, earnedXP, isCompleted, onTakeHint, activeTab }) => {
+  // When the quest is completed, the bottom button switches from "Take a
+  // Hint" to "Next Quest". `hasNextQuest=false` means this is the last quest
+  // in the phase — we still show a button, but it returns to the level page.
+  hasNextQuest:    boolean;
+  onNextQuest:     () => void;
+}> = ({ quest, hintsUsed, maxHints, earnedXP, isCompleted, onTakeHint, activeTab, hasNextQuest, onNextQuest }) => {
   const [activeHint, setActiveHint] = useState<number | null>(null);
   const tabHints = (quest.hints ?? []).filter(h => !h.activity || h.activity === activeTab);
-  const allHintsUsed = hintsUsed >= maxHints;
+  const noHintsAvailable = tabHints.length === 0;
+  const allHintsUsed     = !noHintsAvailable && hintsUsed >= maxHints;
+  const buttonDisabled   = noHintsAvailable || allHintsUsed || isCompleted;
   const unlocked: HintItem[] = tabHints.slice(0, hintsUsed);
 
   return (
@@ -233,7 +240,9 @@ const GameSidePanel: React.FC<{
         <div style={{ fontSize: 9, color: '#484f58', fontFamily: "'JetBrains Mono',monospace", letterSpacing: '1.5px', textTransform: 'uppercase', marginBottom: 10 }}>HINTS</div>
         {unlocked.length === 0 && (
           <div style={{ fontSize: 12, color: '#484f58', fontFamily: 'Inter,sans-serif', fontStyle: 'italic' }}>
-            Take a hint below to unlock guidance.
+            {noHintsAvailable
+              ? 'No hints have been authored for this activity.'
+              : 'Take a hint below to unlock guidance.'}
           </div>
         )}
         {unlocked.map((hint, i) => (
@@ -254,22 +263,112 @@ const GameSidePanel: React.FC<{
           <span style={{ fontSize: 10, color: '#484f58', fontFamily: "'JetBrains Mono',monospace", letterSpacing: '1px' }}>XP REWARD</span>
           <span style={{ fontSize: 14, fontWeight: 800, color: '#facc15', fontFamily: "'JetBrains Mono',monospace" }}>{earnedXP} XP</span>
         </div>
-        <button onClick={onTakeHint} disabled={allHintsUsed || isCompleted} style={{
-          width: '100%', padding: '9px 10px', borderRadius: 9, border: 'none',
-          background: allHintsUsed || isCompleted ? 'rgba(72,79,88,0.2)' : 'linear-gradient(135deg,#06b6d4,#0891b2)',
-          color: allHintsUsed || isCompleted ? '#484f58' : '#000',
-          fontWeight: 700, fontSize: 11,
-          cursor: allHintsUsed || isCompleted ? 'not-allowed' : 'pointer',
-          fontFamily: 'Inter,sans-serif',
-          boxShadow: allHintsUsed || isCompleted ? 'none' : '0 4px 14px rgba(6,182,212,.35)',
-          transition: 'all .15s',
-        }}>
-          {allHintsUsed ? 'No more hints' : `TAKE A HINT (${maxHints - hintsUsed} left)`}
-        </button>
+        {isCompleted ? (
+          // Quest finished — replace the hint button with a "Next Quest"
+          // CTA. If there's no next quest in this phase, the button becomes
+          // "Back to Level" and routes to the phase page instead.
+          <button onClick={onNextQuest} style={{
+            width: '100%', padding: '9px 10px', borderRadius: 9, border: 'none',
+            background: 'linear-gradient(135deg,#3fb950,#2ea043)',
+            color: '#fff',
+            fontWeight: 800, fontSize: 11, letterSpacing: 0.4,
+            cursor: 'pointer',
+            fontFamily: 'Inter,sans-serif',
+            boxShadow: '0 4px 14px rgba(63,185,80,0.35)',
+            transition: 'all .15s',
+          }}
+          onMouseEnter={e => { e.currentTarget.style.transform = 'translateY(-1px)'; }}
+          onMouseLeave={e => { e.currentTarget.style.transform = 'none'; }}
+          >
+            {hasNextQuest ? 'NEXT QUEST →' : '✓ BACK TO LEVEL'}
+          </button>
+        ) : (
+          <button onClick={onTakeHint} disabled={buttonDisabled} style={{
+            width: '100%', padding: '9px 10px', borderRadius: 9, border: 'none',
+            background: buttonDisabled ? 'rgba(72,79,88,0.2)' : 'linear-gradient(135deg,#06b6d4,#0891b2)',
+            color: buttonDisabled ? '#484f58' : '#000',
+            fontWeight: 700, fontSize: 11,
+            cursor: buttonDisabled ? 'not-allowed' : 'pointer',
+            fontFamily: 'Inter,sans-serif',
+            boxShadow: buttonDisabled ? 'none' : '0 4px 14px rgba(6,182,212,.35)',
+            transition: 'all .15s',
+          }}>
+            {noHintsAvailable
+              ? 'No hints available'
+              : allHintsUsed
+                ? 'No more hints'
+                : `TAKE A HINT (${maxHints - hintsUsed} left)`}
+          </button>
+        )}
       </div>
     </div>
   );
 };
+
+// ─── Resizable side-panel width (persists in localStorage) ───────────────
+// Defaults to 280px. Drag handle clamps within [SIDE_MIN, SIDE_MAX]. Width is
+// remembered across sessions per-user via a single key.
+const SIDE_DEFAULT = 280;
+const SIDE_MIN     = 220;
+const SIDE_MAX     = 520;
+const SIDE_STORAGE = 'codesense:lesson:sidePanelWidth';
+
+function useResizableSidePanel(containerRef: React.RefObject<HTMLDivElement | null>) {
+  const [width, setWidth] = useState<number>(() => {
+    if (typeof window === 'undefined') return SIDE_DEFAULT;
+    const raw = window.localStorage.getItem(SIDE_STORAGE);
+    const n = raw ? Number(raw) : NaN;
+    if (!Number.isFinite(n)) return SIDE_DEFAULT;
+    return Math.min(SIDE_MAX, Math.max(SIDE_MIN, n));
+  });
+  const [isResizing, setIsResizing] = useState(false);
+
+  const onResizeStart = useCallback((e: React.MouseEvent) => {
+    e.preventDefault();
+    setIsResizing(true);
+  }, []);
+
+  useEffect(() => {
+    if (!isResizing) return;
+
+    const onMove = (e: MouseEvent) => {
+      const container = containerRef.current;
+      if (!container) return;
+      const rect = container.getBoundingClientRect();
+      // Side panel is on the right — width is distance from cursor to right edge.
+      const next = Math.min(SIDE_MAX, Math.max(SIDE_MIN, rect.right - e.clientX));
+      setWidth(next);
+    };
+    const onUp = () => {
+      setIsResizing(false);
+    };
+
+    window.addEventListener('mousemove', onMove);
+    window.addEventListener('mouseup', onUp);
+    // Block text selection / change cursor globally while dragging
+    const prevUserSelect = document.body.style.userSelect;
+    const prevCursor     = document.body.style.cursor;
+    document.body.style.userSelect = 'none';
+    document.body.style.cursor     = 'col-resize';
+
+    return () => {
+      window.removeEventListener('mousemove', onMove);
+      window.removeEventListener('mouseup', onUp);
+      document.body.style.userSelect = prevUserSelect;
+      document.body.style.cursor     = prevCursor;
+    };
+  }, [isResizing, containerRef]);
+
+  // Persist after the drag settles.
+  useEffect(() => {
+    if (isResizing) return;
+    try { window.localStorage.setItem(SIDE_STORAGE, String(width)); } catch {/* ignore quota */}
+  }, [width, isResizing]);
+
+  const resetWidth = useCallback(() => setWidth(SIDE_DEFAULT), []);
+
+  return { width, isResizing, onResizeStart, resetWidth };
+}
 
 // ─── Main page ────────────────────────────────────────────────────────────
 export const LessonActivity: React.FC = () => {
@@ -290,6 +389,11 @@ export const LessonActivity: React.FC = () => {
   const [isCompleted,  setIsCompleted]  = useState(false);
   const [earnedXP,     setEarnedXP]     = useState(0);
 
+  // Next quest in the same phase (by sortorder). Used to power the
+  // "Next Quest" button that replaces "Take a Hint" once the quest is fully
+  // completed. `null` once we know there's no next quest in this phase.
+  const [nextQuestId, setNextQuestId] = useState<string | null | undefined>(undefined);
+
   const [xpToast, setXpToast] = useState({ visible: false, amount: 0, repeat: false, levelUp: false, newLevel: undefined as number | undefined });
   const [hintToast, setHintToast] = useState({ visible: false });
 
@@ -301,10 +405,39 @@ export const LessonActivity: React.FC = () => {
   const xpToastTimer           = useRef<ReturnType<typeof setTimeout> | null>(null);
   const hintToastTimer         = useRef<ReturnType<typeof setTimeout> | null>(null);
 
+  // Resizable hint side-panel: bodyRef anchors the drag-clamp to the
+  // content row (so width math is independent of the page chrome).
+  const bodyRef = useRef<HTMLDivElement>(null);
+  const {
+    width: sidePanelWidth,
+    isResizing: isSideResizing,
+    onResizeStart,
+    resetWidth: resetSidePanelWidth,
+  } = useResizableSidePanel(bodyRef);
+
   // ── Load quest + this user's mission_progress row ─────────────────────
   const doFetch = useCallback(async () => {
     if (!user?.id || !questId) return;
     setLoading(true); setFetchError(null);
+
+    // RESET per-quest state — `/lesson/:questId` keeps the same component
+    // instance when the route param changes (e.g. "Next Quest" button), so
+    // without an explicit reset, isCompleted / hintsUsed / completedActivities
+    // from the previous quest leak into the new one. That made the Next-Quest
+    // button still appear on the freshly loaded quest, letting the user
+    // chain-click forward and skip quests they never finished.
+    setQuest(null);
+    setIsCompleted(false);
+    setEarnedXP(0);
+    setHintsUsed(0);
+    setProgressId(null);
+    setNextQuestId(undefined);
+    setAppPhase('tutorial');
+    completedActivitiesRef.current = [];
+    everCompletedRef.current       = [];
+    cumulativeXPRef.current        = 0;
+    hintsUsedRef.current           = 0;
+
     try {
       const { data: q, error: qErr } = await withTimeout(
         supabase
@@ -316,6 +449,27 @@ export const LessonActivity: React.FC = () => {
       if (qErr || !q) throw new Error(qErr?.message ?? 'Quest not found');
       const quest = q as unknown as Quest;
       setQuest(quest);
+
+      // Look up the next active quest in the same phase by sortorder. Used by
+      // the side-panel "Next Quest" button after completion. We don't fail the
+      // whole page if this query errors — just fall back to "no next quest".
+      try {
+        const { data: nextRow } = await withTimeout(
+          supabase
+            .from('quests')
+            .select('id')
+            .eq('phase', quest.phase)
+            .eq('isactive', true)
+            .gt('sortorder', quest.sortorder ?? 0)
+            .order('sortorder', { ascending: true })
+            .limit(1)
+            .maybeSingle()
+        );
+        setNextQuestId(nextRow?.id ?? null);
+      } catch (e) {
+        console.warn('[LessonActivity] next-quest lookup failed', e);
+        setNextQuestId(null);
+      }
 
       // Pick the first available tab for this quest as the default.
       const tabs = computeAvailableTabs(quest);
@@ -403,7 +557,10 @@ export const LessonActivity: React.FC = () => {
     () => (quest?.hints ?? []).filter(h => !h.activity || h.activity === activeTab),
     [quest?.hints, activeTab]
   );
-  const maxHints = Math.max(tabHints.length, 1);
+  // Was: Math.max(tabHints.length, 1) — that floor let users click "Take a
+  // hint" on a tab with zero hints, charging XP and revealing nothing. The
+  // real cap is exactly the number of hints available for this tab.
+  const maxHints = tabHints.length;
 
   // First-time vs repeat completion of this specific tab.
   const isRepeatTab = everCompletedRef.current.includes(activeTab);
@@ -415,6 +572,17 @@ export const LessonActivity: React.FC = () => {
     : isRepeatTab
       ? Math.max(REPEAT_XP_MIN, Math.round(baseXP * REPEAT_XP_FRACTION))
       : Math.max(1, baseXP - hintsUsed * XP_PER_HINT);
+
+  // ── Navigate to next quest (or back to phase page if this was the last) ─
+  const handleNextQuest = useCallback(() => {
+    if (nextQuestId) {
+      navigate(`/lesson/${nextQuestId}`);
+    } else if (quest?.phase) {
+      navigate(`/campaign/inside/${quest.phase}`);
+    } else {
+      navigate(-1);
+    }
+  }, [nextQuestId, quest?.phase, navigate]);
 
   // ── Take a hint ──────────────────────────────────────────────────────
   const handleTakeHint = useCallback(async () => {
@@ -691,7 +859,7 @@ export const LessonActivity: React.FC = () => {
       </header>
 
       {/* Body */}
-      <div style={{ flex: 1, display: 'flex', overflow: 'hidden', minHeight: 0 }}>
+      <div ref={bodyRef} style={{ flex: 1, display: 'flex', overflow: 'hidden', minHeight: 0 }}>
         {appPhase === 'tutorial' ? (
           <TutorialLearnPhase
             quest={quest}
@@ -762,8 +930,28 @@ export const LessonActivity: React.FC = () => {
               </div>
             </div>
 
-            {/* Right: side panel */}
-            <div style={{ width: 280, flexShrink: 0, minHeight: 0, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
+            {/* Drag handle: thin column-resizer between the game pane and the
+                side panel. Highlights on hover and while dragging. Double-click
+                to reset to the default width. */}
+            <div
+              role="separator"
+              aria-orientation="vertical"
+              aria-label="Resize hint panel"
+              title="Drag to resize · Double-click to reset"
+              onMouseDown={onResizeStart}
+              onDoubleClick={resetSidePanelWidth}
+              style={{
+                width: 6, flexShrink: 0, cursor: 'col-resize',
+                background: isSideResizing ? 'rgba(88,166,255,0.45)' : 'transparent',
+                borderLeft: '1px solid #21262d',
+                transition: isSideResizing ? 'none' : 'background 0.15s',
+              }}
+              onMouseEnter={e => { if (!isSideResizing) e.currentTarget.style.background = 'rgba(88,166,255,0.18)'; }}
+              onMouseLeave={e => { if (!isSideResizing) e.currentTarget.style.background = 'transparent'; }}
+            />
+
+            {/* Right: side panel — width is user-resizable, persisted to localStorage. */}
+            <div style={{ width: sidePanelWidth, flexShrink: 0, minHeight: 0, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
               <GameSidePanel
                 quest={quest}
                 hintsUsed={hintsUsed}
@@ -772,6 +960,8 @@ export const LessonActivity: React.FC = () => {
                 isCompleted={isCompleted}
                 onTakeHint={handleTakeHint}
                 activeTab={activeTab}
+                hasNextQuest={!!nextQuestId}
+                onNextQuest={handleNextQuest}
               />
             </div>
           </>

@@ -424,11 +424,15 @@ export class CFGGenerator {
 
   // ── Variable / Assignment ─────────────────────────────────────────────────
   private visitVariableDecl(node: any, current: ControlFlowNode): ControlFlowNode {
-    const step = this.createNode(
-      'process', 'Declare',
-      `${node.varType} ${node.name}${node.value ? ' = ...' : ''}`,
-      node.line, node,
-    );
+    // Build actual C++ declaration so flowchart → code round-trips correctly.
+    const dims = Array.isArray(node.dimensions) && node.dimensions.length
+      ? node.dimensions.map((d: any) => `[${this.nodeToString(d)}]`).join('')
+      : '';
+    const init = node.value !== undefined && node.value !== null
+      ? ` = ${this.nodeToString(node.value)}`
+      : '';
+    const code = `${node.varType} ${node.name}${dims}${init}`;
+    const step = this.createNode('process', 'Declare', code, node.line, node);
     this.connect(current, step);
     return step;
   }
@@ -437,7 +441,8 @@ export class CFGGenerator {
     const target = typeof node.target === 'string'
       ? node.target
       : this.nodeToString(node.target);
-    const step = this.createNode('process', 'Assign', `${target} ${node.operator} ...`, node.line, node);
+    const value = this.nodeToString(node.value);
+    const step = this.createNode('process', 'Assign', `${target} ${node.operator} ${value}`, node.line, node);
     this.connect(current, step);
     return step;
   }
@@ -467,13 +472,32 @@ export class CFGGenerator {
 
   // ── I/O ───────────────────────────────────────────────────────────────────
   private visitCoutStatement(node: any, current: ControlFlowNode): ControlFlowNode {
-    const step = this.createNode('output', 'Output (cout)', 'cout << ...', node.line, node);
+    // Reconstruct the actual cout chain so flowchart → code preserves it.
+    // Prefer `values` (chained cout << a << b), fall back to legacy `value`.
+    const items: any[] = Array.isArray(node.values) && node.values.length
+      ? node.values
+      : node.value !== undefined && node.value !== null
+        ? [node.value]
+        : [];
+    const code = items.length
+      ? `cout << ${items.map(v => this.nodeToString(v)).join(' << ')}`
+      : 'cout << ""';
+    const step = this.createNode('output', 'Output (cout)', code, node.line, node);
     this.connect(current, step);
     return step;
   }
 
   private visitCinStatement(node: any, current: ControlFlowNode): ControlFlowNode {
-    const step = this.createNode('input', 'Input (cin)', 'cin >> ...', node.line, node);
+    // Reconstruct the actual cin chain. Prefer `targets`, fall back to `target`.
+    const items: any[] = Array.isArray(node.targets) && node.targets.length
+      ? node.targets
+      : node.target !== undefined && node.target !== null
+        ? [node.target]
+        : [];
+    const code = items.length
+      ? `cin >> ${items.map(t => this.nodeToString(t)).join(' >> ')}`
+      : 'cin >> variable';
+    const step = this.createNode('input', 'Input (cin)', code, node.line, node);
     this.connect(current, step);
     return step;
   }
@@ -695,11 +719,20 @@ export class CFGGenerator {
       case 'ConditionalExpression':
         return `${this.nodeToString(node.condition)} ? ... : ...`;
       case 'NewExpression':
-        return node.size ? `new ${node.baseType}[...]` : `new ${node.baseType}`;
+        return node.size
+          ? `new ${node.baseType}[${this.nodeToString(node.size)}]`
+          : `new ${node.baseType}`;
       case 'VariableDecl':  return `${node.varType} ${node.name}`;
       case 'ExpressionStatement': return this.nodeToString(node.expression);
+      case 'InitializerList':
+        return `{${(node.values || []).map((v: any) => this.nodeToString(v)).join(', ')}}`;
       default:
-        return node.name || node.value !== undefined ? String(node.value) : node.type;
+        // Use `??` (nullish coalescing) — the previous `||` chain mis-handled
+        // valid string-zero or empty-string `name` fields and also leaked
+        // `String(undefined)` when `name` was truthy.
+        if (node.name) return String(node.name);
+        if (node.value !== undefined && node.value !== null) return String(node.value);
+        return node.type ?? '';
     }
   }
 }
