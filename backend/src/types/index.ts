@@ -449,7 +449,7 @@ export interface AnalysisError {
 
 export interface ControlFlowNode {
   id: string;
-  type: 'start' | 'end' | 'process' | 'decision' | 'input' | 'output';
+  type: 'start' | 'end' | 'process' | 'decision' | 'input' | 'output' | 'junction' | 'connector' | 'off_page_connector' | 'predefined';
   label: string;
   code?: string;
   line?: number;
@@ -469,8 +469,8 @@ export interface ExplorerProfile {
   playerName: string;
   secretCode: string; 
   totalXP: number;
-  currentLevel: 1 | 2 | 3 | 4 ;
-  characterType: 'squire' | 'knight' | 'duke' | 'lord';
+  currentLevel: 1 | 2 | 3 | 4 | 5;
+  characterType: 'squire' | 'knight' | 'lord' | 'duke' | 'king';
   createdAt: Date;
   lastActive: Date;
 }

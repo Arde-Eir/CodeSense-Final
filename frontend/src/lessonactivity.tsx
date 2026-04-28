@@ -62,26 +62,44 @@ const TAB_SUBTITLE: Record<ActivityTab, string> = {
   mc:        'Pick the correct answer for each question',
 };
 
-/** Compute which tabs this quest actually has data for. The user must finish
- *  all of these for the quest to be marked completed. */
+/** Compute which tabs this quest should show.
+ *  All activities that have backing data are shown.
+ *  question_type identifies the PRIMARY tab — it appears first so the user
+ *  lands on the designated activity by default. Other populated activities
+ *  are still accessible as additional tabs.
+ *  Exception: mc_questions backs either 'balloon' or 'mc' — balloon only
+ *  when question_type explicitly designates it, mc otherwise. */
 function computeAvailableTabs(quest: Quest | null): ActivityTab[] {
   if (!quest) return [];
-  const out: ActivityTab[] = [];
-  const normalizedType = String(quest.question_type ?? '').trim().toLowerCase();
+  const qt = (quest.question_type ?? '').trim().toLowerCase();
   const isMC =
-    normalizedType === 'multiple_choice' ||
-    normalizedType === 'multiple-choice' ||
-    normalizedType === 'mc' ||
-    normalizedType === 'mcq' ||
-    normalizedType === 'quiz';
-  if (quest.game_items?.length && quest.drop_zones?.length) out.push('drag');
-  if (quest.code_fill_items?.length)                         out.push('code_fill');
-  if (quest.ordering_items?.length)                          out.push('ordering');
-  if (quest.mc_questions?.length) {
-    if (isMC) out.push('mc');
-    else                                            out.push('balloon');
+    qt === 'multiple_choice' || qt === 'multiple-choice' ||
+    qt === 'mc' || qt === 'mcq' || qt === 'quiz';
+
+  // Identify the designated primary tab (may be null if question_type is unset).
+  let primary: ActivityTab | null = null;
+  if      (qt === 'drag_drop')   primary = 'drag';
+  else if (qt === 'code_fill')   primary = 'code_fill';
+  else if (qt === 'ordering')    primary = 'ordering';
+  else if (qt === 'pop_balloon') primary = 'balloon';
+  else if (isMC)                 primary = 'mc';
+
+  // Collect all activities that have data.
+  // mc_questions backs both 'balloon' and 'mc' — both show when data is present.
+  const all: ActivityTab[] = [];
+  if (quest.game_items?.length && quest.drop_zones?.length) all.push('drag');
+  if (quest.code_fill_items?.length)                        all.push('code_fill');
+  if (quest.ordering_items?.length)                         all.push('ordering');
+  if (quest.mc_questions?.length)                           all.push('balloon');
+  if (quest.mc_questions?.length)                           all.push('mc');
+
+  if (all.length === 0) return [];
+
+  // Put the designated primary tab first so it's the default active tab.
+  if (primary && all.includes(primary)) {
+    return [primary, ...all.filter(t => t !== primary)];
   }
-  return out;
+  return all;
 }
 
 // ─── withTimeout — abort hung Supabase calls ──────────────────────────────
@@ -397,6 +415,12 @@ export const LessonActivity: React.FC = () => {
   const [xpToast, setXpToast] = useState({ visible: false, amount: 0, repeat: false, levelUp: false, newLevel: undefined as number | undefined });
   const [hintToast, setHintToast] = useState({ visible: false });
 
+  // Stopwatch: counts up from when the user enters the game phase.
+  // The final elapsed seconds are saved to the DB on quest completion and
+  // shown on leaderboards and profiles.
+  const [elapsed,        setElapsed]        = useState(0);
+  const gameStartedAtRef = useRef<number | null>(null);
+
   // Refs for values used inside async callbacks (avoid stale closures).
   const completedActivitiesRef = useRef<ActivityTab[]>([]);
   const everCompletedRef       = useRef<ActivityTab[]>([]);  // tabs completed in any prior session
@@ -437,6 +461,8 @@ export const LessonActivity: React.FC = () => {
     everCompletedRef.current       = [];
     cumulativeXPRef.current        = 0;
     hintsUsedRef.current           = 0;
+    setElapsed(0);
+    gameStartedAtRef.current       = null;
 
     try {
       const { data: q, error: qErr } = await withTimeout(
@@ -615,15 +641,20 @@ export const LessonActivity: React.FC = () => {
     const newFinished    = [...new Set([...completedActivitiesRef.current, activeTab])] as ActivityTab[];
     completedActivitiesRef.current = newFinished;
 
-    // XP for this event.
+    // XP for this event — scaled by score ratio so incorrect answers earn less.
+    // ratio = 0 means 0 XP regardless of first-take or retake.
+    const ratio = total > 0 ? score / total : 0;
     let xpGainedNow: number;
     if (wasAlreadyDone) {
-      xpGainedNow = Math.max(REPEAT_XP_MIN, Math.round(quest.basexp * REPEAT_XP_FRACTION));
+      // Retake: small bonus scaled by performance — 0 correct answers = 0 XP.
+      xpGainedNow = ratio > 0
+        ? Math.max(REPEAT_XP_MIN, Math.round(quest.basexp * REPEAT_XP_FRACTION * ratio))
+        : 0;
     } else {
       const xpPerTab    = Math.floor(quest.basexp / Math.max(availableTabs.length, 1));
-      const ratio       = total > 0 ? score / total : 1;
       const hintPenalty = Math.round(hintsUsedRef.current * XP_PER_HINT / Math.max(availableTabs.length, 1));
-      xpGainedNow       = Math.max(1, Math.round(xpPerTab * ratio) - hintPenalty);
+      // No floor of 1 — poor performance earns proportionally less, 0 correct earns 0.
+      xpGainedNow = Math.max(0, Math.round(xpPerTab * ratio) - hintPenalty);
     }
     cumulativeXPRef.current += xpGainedNow;
 
@@ -728,18 +759,31 @@ export const LessonActivity: React.FC = () => {
         // Add tabs that we just completed to the everCompleted list so the
         // post-retake UI knows what was historically done.
         everCompletedRef.current = [...new Set([...everCompletedRef.current, ...newFinished])];
+
+        // Fire-and-forget: record how long the user took to finish the quest.
+        if (gameStartedAtRef.current !== null) {
+          const totalSeconds = Math.round((Date.now() - gameStartedAtRef.current) / 1000);
+          supabase
+            .from('mission_progress')
+            .update({ completion_time_seconds: totalSeconds })
+            .eq('userid', user.id)
+            .eq('questid', quest.id)
+            .then(({ error }) => { if (error) console.warn('completion_time save failed', error); });
+        }
       }
 
-      // XP toast
-      setXpToast({
-        visible:  true,
-        amount:   xpGainedNow,
-        repeat:   wasAlreadyDone,
-        levelUp:  levelledUp && isFirstFullFinish,
-        newLevel: levelledUp && isFirstFullFinish ? newLevel : undefined,
-      });
-      if (xpToastTimer.current) clearTimeout(xpToastTimer.current);
-      xpToastTimer.current = setTimeout(() => setXpToast(t => ({ ...t, visible: false })), 4500);
+      // XP toast — only show when XP was actually earned.
+      if (xpGainedNow > 0) {
+        setXpToast({
+          visible:  true,
+          amount:   xpGainedNow,
+          repeat:   wasAlreadyDone,
+          levelUp:  levelledUp && isFirstFullFinish,
+          newLevel: levelledUp && isFirstFullFinish ? newLevel : undefined,
+        });
+        if (xpToastTimer.current) clearTimeout(xpToastTimer.current);
+        xpToastTimer.current = setTimeout(() => setXpToast(t => ({ ...t, visible: false })), 4500);
+      }
 
     } catch (err) {
       // Roll back local state on failure.
@@ -749,6 +793,19 @@ export const LessonActivity: React.FC = () => {
       setFetchError(err instanceof Error ? err.message : 'Could not save your progress');
     }
   }, [user?.id, quest, activeTab, availableTabs, isCompleted]);
+
+  // ── Quest-level stopwatch ─────────────────────────────────────────────
+  // Counts up from when the user first enters the game phase. Stops when
+  // the quest is marked completed. The final value is saved to the DB and
+  // surfaced on leaderboards and user profiles.
+  useEffect(() => {
+    if (appPhase !== 'game' || isCompleted) return;
+    if (gameStartedAtRef.current === null) gameStartedAtRef.current = Date.now();
+    const id = window.setInterval(() => {
+      setElapsed(Math.round((Date.now() - gameStartedAtRef.current!) / 1000));
+    }, 1000);
+    return () => clearInterval(id);
+  }, [appPhase, isCompleted]);
 
   // ── Retake ───────────────────────────────────────────────────────────
   const handleRetake = useCallback(async () => {
@@ -809,6 +866,8 @@ export const LessonActivity: React.FC = () => {
     setIsCompleted(false);
     setHintsUsed(0);
     hintsUsedRef.current = 0;
+    setElapsed(0);
+    gameStartedAtRef.current = null;
     setResetSignal(s => s + 1);
 
     const tabs = computeAvailableTabs(quest);
@@ -899,6 +958,19 @@ export const LessonActivity: React.FC = () => {
                 <div style={{ padding: '14px 22px 6px' }}>
                   <h3 style={{ fontSize: 14, fontWeight: 800, color: '#e6edf3', fontFamily: 'Inter,sans-serif' }}>{TAB_TITLE[activeTab]}</h3>
                   <p style={{ fontSize: 11, color: '#484f58', marginTop: 3, fontFamily: "'JetBrains Mono',monospace" }}>{TAB_SUBTITLE[activeTab]}</p>
+                </div>
+              )}
+
+              {/* ── Stopwatch ── */}
+              {!isCompleted && (
+                <div style={{ padding: '0 22px 8px', flexShrink: 0 }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '6px 10px', borderRadius: 7, border: '1px solid #21262d' }}>
+                    <span style={{ fontSize: 11, flexShrink: 0 }}>⏱</span>
+                    <span style={{ flex: 1, fontSize: 10, color: '#484f58', fontFamily: 'Inter,sans-serif' }}>Quest time</span>
+                    <span style={{ fontSize: 12, minWidth: 48, textAlign: 'right', fontFamily: "'JetBrains Mono',monospace", color: '#8b949e', fontWeight: 600 }}>
+                      {String(Math.floor(elapsed / 60)).padStart(2, '0')}:{String(elapsed % 60).padStart(2, '0')}
+                    </span>
+                  </div>
                 </div>
               )}
 

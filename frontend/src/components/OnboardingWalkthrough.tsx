@@ -83,10 +83,12 @@ const STEPS = (isAdmin: boolean): Step[] => [
     body: (
       <>
         <p>
-          Toggle <b>Build Mode</b> inside the Sandbox. Drag ISO 5807 shapes
-          (Start, Decision, Process, I/O, …) onto the canvas, wire them, then
-          hit <b>⚡ GENERATE C++</b>. The generator walks your graph and emits
-          compilable code.
+          Toggle <b>Build Mode</b> inside the Sandbox. Click <b>☰ TOOLS</b> (top-right of
+          the canvas) to open the shape palette — pick from 12 ISO 5807 shapes
+          (Terminator, Decision, Process, I/O, Junction, Connector, and more),
+          wire them, then hit <b>⚡ GENERATE C++</b>. When you run Analyze Code
+          first, the CFG is auto-generated with the correct shapes (merge points
+          become Junctions, break/continue become On-page Connectors, etc.).
         </p>
         <p>
           Before emit, the <b>GraphValidator</b> runs eleven rules (missing
@@ -108,8 +110,8 @@ const STEPS = (isAdmin: boolean): Step[] => [
         </p>
         <p>
           XP unlocks titles — <b>Squire · Knight · Lord · Duke · King</b> — at
-          1,000 / 4,000 / 10,000 / 25,000 XP. Displayed title is cosmetic:
-          pick any unlocked one in Profile → Settings.
+          5,000 / 20,000 / 75,000 / 250,000 XP. Ranks are intentionally hard
+          to earn. Displayed title is cosmetic: pick any unlocked one in Profile → Settings.
         </p>
       </>
     ),

@@ -135,7 +135,7 @@ const TUTORIALS: Tutorial[] = [
     steps: [
       {
         title: 'Switch to Build mode',
-        instruction: 'In the Sandbox, toggle to Build mode. The node palette appears on the right.',
+        instruction: 'In the Sandbox, toggle to Build mode. Click ☰ TOOLS (top-right of the canvas) to open the shape palette and code generator. The panel can be hidden again with the same button to give you a full-canvas view.',
       },
       {
         title: 'Lay out a simple loop',
@@ -166,8 +166,8 @@ const TUTORIALS: Tutorial[] = [
         instruction: 'Anything with deeply nested loops will work — we want ~30+ nodes in the CFG.',
       },
       {
-        title: 'Click the 🔓 UNLOCKED badge (bottom-left)',
-        instruction: 'It flips to 🔒 LOCKED. Node drag and canvas pan are frozen.',
+        title: 'Click the 🔓 UNLOCKED badge (bottom-left, above the legend)',
+        instruction: 'It flips to 🔒 LOCKED. Node drag and canvas pan are frozen. The lock lives on the left side so it never overlaps the right-side tools panel.',
         why: 'Lock is deliberately scoped: it prevents accidental reshaping while you inspect, but leaves zoom (wheel / pinch / ± controls) enabled so you can still navigate.',
       },
       {
@@ -205,7 +205,7 @@ const TUTORIALS: Tutorial[] = [
       {
         title: 'The Campaign',
         instruction: 'Back on the dashboard, click "Campaign Mode". You\'ll see quests grouped by phase (Beginner → Intermediate → Advanced). Each quest has objectives and earns XP.',
-        hint: 'Ranks unlock at 1,000 / 4,000 / 10,000 / 25,000 XP — Squire → Knight → Lord → Duke → King.',
+        hint: 'Ranks unlock at 5,000 / 20,000 / 75,000 / 250,000 XP — Squire → Knight → Lord → Duke → King. Titles are intentionally hard to earn.',
       },
       {
         title: 'The Leaderboard',
@@ -266,7 +266,7 @@ const TUTORIALS: Tutorial[] = [
       },
       {
         title: 'Check your XP climb',
-        instruction: 'Dashboard → Leaderboard mini, or Profile → Overview. Your rank updates in realtime; cross a threshold (1k / 4k / 10k / 25k) and a rank-up notification appears in the 🔔 bell.',
+        instruction: 'Dashboard → Leaderboard mini, or Profile → Overview. Your rank updates in realtime; cross a threshold (5k / 20k / 75k / 250k) and a rank-up notification appears in the 🔔 bell.',
         hint: 'You can wear any unlocked title — a Duke can still display "Squire" if they want. Set it in Profile → Settings → Displayed Title.',
       },
       {

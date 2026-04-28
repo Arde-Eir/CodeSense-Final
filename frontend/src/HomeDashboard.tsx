@@ -257,10 +257,10 @@ interface Derived {
 }
 
 const XP_MILESTONES: Derived[] = [
-  { id: 'rank:knight', icon: '⚔️', color: '#58a6ff', title: 'Knight rank reached!',   body: 'You\'ve crossed 1,000 XP — you can now display the Knight title.',   check: s => s.totalxp >= 1000 },
-  { id: 'rank:lord',   icon: '🌟', color: '#a371f7', title: 'Lord rank reached!',     body: 'You\'ve crossed 4,000 XP — the Lord title is unlocked.',              check: s => s.totalxp >= 4000 },
-  { id: 'rank:duke',   icon: '👑', color: '#e3b341', title: 'Duke rank reached!',     body: 'You\'ve crossed 10,000 XP — the Duke title is unlocked.',             check: s => s.totalxp >= 10000 },
-  { id: 'rank:king',   icon: '🔱', color: '#ffd700', title: 'KING rank reached!',     body: 'You\'ve crossed 25,000 XP — the highest title in the realm is yours.', check: s => s.totalxp >= 25000 },
+  { id: 'rank:knight', icon: '⚔️', color: '#58a6ff', title: 'Knight rank reached!',   body: 'You\'ve crossed 5,000 XP — you can now display the Knight title.',    check: s => s.totalxp >= 5000 },
+  { id: 'rank:lord',   icon: '🌟', color: '#a371f7', title: 'Lord rank reached!',     body: 'You\'ve crossed 20,000 XP — the Lord title is unlocked.',             check: s => s.totalxp >= 20000 },
+  { id: 'rank:duke',   icon: '👑', color: '#e3b341', title: 'Duke rank reached!',     body: 'You\'ve crossed 75,000 XP — the Duke title is unlocked.',             check: s => s.totalxp >= 75000 },
+  { id: 'rank:king',   icon: '🔱', color: '#ffd700', title: 'KING rank reached!',     body: 'You\'ve crossed 250,000 XP — the highest title in the realm is yours.', check: s => s.totalxp >= 250000 },
 ]
 
 const RUN_MILESTONES: Derived[] = [

@@ -233,14 +233,22 @@ const ScoreRing: React.FC<{ safe: number; total: number }> = ({ safe, total }) =
   const color = pct === 100 ? '#3fb950' : pct >= 70 ? '#e3b341' : '#f85149';
   const r = 22, circ = 2 * Math.PI * r;
   const dash = (pct / 100) * circ;
+  // PDF #9: at 100%, the dasharray-based stroke + round linecap leave a
+  // visible seam at 12 o'clock where the two round caps meet — it reads as
+  // "not a full circle". Render a plain unbroken ring at 100%.
+  const isFull = pct >= 100;
 
   return (
     <div style={{ display: 'flex', alignItems: 'center', gap: '12px', padding: '12px 14px', background: 'rgba(255,255,255,0.02)', border: '1px solid #21262d', borderRadius: '10px' }}>
       <svg width="56" height="56" style={{ flexShrink: 0 }}>
         <circle cx="28" cy="28" r={r} fill="none" stroke="#21262d" strokeWidth="4" />
-        <circle cx="28" cy="28" r={r} fill="none" stroke={color} strokeWidth="4"
-          strokeDasharray={`${dash} ${circ}`} strokeDashoffset={circ / 4}
-          strokeLinecap="round" style={{ transition: 'stroke-dasharray 0.6s ease' }} />
+        {isFull ? (
+          <circle cx="28" cy="28" r={r} fill="none" stroke={color} strokeWidth="4" />
+        ) : (
+          <circle cx="28" cy="28" r={r} fill="none" stroke={color} strokeWidth="4"
+            strokeDasharray={`${dash} ${circ}`} strokeDashoffset={circ / 4}
+            strokeLinecap="round" style={{ transition: 'stroke-dasharray 0.6s ease' }} />
+        )}
         <text x="28" y="33" textAnchor="middle" fontSize="12" fontWeight="700" fill={color} fontFamily="IBM Plex Mono, monospace">{pct}%</text>
       </svg>
       <div>

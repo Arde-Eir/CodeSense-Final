@@ -58,10 +58,37 @@ export class CFGGenerator {
   private currentFunctionEntry: ControlFlowNode | null = null;
   private currentFunctionName: string = '';
 
+  // Pre-collected user-defined function names (for off_page_connector detection)
+  private definedFunctions = new Set<string>();
+
+  private preCollectFunctions(ast: any): void {
+    this.definedFunctions.clear();
+    const walk = (node: any): void => {
+      if (!node || typeof node !== 'object') return;
+      if (node.type === 'FunctionDecl' && node.name) this.definedFunctions.add(node.name);
+      for (const key of Object.keys(node)) {
+        const v = node[key];
+        if (Array.isArray(v)) v.forEach(walk);
+        else if (v && typeof v === 'object') walk(v);
+      }
+    };
+    walk(ast);
+  }
+
+  // ── PDF #3 fix: track the current function's EXIT node so a `return` inside
+  // a nested control-flow construct (if / while / switch / try) jumps straight
+  // to the function end, not to the local block-merge node. Without this, the
+  // `exit` parameter passed through the visitor is whatever the surrounding
+  // construct chose as its local merge — wiring a Return into the merge made
+  // the CFG show flow continuing into unreachable code (which the user
+  // reported as bug #3 in the bug report).
+  private currentFunctionExit: ControlFlowNode | null = null;
+
   generate(ast: ASTNode): CFG {
     this.nodes = [];
     this.edges = [];
     this.currentNodeId = 0;
+    this.preCollectFunctions(ast);
 
     const startNode = this.createNode('start', 'Start');
     const endNode   = this.createNode('end', 'End');
@@ -275,7 +302,7 @@ export class CFGGenerator {
     const decision = this.createNode(
       'decision', 'Condition', this.nodeToString(node.condition), node.line, node,
     );
-    const merge = this.createNode('process', 'Merge');
+    const merge = this.createNode('junction', 'Merge');
     this.connect(current, decision);
 
     let truePath = decision;
@@ -312,7 +339,7 @@ export class CFGGenerator {
     );
     this.connect(current, switchNode);
 
-    const merge = this.createNode('process', 'End Switch');
+    const merge = this.createNode('junction', 'End Switch');
     let prevDecision = switchNode;
 
     (node.cases || []).forEach((caseNode: any, i: number) => {
@@ -458,7 +485,8 @@ export class CFGGenerator {
   // ── FIX 4: visitFunctionCall — draw a labeled recursive back-edge when
   //   the call target matches the function we are currently inside.
   private visitFunctionCall(node: any, current: ControlFlowNode): ControlFlowNode {
-    const step = this.createNode('process', `Call: ${node.name}`, `${node.name}(...)`, node.line, node);
+    const callType = this.definedFunctions.has(node.name) ? 'off_page_connector' : 'predefined';
+    const step = this.createNode(callType, `Call: ${node.name}`, `${node.name}(...)`, node.line, node);
     this.connect(current, step);
 
     // If this call targets the current function, add a "Recursive" back-edge
@@ -524,29 +552,37 @@ export class CFGGenerator {
     // Save outer function context before overwriting (supports nested functions)
     const prevEntry = this.currentFunctionEntry;
     const prevName  = this.currentFunctionName;
+    const prevExit  = this.currentFunctionExit;
 
-    // Point to this function's entry so visitFunctionCall can find it
+    // Point to this function's entry/exit so visitFunctionCall and
+    // visitReturnStatement can find them through any nesting depth.
     this.currentFunctionEntry = funcStart;
     this.currentFunctionName  = node.name;
+    this.currentFunctionExit  = funcEnd;
 
     // Functions are self-contained — connect program flow around them
     // but also build their internal graph from funcStart → funcEnd
     this.connect(current, funcStart);
     let lastNode = funcStart;
+    let bodyTerminated = false;
     if (Array.isArray(node.body)) {
       for (const stmt of node.body) {
         lastNode = this.visit(stmt, lastNode, funcEnd);
-        if (this.isTerminator(stmt)) break; // FIX #3
+        if (this.isTerminator(stmt)) { bodyTerminated = true; break; }
       }
     }
-    // If the function body doesn't explicitly return, connect to funcEnd
-    if (lastNode !== funcEnd) {
+    // If the function body didn't end with a terminator (return/throw),
+    // connect the trailing flow to funcEnd. Otherwise the terminator's own
+    // visitor (e.g. visitReturnStatement) already wired the edge — re-running
+    // connect() here would produce a duplicate edge.
+    if (!bodyTerminated && lastNode !== funcEnd) {
       this.connect(lastNode, funcEnd);
     }
 
     // Restore the outer function context (important for nested declarations)
     this.currentFunctionEntry = prevEntry;
     this.currentFunctionName  = prevName;
+    this.currentFunctionExit  = prevExit;
 
     return funcEnd;
   }
@@ -567,7 +603,13 @@ export class CFGGenerator {
   ): ControlFlowNode {
     const ret = this.createNode('end', 'Return', '', (node as any).line, node);
     this.connect(current, ret);
-    this.connect(ret, exit);
+    // PDF #3: route to the FUNCTION exit, not whatever local merge node the
+    // surrounding control-flow construct passed as `exit`. A return jumps to
+    // the function end, full stop — it must not appear to fall through into
+    // a sibling if-merge / loop-exit, etc. Fall back to `exit` only when
+    // we somehow find ourselves outside any function (defensive).
+    const target = this.currentFunctionExit ?? exit;
+    this.connect(ret, target);
     return ret;
   }
 
@@ -587,7 +629,7 @@ export class CFGGenerator {
   // ── Loop Control ─────────────────────────────────────────────────────────
   private visitLoopControl(node: any, current: ControlFlowNode, exit: ControlFlowNode): ControlFlowNode {
     const label = node.value === 'break' ? '🛑 Break' : '⏭️ Continue';
-    const step = this.createNode('process', label, node.value, node.line);
+    const step = this.createNode('connector', label, node.value, node.line);
     this.connect(current, step);
     // For break, connect to exit so the graph reflects the jump
     if (node.value === 'break') {
@@ -634,7 +676,7 @@ export class CFGGenerator {
       lastTry = this.visit(stmt, lastTry, exit);
     });
 
-    const merge = this.createNode('process', 'After Try-Catch');
+    const merge = this.createNode('junction', 'After Try-Catch');
     this.connect(lastTry, merge);
 
     (node.handlers || []).forEach((handler: any) => {

@@ -403,8 +403,8 @@ function resolveCode(node: Node<NodeData>): string {
 
 function collectAllCode(nodes: Node<NodeData>[]): string[] {
   return nodes
-    // Structural routing nodes don't emit C++ statements
-    .filter(n => !['terminator', 'connector', 'off_page_connector', 'junction'].includes(String(n.type ?? '')))
+    // Pure structural routing nodes don't emit C++ statements
+    .filter(n => !['terminator', 'connector', 'junction'].includes(String(n.type ?? '')))
     .map(n => resolveCode(n))
     .filter(Boolean);
 }
@@ -503,12 +503,25 @@ function traverse(
       continue;
     }
 
-    // ── Connector / Off-page / Junction — structural only, no emitted code ─
-    if (node.type === 'connector' || node.type === 'off_page_connector') {
+    // ── Junction (merge point) — structural only, no emitted code ────────────
+    if (node.type === 'junction') {
       currentId = outEdges[0]?.target;
       continue;
     }
-    if (node.type === 'junction') {
+
+    // ── On-page connector (break / continue) ─────────────────────────────────
+    if (node.type === 'connector') {
+      const code = str(node.data.code);
+      if (code === 'break')    output += `${indent}break;\n`;
+      else if (code === 'continue') output += `${indent}continue;\n`;
+      currentId = outEdges[0]?.target;
+      continue;
+    }
+
+    // ── Off-page connector (call to user-defined function) ────────────────────
+    if (node.type === 'off_page_connector') {
+      const rawCode = resolveCode(node);
+      if (rawCode) output += `${indent}${emitPredefined(str(node.data.label), rawCode)}\n`;
       currentId = outEdges[0]?.target;
       continue;
     }

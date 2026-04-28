@@ -39,6 +39,15 @@ interface QuestEntry {
   quests: { title: string } | { title: string }[] | null
 }
 
+interface FastQuestEntry {
+  questid: string
+  completion_time_seconds: number
+  quests: { title: string } | null
+}
+
+const fmtTime = (s: number): string =>
+  `${String(Math.floor(s / 60)).padStart(2, '0')}:${String(s % 60).padStart(2, '0')}`
+
 // ─── Achievements definition ──────────────────────────────────────────────────
 
 interface Achievement {
@@ -59,10 +68,10 @@ const ACHIEVEMENTS: Achievement[] = [
   { id: 'quest1',     icon: '⚔️', title: 'First Quest',     desc: 'Complete your first campaign quest',        rarity: 'common',    check: (_, qc) => qc >= 1 },
   { id: 'quest5',     icon: '🛡️', title: 'Quest Knight',    desc: 'Complete 5 campaign quests',                rarity: 'rare',      check: (_, qc) => qc >= 5 },
   { id: 'quest10',    icon: '🏆', title: 'Quest Champion',  desc: 'Complete 10 campaign quests',               rarity: 'epic',      check: (_, qc) => qc >= 10 },
-  { id: 'xp1000',     icon: '⚔️', title: 'Rising Knight',   desc: 'Earn 1,000 XP and reach Knight rank',      rarity: 'common',    check: p => p.totalxp >= 1000 },
-  { id: 'xp4000',     icon: '🌟', title: 'Noble Lord',      desc: 'Earn 4,000 XP and reach Lord rank',        rarity: 'rare',      check: p => p.totalxp >= 4000 },
-  { id: 'xp10000',    icon: '👑', title: 'Grand Duke',      desc: 'Earn 10,000 XP and reach Duke rank',       rarity: 'epic',      check: p => p.totalxp >= 10000 },
-  { id: 'xp25000',    icon: '🔱', title: 'Legendary King',  desc: 'Amass 25,000 XP and claim the crown',      rarity: 'legendary', check: p => p.totalxp >= 25000 },
+  { id: 'xp5000',     icon: '⚔️', title: 'Rising Knight',   desc: 'Earn 5,000 XP and reach Knight rank',      rarity: 'common',    check: p => p.totalxp >= 5000 },
+  { id: 'xp20000',    icon: '🌟', title: 'Noble Lord',      desc: 'Earn 20,000 XP and reach Lord rank',       rarity: 'rare',      check: p => p.totalxp >= 20000 },
+  { id: 'xp75000',    icon: '👑', title: 'Grand Duke',      desc: 'Earn 75,000 XP and reach Duke rank',       rarity: 'epic',      check: p => p.totalxp >= 75000 },
+  { id: 'xp250000',   icon: '🔱', title: 'Legendary King',  desc: 'Amass 250,000 XP and claim the crown',     rarity: 'legendary', check: p => p.totalxp >= 250000 },
 ]
 
 const RARITY_STYLE: Record<Achievement['rarity'], { color: string; glow: string; bg: string; label: string }> = {
@@ -118,6 +127,7 @@ export const ProfileSettings: React.FC = () => {
   const [questsCompleted, setQuestsCompleted] = useState(0)
   const [reports, setReports] = useState<ReportEntry[]>([])
   const [completedQuests, setCompletedQuests] = useState<QuestEntry[]>([])
+  const [fastestQuests, setFastestQuests] = useState<FastQuestEntry[]>([])
 
   // Image state
   const [avatarUrl, setAvatarUrl] = useState<string | null>(null)
@@ -226,6 +236,16 @@ export const ProfileSettings: React.FC = () => {
         .eq('userid', user.id).eq('status', 'completed')
         .order('completedat', { ascending: false }).limit(15)
       setCompletedQuests((cq ?? []) as unknown as QuestEntry[])
+
+      // Fastest quest completions
+      const { data: fq } = await supabase
+        .from('mission_progress')
+        .select('questid, completion_time_seconds, quests(title)')
+        .eq('userid', user.id)
+        .not('completion_time_seconds', 'is', null)
+        .order('completion_time_seconds', { ascending: true })
+        .limit(10)
+      setFastestQuests((fq as any[]) ?? [])
 
       // Recent reports
       const { data: reps } = await supabase.from('reports')
@@ -555,6 +575,24 @@ export const ProfileSettings: React.FC = () => {
                       </div>
                     ))}
                   </div>
+
+                  {/* Fastest completions */}
+                  {fastestQuests.length > 0 && (
+                    <div style={{ background: '#0d1117', border: '1px solid #21262d', borderRadius: '12px', padding: '18px' }}>
+                      <div style={{ color: '#8b949e', fontSize: '10px', fontWeight: '700', letterSpacing: '1.5px', textTransform: 'uppercase', marginBottom: '12px' }}>⚡ Fastest Completions</div>
+                      {fastestQuests.map((r, i) => (
+                        <div key={i} style={{ display: 'flex', alignItems: 'center', gap: '10px', padding: '8px 0', borderBottom: i < fastestQuests.length - 1 ? '1px solid #21262d' : 'none' }}>
+                          <span style={{ fontSize: '10px', color: '#484f58', fontFamily: 'monospace', minWidth: 20 }}>#{i + 1}</span>
+                          <span style={{ flex: 1, fontSize: '12px', color: '#c9d1d9', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' as const }}>
+                            {(r.quests as any)?.title ?? r.questid}
+                          </span>
+                          <span style={{ fontSize: '12px', fontFamily: 'monospace', color: '#3fb950', fontWeight: 700 }}>
+                            {fmtTime(r.completion_time_seconds)}
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
                 </div>
               )}
 

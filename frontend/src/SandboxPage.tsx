@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useCallback } from 'react';
+import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import './layout.css';
 import { CodeEditor } from './components/Editor/CodeEditor';
@@ -106,7 +106,6 @@ const PlayerHUD: React.FC<{
         <div style={{ color: '#484f58', fontSize: '9px', letterSpacing: '0.5px', textTransform: 'uppercase', fontFamily: 'IBM Plex Mono, monospace' }}>RUNS</div>
       </div>
 
-      {/* Run flash indicator — no XP, just shows analysis ran */}
       {runFlash && (
         <div style={{ position: 'absolute', top: '-28px', right: '6px', color: '#58a6ff', fontSize: '11px', fontWeight: '700', animation: 'xpFloat 1.8s ease-out forwards', pointerEvents: 'none', whiteSpace: 'nowrap', fontFamily: 'IBM Plex Mono, monospace' }}>
           🔬 analyzed
@@ -374,8 +373,6 @@ export const SandboxPage = () => {
   const editorRef = useRef<any>(null);
 
   const [mode, setMode] = useState<AppMode>('analyze');
-  // Quick Start restore: if the dashboard handed us a snippet via sessionStorage,
-  // load it as the initial editor content. Falls back to the default demo.
   const [code, setCode] = useState<string>(() => {
     try {
       const restored = sessionStorage.getItem('cs-sandbox-restore');
@@ -409,7 +406,6 @@ int main() {
   const [editorFullscreen, setEditorFullscreen] = useState(false);
   const [builtCode, setBuiltCode] = useState('');
   const [liveStats, setLiveStats] = useState<LiveStats | null>(null);
-  // runFlash: shows "analyzed" indicator without any XP implication
   const [runFlash, setRunFlash] = useState(false);
 
   const [openPanels, setOpenPanels] = useState<{ editor: boolean; tabs: boolean }>({
@@ -447,7 +443,6 @@ int main() {
     try {
       const { data } = await supabase.from('users').select('totalxp, sandbox_runs').eq('id', user.id).single();
       if (data) {
-        // Rank derived from XP, not from `currentlevel` (which can be stale).
         const rank = getRank(data.totalxp ?? 0);
         setLiveStats({ totalXP: data.totalxp ?? 0, currentLevel: rank.level, sandboxRuns: data.sandbox_runs ?? 0, rankName: rank.name });
       }
@@ -480,27 +475,39 @@ int main() {
 
   const handleAnalyze = async () => {
     if (!user && !isGuest) return;
+    (document.activeElement as HTMLElement | null)?.blur?.();
     DataIsolationService.saveSandboxCode(isGuest ? null : user?.id || null, code, 'main.cpp');
-    // Start a fresh visualization session per analyze click so old node/edge
-    // interaction state never leaks into the next run.
     setResult(null);
     setAnalysisRunKey(prev => prev + 1);
     setIsAnalyzing(true);
-    try {
-      const data = await analyzeCode(code);
-      setResult(data);
+    // Open the Analysis panel immediately so results appear as soon as they arrive.
+    setOpenPanels(prev => ({ ...prev, tabs: true }));
 
-      // Sandbox: log run (NO XP awarded) and update run counter only
-      if (data.success && user) {
-        await DatabaseService.logSandboxRun(user.id, code, data.cognitiveComplexity ?? 0, data.symbolTable ?? {});
-        await fetchLiveStats();
-        // Show "analyzed" flash — NOT an XP gain notification
-        setRunFlash(true);
-        setTimeout(() => setRunFlash(false), 2200);
+    let data: AnalysisResult | null = null;
+    try {
+      data = await analyzeCode(code);
+      setResult(data);
+      if (data.success && isGuest) {
+        DataIsolationService.saveGuestProgress({ sandboxProgress: { lastCode: code } });
       }
-      if (data.success && isGuest) DataIsolationService.saveGuestProgress({ sandboxProgress: { lastCode: code } });
-    } catch (err) { console.error('Analysis failed:', err); }
-    finally { setIsAnalyzing(false); }
+    } catch (err) {
+      console.error('Analysis failed:', err);
+    } finally {
+      // Unblock the UI as soon as we have (or failed to get) results.
+      setIsAnalyzing(false);
+      try { editorRef.current?.focus?.(); } catch {/* editor may have unmounted */}
+    }
+
+    // DB logging and stat refresh run in the background — never block the UI.
+    if (data?.success && user) {
+      // Optimistically bump the run counter so the HUD updates instantly.
+      setLiveStats(prev => prev ? { ...prev, sandboxRuns: prev.sandboxRuns + 1 } : prev);
+      setRunFlash(true);
+      setTimeout(() => setRunFlash(false), 2200);
+      DatabaseService.logSandboxRun(user.id, code, data.cognitiveComplexity ?? 0, data.symbolTable ?? {})
+        .then(() => fetchLiveStats())
+        .catch(err => console.error('DB log failed:', err));
+    }
   };
 
   const getSymbolList = (): SymbolInfo[] => {
@@ -509,8 +516,19 @@ int main() {
   };
   const symbols = getSymbolList();
 
-  const totalNodes = result?.cfg?.nodes?.length ?? 0;
-  const unsafeCount = result?.safetyChecks?.filter(c => c.status === 'UNSAFE').length ?? 0;
+  // FIX: memoize cfg and safetyChecks so FlowGraph receives a stable reference.
+  // Without this, result?.cfg and result?.safetyChecks produce new object
+  // references on every SandboxPage render, causing FlowGraph's
+  // useEffect([cfg, safetyChecks]) to fire every render → setEdges →
+  // re-render → infinite loop ("Maximum update depth exceeded").
+  const cfg = useMemo(() => result?.cfg ?? null, [result]);
+  const safetyChecks = useMemo(() => result?.safetyChecks, [result]);
+
+  const totalNodes  = cfg?.nodes?.length ?? 0;
+  const unsafeCount = useMemo(
+    () => safetyChecks?.filter(c => c.status === 'UNSAFE').length ?? 0,
+    [safetyChecks]
+  );
 
   const TABS = [
     { id: 'lexical',   label: 'Lexical'   },
@@ -534,7 +552,6 @@ int main() {
         </div>
 
         <div className="header-actions">
-          {/* Sandbox mode badge — make clear no XP is earned here */}
           <div style={{
             display: 'flex', alignItems: 'center', gap: '5px',
             padding: '4px 10px', borderRadius: '6px',
@@ -733,15 +750,15 @@ int main() {
 
           <div className="right-column">
             <div className="section-title cfg-title">Control Flow Graph</div>
-            {result?.success && result.cfg && (
+            {result?.success && cfg && (
               <SafetyBanner total={totalNodes} unsafe={unsafeCount} />
             )}
             <div className="visualizer-container">
-              {result?.success && result.cfg ? (
+              {result?.success && cfg ? (
                 <FlowGraph
                   key={analysisRunKey}
-                  cfg={result.cfg}
-                  safetyChecks={result.safetyChecks}
+                  cfg={cfg}
+                  safetyChecks={safetyChecks}
                   onNodeClick={handleNodeClick}
                   isDrawerOpen={isTokenDrawerOpen}
                 />

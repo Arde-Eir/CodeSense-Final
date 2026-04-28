@@ -246,63 +246,86 @@ export class SymbolicExecutor {
     return { type: 'unknown' as const };
   }
 
-  private visitVariableDecl(node: VariableDeclNode): SymbolicValue {
-    let size: number | undefined;
+ private visitVariableDecl(node: VariableDeclNode): SymbolicValue {
+  let size: number | undefined;
 
-    if (node.dimensions && node.dimensions.length > 0) {
-      const dimResult = this.visit(node.dimensions[0]);
-      if (dimResult.type === 'concrete') size = dimResult.value;
-    }
-
-    let val: SymbolicValue = node.value
-      ? this.visit(node.value)
-      : { type: 'unknown' as const };
-
-    if (!node.value && node.varType && node.varType.includes('*')) {
-      val = { type: 'pointer', offset: 0, isNull: true };
-    }
-
-    // Also pick up arraySize from typechecker dimensions if not concretely computed
-    if (size === undefined && node.dimensions && node.dimensions.length > 0) {
-      const dim0 = (node.dimensions[0] as any)?.value;
-      if (typeof dim0 === 'number') size = dim0;
-    }
-    const allDims: number[] = [];
-if (node.dimensions) {
-  node.dimensions.forEach((d: any) => {
-    const v = d?.value;
-    if (typeof v === 'number') allDims.push(v);
-  });
-}
-const finalVal: SymbolicValue = allDims.length > 0
-  ? { ...val, arraySize: allDims[0], arraySizes: allDims }
-  : val;
-    this.state.variables.set(node.name, finalVal);
-
-    // Emit to rich Math tab trace
-    if (node.value) {
-      const tracedVal = finalVal.type === 'concrete'
-        ? (finalVal as any).value
-        : `${node.varType} (symbolic)`;
-      this.valueTrace.push({
-        expression: `${node.varType} ${node.name} = ${this.expressionToString(node.value)}`,
-        value: tracedVal,
-        line: (node as any).line,
-      });
-      this.state.initialized.add(node.name);
-      // FIX 12: if the value is a 'new' expression, register in allocatedPointers
-      if ((node.value as any)?.type === 'NewExpression') {
-        this.state.allocatedPointers.set(node.name, {
-          line: (node as any).line || 0,
-          freed: false,
-          size,
-          varName: node.name,
-        });
-      }
-    }
-
-    return finalVal;
+  // 1. Handle array dimensions
+  if (node.dimensions && node.dimensions.length > 0) {
+    const dimResult = this.visit(node.dimensions[0]);
+    if (dimResult.type === 'concrete') size = dimResult.value;
   }
+
+  // 2. Resolve the initializer value
+  let val: SymbolicValue = node.value
+    ? this.visit(node.value)
+    : { type: 'unknown' as const };
+
+  // 3. FIX: Handle Reference Aliasing (&)
+  // If the type is a reference (e.g., int&), it must point to the target variable's identity.
+  const isReference = node.varType.includes('&');
+  if (isReference && node.value) {
+    const targetName = typeof node.value === 'string' 
+      ? node.value 
+      : (node.value as any).name;
+      
+    if (targetName) {
+      // Treat the reference as a pointer to the target variable's name
+      val = { type: 'pointer', target: targetName, offset: 0 };
+    }
+  }
+
+  // 4. Standard pointer initialization (nullptr logic)
+  if (!node.value && node.varType && node.varType.includes('*')) {
+    val = { type: 'pointer', offset: 0, isNull: true };
+  }
+
+  // 5. Finalize value and array sizes
+  const allDims: number[] = [];
+  if (node.dimensions) {
+    node.dimensions.forEach((d: any) => {
+      const v = d?.value;
+      if (typeof v === 'number') allDims.push(v);
+    });
+  }
+
+  const finalVal: SymbolicValue = allDims.length > 0
+    ? { ...val, arraySize: allDims[0], arraySizes: allDims }
+    : val;
+
+  // 6. Update state
+  this.state.variables.set(node.name, finalVal);
+  
+  // References are always considered initialized at declaration in C++
+  if (isReference || node.value) {
+    this.state.initialized.add(node.name);
+  }
+
+  // 7. Emit to rich Math tab trace
+  if (node.value) {
+    const tracedLabel = isReference ? `(reference to ${this.expressionToString(node.value)})` : '';
+    const tracedVal = finalVal.type === 'concrete'
+      ? (finalVal as any).value
+      : `${node.varType} ${tracedLabel}`;
+
+    this.valueTrace.push({
+      expression: `${node.varType} ${node.name} = ${this.expressionToString(node.value)}`,
+      value: tracedVal,
+      line: (node as any).line,
+    });
+
+    // Handle dynamic memory allocation tracking
+    if ((node.value as any)?.type === 'NewExpression') {
+      this.state.allocatedPointers.set(node.name, {
+        line: (node as any).line || 0,
+        freed: false,
+        size,
+        varName: node.name,
+      });
+    }
+  }
+
+  return finalVal;
+}
 
   private visitAssignment(node: AssignmentNode): SymbolicValue {
     const value = this.visit(node.value);
@@ -416,9 +439,15 @@ const finalVal: SymbolicValue = allDims.length > 0
   private evalConcreteCondition(cond: any): boolean | null {
     if (!cond) return null;
     // Literal booleans
-    if (cond.type === 'Boolean')      return !!cond.value;
-    if (cond.type === 'Integer')      return cond.value !== 0;
-    // Identifier resolving to a concrete number/bool
+    if (cond.type === 'Boolean' || cond.type === 'Literal') return !!cond.value;
+    if (cond.type === 'Integer' || cond.type === 'Float')   return cond.value !== 0;
+    // Bare identifier — the parser emits identifiers as plain strings inside
+    // BinaryOp / etc., so check that case before the structural Identifier.
+    if (typeof cond === 'string') {
+      const v = this.state.variables.get(cond);
+      if (v?.type === 'concrete') return !!v.value;
+      return null;
+    }
     if (cond.type === 'Identifier') {
       const v = this.state.variables.get(cond.name);
       if (v?.type === 'concrete') return !!v.value;
@@ -442,9 +471,19 @@ const finalVal: SymbolicValue = allDims.length > 0
   }
 
   private resolveConcrete(node: any): number | null {
-    if (!node) return null;
+    if (node == null) return null;
+    // Bare-string identifier (parser emits identifiers as raw strings inside
+    // BinaryOp.left / right). Without this branch, `while (x < 5)` couldn't
+    // see x's concrete value and the always-false check never fired.
+    if (typeof node === 'string') {
+      const v = this.state.variables.get(node);
+      if (v?.type === 'concrete' && typeof v.value === 'number') return v.value;
+      return null;
+    }
     if (node.type === 'Integer' || node.type === 'Float') return node.value;
-    if (node.type === 'Boolean') return node.value ? 1 : 0;
+    if (node.type === 'Boolean' || node.type === 'Literal') {
+      return node.value ? 1 : 0;
+    }
     if (node.type === 'Identifier') {
       const v = this.state.variables.get(node.name);
       if (v?.type === 'concrete' && typeof v.value === 'number') return v.value;
@@ -924,8 +963,22 @@ const finalVal: SymbolicValue = allDims.length > 0
   private visitNamespace(_n: any): SymbolicValue { return { type: 'unknown' as const }; }
 
   private visitCinStatement(node: any): SymbolicValue {
-    const rawTargets = node.targets ?? (node.target ? [node.target] : []);
-    const targets: any[] = Array.isArray(rawTargets) ? rawTargets : [rawTargets];
+    // Flatten `cin >> a >> b` chains: the parser may emit a leaf, an array,
+    // or a BinaryOp tree. Marking only the root would leave the inner
+    // identifiers symbolic but uninitialized, masking real bugs and surfacing
+    // false "uninitialized" warnings later.
+    const flatten = (n: any): any[] => {
+      if (n == null) return [];
+      if (Array.isArray(n)) return n.flatMap(flatten);
+      if (typeof n === 'string') return [n];
+      if (n.type === 'BinaryOp' && (n.operator === '>>' || n.operator === '<<')) {
+        return [...flatten(n.left), ...flatten(n.right)];
+      }
+      return [n];
+    };
+    const targets = node.targets
+      ? flatten(node.targets)
+      : (node.target ? [node.target] : []);
     targets.forEach(t => {
       const name = typeof t === 'string' ? t : t.name;
       if (name) {

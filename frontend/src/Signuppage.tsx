@@ -392,10 +392,11 @@ const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
   } catch (err: any) {
     const msg = err?.message ?? '';
     // Handle specific errors from DatabaseService
-    if      (msg === 'USERNAME_TAKEN') setErrors({ username: 'This player name is already taken.' });
-    else if (msg === 'EMAIL_TAKEN')    setErrors({ email: 'An account with this email already exists.' });
+    if      (msg === 'USERNAME_TAKEN')          setErrors({ username: 'This player name is already taken.' });
+    else if (msg === 'EMAIL_TAKEN')             setErrors({ email: 'An account with this email already exists.' });
+    else if (msg === 'EMAIL_ORPHANED')           setErrors({ email: 'This email is already registered. If this is your account, try logging in instead.' });
+    else if (msg === 'SERVER_ERROR')            setErrors({ submit: 'A server error occurred. Please try again in a moment.' });
     else {
-      // This will now properly display "Database error saving new user" to the user
       setErrors({ submit: msg || 'An unexpected error occurred. Please try again.' });
     }
   } finally {

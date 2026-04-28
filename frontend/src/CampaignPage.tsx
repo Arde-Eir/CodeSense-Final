@@ -10,7 +10,7 @@
 // accidental NULLing — see migration_mission_progress_v2.sql), so playing
 // through the level once unlocks the next one and never gets undone.
 
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from './components/AuthScreen';
 import { supabase } from './services/supabase';
@@ -22,45 +22,50 @@ interface LevelCardConfig {
   phase:     Phase;
   title:     string;
   subtitle:  string;
+  blurb:     string;
   color:     string;
   glowColor: string;
   icon:      string;
 }
 
 const LEVELS: LevelCardConfig[] = [
-  { id: 1, phase: 'beginner',     title: 'LEVEL 1', subtitle: 'Beginner',     color: '#3fb950', glowColor: 'rgba(63,185,80,0.35)',  icon: '🌱' },
-  { id: 2, phase: 'intermediate', title: 'LEVEL 2', subtitle: 'Intermediate', color: '#e3b341', glowColor: 'rgba(227,179,65,0.35)', icon: '⚔️' },
-  { id: 3, phase: 'advanced',     title: 'LEVEL 3', subtitle: 'Advanced',     color: '#f85149', glowColor: 'rgba(248,81,73,0.35)',  icon: '🔥' },
+  {
+    id: 1, phase: 'beginner', title: 'LEVEL 1', subtitle: 'Beginner',
+    blurb: 'Variables, I/O, basic control flow.',
+    color: '#3fb950', glowColor: 'rgba(63,185,80,0.35)', icon: '🌱',
+  },
+  {
+    id: 2, phase: 'intermediate', title: 'LEVEL 2', subtitle: 'Intermediate',
+    blurb: 'Loops, functions, arrays, references.',
+    color: '#e3b341', glowColor: 'rgba(227,179,65,0.35)', icon: '⚔️',
+  },
+  {
+    id: 3, phase: 'advanced', title: 'LEVEL 3', subtitle: 'Advanced',
+    blurb: 'Pointers, recursion, dynamic memory.',
+    color: '#f85149', glowColor: 'rgba(248,81,73,0.35)', icon: '🔥',
+  },
 ];
 
-const CAMPAIGN_STARTED_KEY = 'cs-campaign-started';
-
 interface PhaseProgress {
-  total:     number;
-  finished:  number;  // count of quests with first_completed_at set
+  total:    number;
+  finished: number;  // count of quests with first_completed_at set
 }
+
+type LevelStatus = 'locked' | 'next' | 'in-progress' | 'complete';
+
+const EMPTY_PROGRESS: Record<Phase, PhaseProgress> = {
+  beginner:     { total: 0, finished: 0 },
+  intermediate: { total: 0, finished: 0 },
+  advanced:     { total: 0, finished: 0 },
+};
 
 // ─── Page ──────────────────────────────────────────────────────────────────
 export const CampaignPage: React.FC = () => {
   const navigate = useNavigate();
   const { user } = useAuth();
 
-  // Persist "started" so coming back from a level keeps the cards interactive.
-  const [started, setStarted] = useState<boolean>(() => {
-    try { return sessionStorage.getItem(CAMPAIGN_STARTED_KEY) === '1'; } catch { return false; }
-  });
-  const [visible,      setVisible]      = useState(false);
-  const [hoveredLevel, setHoveredLevel] = useState<number | null>(null);
-  const [progress,     setProgress]     = useState<Record<Phase, PhaseProgress>>({
-    beginner:     { total: 0, finished: 0 },
-    intermediate: { total: 0, finished: 0 },
-    advanced:     { total: 0, finished: 0 },
-  });
-
-  const [particles,   setParticles]   = useState<{ x: number; y: number; id: number }[]>([]);
-  const [bgParticles, setBgParticles] = useState<{ x: number; y: number; id: number }[]>([]);
-  const bannerRef  = useRef<HTMLDivElement>(null);
-  const particleId = useRef(0);
+  const [visible,  setVisible]  = useState(false);
+  const [progress, setProgress] = useState<Record<Phase, PhaseProgress>>(EMPTY_PROGRESS);
 
   const userXP = user?.totalXP ?? 0;
 
@@ -68,8 +73,9 @@ export const CampaignPage: React.FC = () => {
   useEffect(() => {
     const els = [document.documentElement, document.body, document.getElementById('root')];
     els.forEach(el => { if (el) { el.style.overflow = 'auto'; el.style.height = 'auto'; } });
-    setTimeout(() => setVisible(true), 50);
+    const t = setTimeout(() => setVisible(true), 30);
     return () => {
+      clearTimeout(t);
       els.forEach(el => { if (el) { el.style.overflow = ''; el.style.height = ''; } });
     };
   }, []);
@@ -80,7 +86,6 @@ export const CampaignPage: React.FC = () => {
     let cancelled = false;
 
     const fetchProgress = async () => {
-      // 1. Every active campaign quest, grouped by phase
       const { data: quests } = await supabase
         .from('quests')
         .select('id, phase')
@@ -88,15 +93,12 @@ export const CampaignPage: React.FC = () => {
         .eq('mode', 'campaign');
       if (cancelled || !quests) return;
 
-      const questIdsByPhase: Record<Phase, string[]> = {
-        beginner: [], intermediate: [], advanced: [],
-      };
+      const idsByPhase: Record<Phase, string[]> = { beginner: [], intermediate: [], advanced: [] };
       for (const q of quests) {
         const phase = q.phase as Phase | null;
-        if (phase && phase in questIdsByPhase) questIdsByPhase[phase].push(q.id);
+        if (phase && phase in idsByPhase) idsByPhase[phase].push(q.id);
       }
 
-      // 2. This user's mission_progress for the campaign quests
       const allIds = quests.map(q => q.id);
       const { data: mp } = allIds.length
         ? await supabase
@@ -108,18 +110,12 @@ export const CampaignPage: React.FC = () => {
       if (cancelled) return;
 
       const finishedIds = new Set(
-        (mp ?? [])
-          .filter(r => r.first_completed_at != null)
-          .map(r => r.questid)
+        (mp ?? []).filter(r => r.first_completed_at != null).map(r => r.questid)
       );
 
-      const next: Record<Phase, PhaseProgress> = {
-        beginner:     { total: 0, finished: 0 },
-        intermediate: { total: 0, finished: 0 },
-        advanced:     { total: 0, finished: 0 },
-      };
-      (Object.keys(questIdsByPhase) as Phase[]).forEach(phase => {
-        const ids = questIdsByPhase[phase];
+      const next: Record<Phase, PhaseProgress> = { ...EMPTY_PROGRESS };
+      (Object.keys(idsByPhase) as Phase[]).forEach(phase => {
+        const ids = idsByPhase[phase];
         next[phase] = {
           total:    ids.length,
           finished: ids.filter(id => finishedIds.has(id)).length,
@@ -133,40 +129,43 @@ export const CampaignPage: React.FC = () => {
     return () => { cancelled = true; };
   }, [user?.id]);
 
-  // ── Unlock = previous level fully completed (or is level 1) ──────────────
-  const isLevelUnlocked = (id: 1 | 2 | 3): boolean => {
-    if (id === 1) return true;
-    const prevPhase = LEVELS[id - 2].phase;
-    const prev = progress[prevPhase];
-    return prev.total > 0 && prev.finished >= prev.total;
-  };
-
+  // ── Status derivation ───────────────────────────────────────────────────
   const isLevelComplete = (phase: Phase): boolean => {
     const p = progress[phase];
     return p.total > 0 && p.finished >= p.total;
   };
+  const isLevelUnlocked = (id: 1 | 2 | 3): boolean => {
+    if (id === 1) return true;
+    return isLevelComplete(LEVELS[id - 2].phase);
+  };
+
+  // The "next up" level is the first unlocked-but-not-complete level. It gets
+  // a subtle pulse-glow so the user can see at a glance where to continue.
+  const nextLevelId: 1 | 2 | 3 | null = useMemo(() => {
+    for (const lvl of LEVELS) {
+      if (isLevelUnlocked(lvl.id) && !isLevelComplete(lvl.phase)) return lvl.id;
+    }
+    return null;
+  }, [progress]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const statusFor = (lvl: LevelCardConfig): LevelStatus => {
+    if (!isLevelUnlocked(lvl.id))      return 'locked';
+    if (isLevelComplete(lvl.phase))    return 'complete';
+    if (lvl.id === nextLevelId)        return 'next';
+    return 'in-progress';
+  };
 
   // ── Click handlers ────────────────────────────────────────────────────────
-  const handlePageClick = (e: React.MouseEvent) => {
-    const id = particleId.current++;
-    setBgParticles(p => [...p, { x: e.clientX, y: e.clientY, id }]);
-    setTimeout(() => setBgParticles(p => p.filter(pt => pt.id !== id)), 900);
-  };
-
-  const handleLevelClick = (level: LevelCardConfig) => {
-    if (!started || !isLevelUnlocked(level.id)) return;
-    navigate(`/campaign/inside/${level.phase}`);
-  };
-
-  const handleBannerClick = (e: React.MouseEvent) => {
-    const rect = bannerRef.current?.getBoundingClientRect();
-    if (!rect) return;
-    const x = e.clientX - rect.left, y = e.clientY - rect.top;
-    const id = particleId.current++;
-    setParticles(p => [...p, { x, y, id }]);
-    setTimeout(() => setParticles(p => p.filter(pt => pt.id !== id)), 800);
-    setStarted(true);
-    try { sessionStorage.setItem(CAMPAIGN_STARTED_KEY, '1'); } catch { /* quota */ }
+  const handleLevelClick = (lvl: LevelCardConfig, el: HTMLElement) => {
+    if (!isLevelUnlocked(lvl.id)) {
+      // Replay the shake by reflowing — re-adding the class on an already-
+      // shaking element wouldn't restart the animation otherwise.
+      el.classList.remove('shake');
+      void el.offsetWidth;
+      el.classList.add('shake');
+      return;
+    }
+    navigate(`/campaign/inside/${lvl.phase}`);
   };
 
   // ── Render ────────────────────────────────────────────────────────────────
@@ -179,60 +178,28 @@ export const CampaignPage: React.FC = () => {
         <div className="scanline" />
       </div>
 
-      {/* Click particles (page-wide overlay) */}
-      <div style={{ position: 'fixed', inset: 0, zIndex: 9999, pointerEvents: 'none', overflow: 'hidden' }}>
-        {bgParticles.map(p => (
-          <div key={p.id} style={{
-            position: 'absolute', left: p.x, top: p.y,
-            width: 70, height: 70, borderRadius: '50%',
-            border: '2px solid rgba(227,179,65,0.7)',
-            animation: 'bg-particle-burst 0.9s ease-out forwards',
-            pointerEvents: 'none',
-          }} />
-        ))}
-      </div>
-
       <div
-        className="campaign-root campaign-content"
+        className="campaign-root"
         style={{ opacity: visible ? 1 : 0, transition: 'opacity 0.4s ease' }}
-        onClick={handlePageClick}
       >
         <Header userXP={userXP} onExit={() => navigate('/home')} />
 
-        <div style={{ maxWidth: 900, margin: '0 auto', padding: '32px 24px 60px' }}>
-          <HeroBanner
-            ref={bannerRef}
-            started={started}
-            particles={particles}
-            onClick={handleBannerClick}
-          />
+        <main className="campaign-main">
+          <HeroBanner />
 
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 20 }}>
+          <div className="level-grid">
             {LEVELS.map((level, i) => (
               <LevelCard
                 key={level.id}
                 config={level}
                 index={i}
-                started={started}
-                unlocked={isLevelUnlocked(level.id)}
-                completed={isLevelComplete(level.phase)}
+                status={statusFor(level)}
                 progress={progress[level.phase]}
-                hovered={hoveredLevel === level.id}
-                onHover={hover => setHoveredLevel(hover ? level.id : null)}
-                onClick={() => handleLevelClick(level)}
+                onClick={(el) => handleLevelClick(level, el)}
               />
             ))}
           </div>
-
-          {!started && (
-            <p style={{
-              textAlign: 'center', marginTop: 32, color: '#484f58',
-              fontSize: 13, fontFamily: "'IBM Plex Mono', monospace", letterSpacing: '0.5px',
-            }}>
-              Press the banner above to begin your journey
-            </p>
-          )}
-        </div>
+        </main>
       </div>
     </>
   );
@@ -240,13 +207,7 @@ export const CampaignPage: React.FC = () => {
 
 // ─── Header ────────────────────────────────────────────────────────────────
 const Header: React.FC<{ userXP: number; onExit: () => void }> = ({ userXP, onExit }) => (
-  <div style={{
-    height: 58, background: 'rgba(8,11,16,0.6)', backdropFilter: 'blur(12px)',
-    borderBottom: '1px solid #2d333b',
-    display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-    padding: '0 24px', position: 'sticky', top: 0, zIndex: 100,
-    boxShadow: '0 4px 20px rgba(0,0,0,0.5)',
-  }}>
+  <div className="campaign-header">
     <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
       <span style={{ fontSize: 18 }}>🎯</span>
       <span style={{ fontFamily: "'IBM Plex Mono', monospace", fontWeight: 700, fontSize: 15, letterSpacing: '-0.3px' }}>
@@ -254,210 +215,124 @@ const Header: React.FC<{ userXP: number; onExit: () => void }> = ({ userXP, onEx
       </span>
     </div>
     <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-      <div style={{
-        display: 'flex', alignItems: 'center', gap: 8,
-        background: 'rgba(63,185,80,0.1)', border: '1px solid rgba(63,185,80,0.25)',
-        borderRadius: 8, padding: '5px 12px',
-      }}>
+      <div className="xp-pill">
         <span style={{ fontSize: 12 }}>⚡</span>
-        <span style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: 12, color: '#3fb950', fontWeight: 700 }}>
-          {userXP.toLocaleString()} XP
-        </span>
+        <span>{userXP.toLocaleString()} XP</span>
       </div>
-      <button
-        onClick={onExit}
-        style={{
-          background: 'transparent', border: '1px solid #444c56', color: '#8b949e',
-          padding: '7px 14px', borderRadius: 6, fontWeight: 600, fontSize: 11, letterSpacing: '0.5px',
-          cursor: 'pointer', fontFamily: "'IBM Plex Mono', monospace", transition: 'all 0.15s',
-        }}
-        onMouseEnter={e => { e.currentTarget.style.borderColor = '#f85149'; e.currentTarget.style.color = '#f85149'; }}
-        onMouseLeave={e => { e.currentTarget.style.borderColor = '#444c56'; e.currentTarget.style.color = '#8b949e'; }}
-      >
-        ← EXIT
-      </button>
+      <button className="exit-btn" onClick={onExit}>← EXIT</button>
     </div>
   </div>
 );
 
 // ─── Hero banner ───────────────────────────────────────────────────────────
-const HeroBanner = React.forwardRef<
-  HTMLDivElement,
-  { started: boolean; particles: { x: number; y: number; id: number }[]; onClick: (e: React.MouseEvent) => void }
->(({ started, particles, onClick }, ref) => (
-  <div
-    ref={ref}
-    onClick={onClick}
-    style={{
-      position: 'relative', borderRadius: 16, overflow: 'hidden', height: 220, marginBottom: 28,
-      background: 'linear-gradient(135deg, #1a1500 0%, #241c00 50%, #0d1117 100%)',
-      border: '1px solid rgba(227,179,65,0.2)',
-      cursor: started ? 'default' : 'pointer',
-      boxShadow: '0 8px 32px rgba(0,0,0,0.5)',
-    }}
-  >
-    <div style={{ position: 'absolute', inset: 0, opacity: 0.12, backgroundImage: 'linear-gradient(rgba(227,179,65,0.6) 1px,transparent 1px),linear-gradient(90deg,rgba(227,179,65,0.6) 1px,transparent 1px)', backgroundSize: '40px 40px' }} />
-    <div style={{ position: 'absolute', inset: 0, background: 'radial-gradient(circle at 30% 50%, rgba(227,179,65,0.08), transparent 60%)' }} />
-    <div style={{ position: 'relative', zIndex: 1, padding: '32px 36px', height: '100%', display: 'flex', flexDirection: 'column', justifyContent: 'center' }}>
-      <div style={{ fontSize: 11, color: '#e3b341', fontFamily: "'IBM Plex Mono', monospace", fontWeight: 700, letterSpacing: '3px', textTransform: 'uppercase', marginBottom: 12 }}>
-        Choose Your Path
-      </div>
-      <h1 style={{ fontSize: 32, fontWeight: 800, color: '#f0f6fc', letterSpacing: '-0.8px', lineHeight: 1.1, margin: 0 }}>
-        Three levels.
-      </h1>
-      <h1 style={{ fontSize: 32, fontWeight: 800, color: '#e3b341', letterSpacing: '-0.8px', lineHeight: 1.1, margin: '4px 0 0', fontStyle: 'italic' }}>
-        One programmer.
-      </h1>
-      {!started && (
-        <button
-          className="press-btn"
-          style={{
-            position: 'absolute', bottom: 24, right: 32,
-            padding: '10px 18px', borderRadius: 8,
-            background: 'linear-gradient(135deg, #e3b341, #c69835)', color: '#080b10',
-            border: 'none', fontFamily: "'IBM Plex Mono', monospace",
-            fontSize: 12, fontWeight: 800, letterSpacing: '1px', cursor: 'pointer',
-          }}
-        >
-          ▶ PRESS TO BEGIN
-        </button>
-      )}
+const HeroBanner: React.FC = () => (
+  <div className="hero">
+    <div className="hero-grid-overlay" />
+    <div className="hero-glow" />
+    <div className="hero-text">
+      <div className="hero-eyebrow">Choose Your Path</div>
+      <h1 className="hero-title">Three levels.</h1>
+      <h1 className="hero-title hero-title--accent">One programmer.</h1>
     </div>
-    {particles.map(p => (
-      <div key={p.id} style={{
-        position: 'absolute', left: p.x, top: p.y, width: 60, height: 60, borderRadius: '50%',
-        border: '2px solid rgba(227,179,65,0.6)', pointerEvents: 'none',
-        animation: 'particle-burst 0.8s ease-out forwards',
-      }} />
-    ))}
   </div>
-));
-HeroBanner.displayName = 'HeroBanner';
+);
 
 // ─── Level card ────────────────────────────────────────────────────────────
 const LevelCard: React.FC<{
-  config:    LevelCardConfig;
-  index:     number;
-  started:   boolean;
-  unlocked:  boolean;
-  completed: boolean;
-  progress:  PhaseProgress;
-  hovered:   boolean;
-  onHover:   (hover: boolean) => void;
-  onClick:   () => void;
-}> = ({ config, index, started, unlocked, completed, progress, hovered, onHover, onClick }) => {
-  const active = started && unlocked;
-  const accent = completed ? '#3fb950' : config.color;
+  config:   LevelCardConfig;
+  index:    number;
+  status:   LevelStatus;
+  progress: PhaseProgress;
+  onClick:  (el: HTMLElement) => void;
+}> = ({ config, index, status, progress, onClick }) => {
+  const unlocked = status !== 'locked';
+  const accent   = status === 'complete' ? '#3fb950' : config.color;
+
+  // ── Hover tilt: soft 3D effect on unlocked cards (resets on leave) ──────
+  const handleMouseMove = (e: React.MouseEvent<HTMLDivElement>) => {
+    if (!unlocked) return;
+    const rect = e.currentTarget.getBoundingClientRect();
+    const x = e.clientX - rect.left, y = e.clientY - rect.top;
+    const rx = ((y / rect.height) - 0.5) * -6;
+    const ry = ((x / rect.width)  - 0.5) *  6;
+    e.currentTarget.style.transform =
+      `perspective(800px) rotateX(${rx}deg) rotateY(${ry}deg) translateZ(0)`;
+  };
+  const resetTilt = (e: React.MouseEvent<HTMLDivElement>) => {
+    e.currentTarget.style.transform = '';
+  };
+
+  const badge: Record<LevelStatus, { label: string; bg: string; fg: string }> = {
+    locked:        { label: '🔒 LOCKED',     bg: 'rgba(72,79,88,0.18)',  fg: '#6e7681' },
+    next:          { label: '▶ NEXT UP',     bg: `${accent}26`,          fg: accent     },
+    'in-progress': { label: '◐ IN PROGRESS', bg: `${accent}22`,          fg: accent     },
+    complete:      { label: '✓ COMPLETE',    bg: 'rgba(63,185,80,0.18)', fg: '#3fb950' },
+  };
+
+  const cta: Record<LevelStatus, string> = {
+    locked:        `Finish Level ${config.id - 1} to unlock`,
+    next:          progress.finished === 0 ? `Begin Level ${config.id} →` : `Continue Level ${config.id} →`,
+    'in-progress': `Continue Level ${config.id} →`,
+    complete:      'Replay quests',
+  };
 
   return (
     <div
-      className="level-card"
-      onClick={onClick}
-      onMouseEnter={() => onHover(true)}
-      onMouseLeave={() => onHover(false)}
+      className={`level-card status-${status}`}
       style={{
-        animationDelay: `${index * 0.1 + 0.2}s`,
-        background: active
-          ? 'linear-gradient(160deg, #161b22 0%, #1c2128 100%)'
-          : '#0d1117',
-        border: `1px solid ${active ? accent + '55' : '#21262d'}`,
-        borderRadius: 16, padding: '28px 24px',
-        cursor: active ? 'pointer' : 'not-allowed',
-        transition: 'all 0.25s ease', position: 'relative', overflow: 'hidden',
-        boxShadow: hovered && active
-          ? `0 8px 32px ${config.glowColor}, inset 0 0 20px ${accent}08`
-          : '0 4px 12px rgba(0,0,0,0.3)',
-        transform: hovered && active ? 'translateY(-4px)' : 'none',
-        opacity: !started ? 0.7 : unlocked ? 1 : 0.5,
-        minHeight: 240,
+        // CSS variable lets the keyframes / hover effects pick up the level's
+        // accent without prop-drilling colors into every selector.
+        ['--accent' as any]: accent,
+        ['--glow' as any]:   config.glowColor,
+        animationDelay: `${index * 80}ms`,
       }}
+      onClick={(e) => onClick(e.currentTarget)}
+      onMouseMove={handleMouseMove}
+      onMouseLeave={resetTilt}
+      role="button"
+      aria-disabled={!unlocked}
+      aria-label={`${config.title} — ${config.subtitle}, ${badge[status].label.replace(/^[^\w]+/, '').trim()}`}
     >
-      {active && hovered && (
-        <div style={{
-          position: 'absolute', inset: 0, borderRadius: 16,
-          background: `radial-gradient(circle at 50% 0%, ${accent}0a 0%, transparent 60%)`,
-          pointerEvents: 'none',
-        }} />
-      )}
+      {/* Top accent stripe */}
+      <div className="level-card-accent" />
 
-      {/* Top accent line */}
-      <div style={{
-        position: 'absolute', top: 0, left: 24, right: 24, height: 2,
-        background: active ? `linear-gradient(90deg, transparent, ${accent}, transparent)` : 'transparent',
-        borderRadius: '0 0 2px 2px', transition: 'background 0.3s',
-      }} />
-
-      {/* Status badge (top-right) */}
-      {active && (
-        <div style={{
-          position: 'absolute', top: 14, right: 14,
-          background: `${accent}22`, border: `1px solid ${accent}44`,
-          borderRadius: 6, padding: '3px 8px',
-          fontSize: 10, fontWeight: 700, color: accent,
-          fontFamily: "'IBM Plex Mono', monospace", letterSpacing: '0.5px',
-        }}>
-          {completed ? '✓ COMPLETE' : 'UNLOCKED'}
-        </div>
-      )}
-
-      {/* Title row */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 6 }}>
-        <span style={{ color: active ? accent : '#444c56', fontSize: 14, fontWeight: 700, transition: 'color 0.3s' }}>▶</span>
-        <span style={{
-          fontFamily: "'IBM Plex Mono', monospace",
-          fontWeight: 700, fontSize: 17, letterSpacing: '0.5px',
-          color: active ? '#e6edf3' : '#484f58',
-        }}>
-          {config.title}
-        </span>
-      </div>
-      <div style={{
-        fontSize: 14, color: active ? '#8b949e' : '#30363d',
-        marginBottom: 22, marginLeft: 24, transition: 'color 0.3s',
-      }}>
-        {config.subtitle}
+      {/* Status badge */}
+      <div className="level-card-badge" style={{ background: badge[status].bg, color: badge[status].fg }}>
+        {badge[status].label}
       </div>
 
-      {/* Quest count + progress bar */}
-      {active && progress.total > 0 && (
-        <div style={{ marginLeft: 24, marginBottom: 16 }}>
-          <div style={{
-            fontSize: 11, color: accent, fontFamily: "'IBM Plex Mono', monospace",
-            marginBottom: 6, letterSpacing: '0.5px',
-          }}>
-            {progress.finished}/{progress.total} {progress.total === 1 ? 'quest' : 'quests'} done
+      {/* Header row: title + icon */}
+      <div className="level-card-head">
+        <div>
+          <div className="level-card-title">
+            <span className="level-card-arrow">▶</span>
+            {config.title}
           </div>
-          <div style={{ height: 4, background: 'rgba(255,255,255,0.04)', borderRadius: 2, overflow: 'hidden' }}>
-            <div style={{
-              width: `${(progress.finished / progress.total) * 100}%`,
-              height: '100%', background: accent, transition: 'width 0.6s ease',
-            }} />
-          </div>
+          <div className="level-card-subtitle">{config.subtitle}</div>
+          <div className="level-card-blurb">{config.blurb}</div>
         </div>
-      )}
-
-      {/* Big icon */}
-      <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: 56, marginTop: 'auto' }}>
-        <div style={{
-          width: 48, height: 48, borderRadius: 12,
-          background: active ? `${accent}18` : 'rgba(255,255,255,0.03)',
-          border: `1px solid ${active ? accent + '44' : '#21262d'}`,
-          display: 'flex', alignItems: 'center', justifyContent: 'center',
-          fontSize: 22, transition: 'all 0.3s',
-        }}>
-          {unlocked ? (active ? config.icon : '🔓') : '🔒'}
-        </div>
+        <div className="level-card-icon-slot" aria-hidden>{unlocked ? config.icon : '🔒'}</div>
       </div>
 
-      {/* Lock hint */}
-      {!unlocked && (
-        <div style={{
-          textAlign: 'center', marginTop: 10, fontSize: 11, color: '#484f58',
-          fontFamily: "'IBM Plex Mono', monospace",
-        }}>
-          Finish Level {(config.id - 1)} first
+      {/* Footer: quest count + CTA */}
+      <div className="level-card-foot">
+        <div className="level-card-quest-count">
+          {progress.total > 0 ? (
+            <>
+              <span className="level-card-icon-mini" aria-hidden>{unlocked ? config.icon : '🔒'}</span>
+              <span>
+                <strong>{progress.finished}</strong>
+                <span style={{ color: '#6e7681' }}> / {progress.total}</span> quests
+              </span>
+            </>
+          ) : (
+            <span style={{ color: '#6e7681' }}>Loading quests…</span>
+          )}
         </div>
-      )}
+        <div className="level-card-cta" style={{ color: unlocked ? accent : '#6e7681' }}>
+          {cta[status]}
+        </div>
+      </div>
     </div>
   );
 };
@@ -466,17 +341,18 @@ const LevelCard: React.FC<{
 const STYLE_CSS = `
   @import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;600;700&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap');
 
-  @keyframes scanline   { 0% { transform: translateY(-100%); } 100% { transform: translateY(100vh); } }
-  @keyframes flicker    { 0%, 95%, 100% { opacity: 1; } 96% { opacity: 0.4; } 97% { opacity: 1; } 98% { opacity: 0.6; } }
-  @keyframes drift      { 0% { transform: translate(0,0) scale(1); } 33% { transform: translate(12px,-8px) scale(1.04); } 66% { transform: translate(-8px,12px) scale(0.97); } 100% { transform: translate(0,0) scale(1); } }
-  @keyframes particle-burst    { 0% { transform: translate(-50%,-50%) scale(0); opacity: 1; } 100% { transform: translate(-50%,-50%) scale(4); opacity: 0; } }
-  @keyframes bg-particle-burst { 0% { transform: translate(-50%,-50%) scale(0); opacity: 0.8; } 60% { opacity: 0.5; } 100% { transform: translate(-50%,-50%) scale(6); opacity: 0; } }
-  @keyframes card-in    { from { opacity: 0; transform: translateY(30px); } to { opacity: 1; transform: translateY(0); } }
-  @keyframes press-pulse{ 0%,100% { box-shadow: 0 0 0 0 rgba(227,179,65,0.6); } 50% { box-shadow: 0 0 0 12px rgba(227,179,65,0); } }
-  @keyframes lock-shake { 0%,100% { transform: translateX(0); } 20% { transform: translateX(-4px); } 40% { transform: translateX(4px); } 60% { transform: translateX(-3px); } 80% { transform: translateX(3px); } }
+  @keyframes scanline    { 0% { transform: translateY(-100%); } 100% { transform: translateY(100vh); } }
+  @keyframes drift       { 0% { transform: translate(0,0) scale(1); } 33% { transform: translate(12px,-8px) scale(1.04); } 66% { transform: translate(-8px,12px) scale(0.97); } 100% { transform: translate(0,0) scale(1); } }
+  @keyframes card-in     { from { opacity: 0; transform: translateY(28px); } to { opacity: 1; transform: translateY(0); } }
+  @keyframes lock-shake  { 0%,100% { transform: translateX(0); } 20% { transform: translateX(-6px); } 40% { transform: translateX(6px); } 60% { transform: translateX(-4px); } 80% { transform: translateX(4px); } }
+  @keyframes pulse-glow  {
+    0%,100% { box-shadow: 0 4px 16px rgba(0,0,0,0.35), 0 0 0 0 var(--glow); }
+    50%     { box-shadow: 0 4px 16px rgba(0,0,0,0.35), 0 0 0 10px transparent; }
+  }
 
+  /* ── Layout ───────────────────────────────────────────────────────────── */
   .campaign-root {
-    position: relative; min-height: 100vh; width: 100%;
+    position: relative; z-index: 1; min-height: 100vh; width: 100%;
     background: transparent; font-family: 'IBM Plex Sans', system-ui, sans-serif;
     color: #e6edf3; overflow-x: hidden;
   }
@@ -485,7 +361,7 @@ const STYLE_CSS = `
     background: #080b10;
   }
   .campaign-bg .grid {
-    position: absolute; inset: 0; opacity: 0.25;
+    position: absolute; inset: 0; opacity: 0.2;
     background-image:
       linear-gradient(rgba(227,179,65,0.5) 1px, transparent 1px),
       linear-gradient(90deg, rgba(227,179,65,0.5) 1px, transparent 1px);
@@ -493,13 +369,177 @@ const STYLE_CSS = `
   }
   .campaign-bg .scanline {
     position: absolute; left: 0; right: 0; height: 2px;
-    background: linear-gradient(90deg, transparent, rgba(227,179,65,0.2), transparent);
+    background: linear-gradient(90deg, transparent, rgba(227,179,65,0.18), transparent);
     animation: scanline 6s linear infinite;
   }
-  .campaign-content { position: relative; z-index: 1; }
-  .level-card { animation: card-in 0.5s ease both; }
-  .press-btn  { animation: flicker 5s ease-in-out infinite, press-pulse 2s ease-in-out infinite; transition: transform 0.2s ease; }
-  .press-btn:hover { transform: scale(1.06); }
+  .campaign-main {
+    max-width: 1400px; margin: 0 auto;
+    padding: 28px clamp(16px, 4vw, 48px) 60px;
+  }
+
+  /* ── Header ──────────────────────────────────────────────────────────── */
+  .campaign-header {
+    height: 58px; background: rgba(8,11,16,0.65); backdrop-filter: blur(12px);
+    border-bottom: 1px solid #2d333b;
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 0 24px; position: sticky; top: 0; z-index: 100;
+    box-shadow: 0 4px 20px rgba(0,0,0,0.5);
+  }
+  .xp-pill {
+    display: flex; align-items: center; gap: 8px;
+    background: rgba(63,185,80,0.1); border: 1px solid rgba(63,185,80,0.25);
+    border-radius: 8px; padding: 5px 12px;
+    font-family: 'IBM Plex Mono', monospace; font-size: 12px; color: #3fb950; font-weight: 700;
+  }
+  .exit-btn {
+    background: transparent; border: 1px solid #444c56; color: #8b949e;
+    padding: 7px 14px; border-radius: 6px; font-weight: 600; font-size: 11px;
+    letter-spacing: 0.5px; cursor: pointer;
+    font-family: 'IBM Plex Mono', monospace; transition: color 0.15s, border-color 0.15s;
+  }
+  .exit-btn:hover { border-color: #f85149; color: #f85149; }
+
+  /* ── Hero banner ─────────────────────────────────────────────────────── */
+  .hero {
+    position: relative; border-radius: 16px; overflow: hidden;
+    margin-bottom: 28px; padding: 28px clamp(20px, 3vw, 36px);
+    display: flex; align-items: center;
+    background: linear-gradient(135deg, #1a1500 0%, #241c00 50%, #0d1117 100%);
+    border: 1px solid rgba(227,179,65,0.2);
+    box-shadow: 0 8px 32px rgba(0,0,0,0.5);
+    min-height: 140px;
+  }
+  .hero-grid-overlay {
+    position: absolute; inset: 0; opacity: 0.1; pointer-events: none;
+    background-image:
+      linear-gradient(rgba(227,179,65,0.6) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(227,179,65,0.6) 1px, transparent 1px);
+    background-size: 40px 40px;
+  }
+  .hero-glow {
+    position: absolute; inset: 0; pointer-events: none;
+    background: radial-gradient(circle at 28% 50%, rgba(227,179,65,0.1), transparent 60%);
+  }
+  .hero-text { position: relative; z-index: 1; min-width: 0; }
+  .hero-eyebrow {
+    font-size: 11px; color: #e3b341; font-family: 'IBM Plex Mono', monospace;
+    font-weight: 700; letter-spacing: 3px; text-transform: uppercase; margin-bottom: 12px;
+  }
+  .hero-title {
+    font-size: clamp(24px, 3vw, 32px); font-weight: 800; color: #f0f6fc;
+    letter-spacing: -0.8px; line-height: 1.1; margin: 0;
+  }
+  .hero-title--accent { color: #e3b341; font-style: italic; margin-top: 4px; }
+
+  /* ── Level grid ──────────────────────────────────────────────────────── */
+  .level-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+    gap: 20px;
+  }
+
+  /* ── Level card ──────────────────────────────────────────────────────── */
+  .level-card {
+    --accent: #3fb950;
+    --glow:   rgba(63,185,80,0.35);
+    position: relative; border-radius: 16px; padding: 22px 22px 18px;
+    background: linear-gradient(160deg, #161b22 0%, #1c2128 100%);
+    border: 1px solid #21262d;
+    cursor: pointer; overflow: hidden;
+    min-height: 220px;
+    display: flex; flex-direction: column; justify-content: space-between;
+    transform-style: preserve-3d;
+    transition: transform 0.18s ease, box-shadow 0.25s ease, border-color 0.25s ease;
+    box-shadow: 0 4px 16px rgba(0,0,0,0.35);
+    animation: card-in 0.5s cubic-bezier(0.2, 0.8, 0.2, 1) both;
+  }
+  .level-card.status-locked {
+    cursor: not-allowed; opacity: 0.55;
+    background: #0d1117; border-color: #21262d;
+  }
+  .level-card.status-next {
+    border-color: var(--accent);
+    animation: card-in 0.5s cubic-bezier(0.2, 0.8, 0.2, 1) both,
+               pulse-glow 2.6s ease-in-out 0.6s infinite;
+  }
+  .level-card:not(.status-locked):hover {
+    border-color: color-mix(in srgb, var(--accent) 60%, transparent);
+    box-shadow: 0 12px 40px var(--glow), inset 0 0 24px rgba(255,255,255,0.02);
+  }
+  .level-card.shake { animation: lock-shake 0.42s ease; }
+
+  .level-card-accent {
+    position: absolute; top: 0; left: 18px; right: 18px; height: 2px;
+    background: linear-gradient(90deg, transparent, var(--accent), transparent);
+    border-radius: 0 0 2px 2px;
+    opacity: 0; transition: opacity 0.25s;
+  }
+  .level-card:not(.status-locked) .level-card-accent { opacity: 0.85; }
+
+  .level-card-badge {
+    position: absolute; top: 12px; right: 12px;
+    border-radius: 6px; padding: 3px 8px; font-size: 10px; font-weight: 700;
+    letter-spacing: 0.6px; font-family: 'IBM Plex Mono', monospace;
+    border: 1px solid currentColor;
+  }
+
+  .level-card-head {
+    display: flex; align-items: flex-start; justify-content: space-between;
+    gap: 14px; margin-top: 18px;
+  }
+  .level-card-title {
+    display: flex; align-items: center; gap: 8px; margin-bottom: 4px;
+    font-family: 'IBM Plex Mono', monospace;
+    font-weight: 700; font-size: 16px; letter-spacing: 0.3px;
+    color: #e6edf3;
+  }
+  .level-card.status-locked .level-card-title { color: #484f58; }
+  .level-card-arrow { color: var(--accent); font-size: 13px; }
+  .level-card.status-locked .level-card-arrow { color: #3d444d; }
+  .level-card-subtitle {
+    font-size: 13px; color: #8b949e; margin-left: 21px;
+  }
+  .level-card-blurb {
+    font-size: 11px; color: #6e7681; margin-left: 21px; margin-top: 8px; line-height: 1.5;
+    max-width: 240px;
+  }
+  .level-card-icon-slot {
+    width: 56px; height: 56px; border-radius: 14px;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 26px; flex-shrink: 0;
+    background: color-mix(in srgb, var(--accent) 12%, transparent);
+    border: 1px solid color-mix(in srgb, var(--accent) 30%, transparent);
+    transition: transform 0.3s cubic-bezier(0.34, 1.56, 0.64, 1);
+  }
+  .level-card:not(.status-locked):hover .level-card-icon-slot {
+    transform: rotate(-6deg) scale(1.1);
+  }
+  .level-card.status-locked .level-card-icon-slot {
+    background: rgba(255,255,255,0.02); border-color: #21262d;
+  }
+
+  .level-card-foot {
+    display: flex; align-items: center; justify-content: space-between;
+    gap: 12px; margin-top: 18px; padding-top: 14px;
+    border-top: 1px solid rgba(255,255,255,0.04);
+  }
+  .level-card-quest-count {
+    display: flex; align-items: center; gap: 8px;
+    font-family: 'IBM Plex Mono', monospace; font-size: 12px; color: #8b949e;
+  }
+  .level-card-quest-count strong { color: var(--accent); font-weight: 700; }
+  .level-card-icon-mini {
+    width: 22px; height: 22px; border-radius: 6px; font-size: 12px;
+    display: flex; align-items: center; justify-content: center;
+    background: color-mix(in srgb, var(--accent) 14%, transparent);
+    border: 1px solid color-mix(in srgb, var(--accent) 30%, transparent);
+  }
+  .level-card-cta {
+    font-family: 'IBM Plex Mono', monospace; font-size: 11px; font-weight: 700;
+    letter-spacing: 0.5px;
+    transition: transform 0.2s ease;
+  }
+  .level-card:not(.status-locked):hover .level-card-cta { transform: translateX(3px); }
 `;
 
 export default CampaignPage;

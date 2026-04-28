@@ -151,11 +151,14 @@ function getMonthLabels() {
   today.setHours(0, 0, 0, 0)
   const start = new Date(today)
   start.setDate(start.getDate() - start.getDay() - 7 * 52)
+  let lastMonth = -1
   for (let w = 0; w < 52; w++) {
     const d = new Date(start)
     d.setDate(d.getDate() + w * 7)
-    if (d.getDate() <= 7) {
+    const month = d.getMonth()
+    if (month !== lastMonth) {
       labels.push({ label: d.toLocaleString('default', { month: 'short' }), col: w })
+      lastMonth = month
     }
   }
   return labels
@@ -1054,10 +1057,10 @@ export const ProgressPage: React.FC = () => {
                 { id: 'beginner_clear',    icon: '🌱', name: 'Beginner Clear',   desc: 'Complete a beginner quest',           earned: stats.missions.filter(m => m.questid?.phase === 'beginner'    && m.status === 'completed').length >= 1, progress: () => Math.min(1, stats.missions.filter(m => m.questid?.phase === 'beginner'    && m.status === 'completed').length) / 1, detail: '' },
                 { id: 'intermediate_clear',icon: '🔥', name: 'Intermediate Clear',desc: 'Complete an intermediate quest',     earned: stats.missions.filter(m => m.questid?.phase === 'intermediate' && m.status === 'completed').length >= 1, progress: () => Math.min(1, stats.missions.filter(m => m.questid?.phase === 'intermediate' && m.status === 'completed').length) / 1, detail: '' },
                 { id: 'advanced_clear',    icon: '💎', name: 'Advanced Clear',   desc: 'Complete an advanced quest',          earned: stats.missions.filter(m => m.questid?.phase === 'advanced'    && m.status === 'completed').length >= 1, progress: () => Math.min(1, stats.missions.filter(m => m.questid?.phase === 'advanced'    && m.status === 'completed').length) / 1, detail: '' },
-                { id: 'knight_rank',       icon: '⚔️', name: 'Knight',           desc: 'Reach Knight rank (1,000 XP)',         earned: stats.totalXP >= 1000,            progress: () => Math.min(1, stats.totalXP / 1000),    detail: `${stats.totalXP.toLocaleString()} / 1,000 XP` },
-                { id: 'lord_rank',         icon: '🌟', name: 'Lord',             desc: 'Reach Lord rank (4,000 XP)',           earned: stats.totalXP >= 4000,            progress: () => Math.min(1, stats.totalXP / 4000),    detail: `${stats.totalXP.toLocaleString()} / 4,000 XP` },
-                { id: 'duke_rank',         icon: '👑', name: 'Duke',             desc: 'Reach Duke rank (10,000 XP)',          earned: stats.totalXP >= 10000,           progress: () => Math.min(1, stats.totalXP / 10000),   detail: `${stats.totalXP.toLocaleString()} / 10,000 XP` },
-                { id: 'king_rank',         icon: '🔱', name: 'King',             desc: 'Reach King rank (25,000 XP)',          earned: stats.totalXP >= 25000,           progress: () => Math.min(1, stats.totalXP / 25000),   detail: `${stats.totalXP.toLocaleString()} / 25,000 XP` },
+                { id: 'knight_rank',       icon: '⚔️', name: 'Knight',           desc: 'Reach Knight rank (5,000 XP)',         earned: stats.totalXP >= 5000,            progress: () => Math.min(1, stats.totalXP / 5000),    detail: `${stats.totalXP.toLocaleString()} / 5,000 XP` },
+                { id: 'lord_rank',         icon: '🌟', name: 'Lord',             desc: 'Reach Lord rank (20,000 XP)',          earned: stats.totalXP >= 20000,           progress: () => Math.min(1, stats.totalXP / 20000),   detail: `${stats.totalXP.toLocaleString()} / 20,000 XP` },
+                { id: 'duke_rank',         icon: '👑', name: 'Duke',             desc: 'Reach Duke rank (75,000 XP)',          earned: stats.totalXP >= 75000,           progress: () => Math.min(1, stats.totalXP / 75000),   detail: `${stats.totalXP.toLocaleString()} / 75,000 XP` },
+                { id: 'king_rank',         icon: '🔱', name: 'King',             desc: 'Reach King rank (250,000 XP)',         earned: stats.totalXP >= 250000,          progress: () => Math.min(1, stats.totalXP / 250000),  detail: `${stats.totalXP.toLocaleString()} / 250,000 XP` },
                 { id: 'no_hints',          icon: '🎯', name: 'Purist',           desc: 'Complete a quest without hints',       earned: stats.missions.some(m => m.status === 'completed' && m.hintsused === 0), progress: () => stats.missions.some(m => m.status === 'completed' && m.hintsused === 0) ? 1 : 0, detail: '' },
                 { id: 'streak_3',          icon: '🔥', name: 'On A Roll',        desc: 'Practice 3 days in a row',             earned: streaks.longest >= 3,             progress: () => Math.min(1, streaks.longest / 3),     detail: `${streaks.longest} / 3 days` },
                 { id: 'streak_7',          icon: '🏆', name: 'Week Warrior',     desc: 'Practice 7 days in a row',             earned: streaks.longest >= 7,             progress: () => Math.min(1, streaks.longest / 7),     detail: `${streaks.longest} / 7 days` },

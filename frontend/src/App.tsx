@@ -1,5 +1,5 @@
 import React, { useEffect } from 'react';
-import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
+import { BrowserRouter, Routes, Route, Navigate, useNavigate } from 'react-router-dom';
 import { AuthProvider, useAuth } from './components/AuthScreen';
 import { HomeDashboard } from './HomeDashboard';
 import { SignupPage } from './Signuppage';
@@ -23,6 +23,7 @@ const BANNER_HEIGHT = 40; // px — keep in sync with banner padding + line-heig
 
 const ImpersonationBanner: React.FC = () => {
   const { impersonatingUser, stopImpersonation, user } = useAuth();
+  const navigate = useNavigate();
 
   // While the banner is visible, add top padding to <body> so page content
   // isn't hidden behind the fixed-position banner.
@@ -44,11 +45,11 @@ const ImpersonationBanner: React.FC = () => {
       fontSize: '13px', fontWeight: '600', boxShadow: '0 2px 12px rgba(0,0,0,0.5)',
     }}>
       <span>
-        👁️ Admin preview — viewing as <strong>{user?.playerName}</strong>
-        {' '}(impersonating real admin: <strong>{impersonatingUser.playerName}</strong>)
+        👁️ Admin preview — you are <strong>{impersonatingUser.playerName}</strong>
+        {' '}viewing as <strong>{user?.playerName}</strong>
       </span>
       <button
-        onClick={stopImpersonation}
+        onClick={() => { stopImpersonation(); navigate('/admin'); }}
         style={{
           background: 'rgba(255,255,255,0.2)', border: '1px solid rgba(255,255,255,0.4)',
           color: 'white', borderRadius: '6px', padding: '4px 14px',
@@ -69,9 +70,11 @@ const ProtectedRoute: React.FC<{ children: React.ReactElement }> = ({ children }
 };
 
 const AdminRoute: React.FC<{ children: React.ReactElement }> = ({ children }) => {
-  const { isAuthenticated, isAdmin } = useAuth();
+  const { isAuthenticated, isAdmin, impersonatingUser } = useAuth();
   if (!isAuthenticated) return <Navigate to="/login" replace />;
-  if (!isAdmin)         return <Navigate to="/home"  replace />;
+  // During impersonation isAdmin=false, but impersonatingUser holds the real
+  // admin — allow access so stopImpersonation can navigate back to /admin.
+  if (!isAdmin && !impersonatingUser) return <Navigate to="/home" replace />;
   return children;
 };
 

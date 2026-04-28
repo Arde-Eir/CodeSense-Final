@@ -97,8 +97,24 @@ export const CodeFillGame: React.FC<Props> = ({ items, onComplete, resetSignal }
         <span style={{ fontSize: 11, color: '#484f58', fontFamily: "'JetBrains Mono',monospace" }}>{idx + 1}/{items.length}</span>
       </div>
       {item.caption && <div style={{ fontSize: 12, color: '#8b949e', fontFamily: 'Inter,sans-serif' }}>{item.caption}</div>}
-      <div style={{ background: '#0d1117', border: '1px solid #30363d', borderRadius: 10, padding: '16px 18px', flex: 1, overflowY: 'auto' }}>
-        {rendered}
+      <div style={{ background: '#0d1117', border: '1px solid #30363d', borderRadius: 10, flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+        {/* Language header — always C++ unless the item explicitly overrides it */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '7px 14px', background: '#161b22', borderBottom: '1px solid #21262d', flexShrink: 0 }}>
+          <div style={{ display: 'flex', gap: 5 }}>
+            {['#f85149', '#e3b341', '#3fb950'].map(c => (
+              <div key={c} style={{ width: 9, height: 9, borderRadius: '50%', background: c }} />
+            ))}
+          </div>
+          <span style={{ fontSize: 10, color: '#8b949e', fontFamily: "'JetBrains Mono',monospace", letterSpacing: '0.8px' }}>
+            {item.language ?? 'C++'}
+          </span>
+          <span style={{ marginLeft: 'auto', fontSize: 9, color: '#484f58', fontFamily: "'JetBrains Mono',monospace", letterSpacing: '1px', textTransform: 'uppercase' }}>
+            fill in the blanks
+          </span>
+        </div>
+        <div style={{ flex: 1, overflowY: 'auto', padding: '16px 18px' }}>
+          {rendered}
+        </div>
       </div>
       {item.hint && checked && !results.every(Boolean) && (
         <div style={{ padding: '10px 14px', borderRadius: 8, background: 'rgba(88,166,255,0.07)', border: '1px solid rgba(88,166,255,0.2)', fontSize: 12, color: '#8b949e', fontFamily: 'Inter,sans-serif' }}>

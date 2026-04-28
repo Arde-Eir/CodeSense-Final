@@ -418,8 +418,28 @@ export class TypeChecker {
     if (initialized) {
       const valueType = this.visit(varNode.value);
       this.markWrite(varNode.name, varNode.line || 0);
-      if (valueType && !this.isTypeCompatible(varNode.varType, valueType, varNode.value)) {
+
+      // ── REFERENCE DECLARATIONS are always type-compatible ──────────────
+      // If the declared type is a reference (e.g. int &, const int &, int&&),
+      // the initializer just needs to be the same base type — no mismatch.
+      const normalizedDeclType = varNode.varType.replace(/\s+/g, '');
+      const isReferenceDecl = normalizedDeclType.includes('&');
+
+      if (!isReferenceDecl && valueType && !this.isTypeCompatible(varNode.varType, valueType, varNode.value)) {
         this.addError(node, `Type mismatch: cannot assign '${valueType}' to '${varNode.varType}'`);
+      } else if (isReferenceDecl && valueType) {
+        // Still validate base type compatibility for references
+        const baseTarget = normalizedDeclType.replace(/&+$/, '').replace(/^const/, '').replace(/\s+/g, '');
+        const baseSource = valueType.replace(/&+$/, '').replace(/^const/, '').replace(/\s+/g, '');
+        const numWeight: Record<string, number> = {
+          char: 1, short: 1.5, int: 2, long: 2.5, float: 3, double: 4,
+        };
+        if (baseTarget !== baseSource &&
+            numWeight[baseTarget] !== undefined &&
+            numWeight[baseSource] !== undefined &&
+            numWeight[baseTarget] < numWeight[baseSource]) {
+          this.addError(node, `Possible data loss: binding '${valueType}' to reference '${varNode.varType}' (narrowing conversion).`, 'warning');
+        }
       }
     }
     return varNode.varType;
@@ -533,6 +553,44 @@ export class TypeChecker {
     const condType = this.visit(w.condition);
     if (condType && !this.isContextuallyConvertibleToBool(condType)) {
       this.addError(w.condition, `While condition must be boolean-convertible, got '${condType}'`);
+    }
+
+    // PDF #6: Constant-false condition detection. `while (false)` / `while (0)`
+    // never executes the body — surface a beginner-friendly warning so the
+    // user understands the loop body is dead code.
+    const cond = w.condition as any;
+    if ((cond?.type === 'Literal' && cond.value === false) ||
+        (cond?.type === 'Integer' && cond.value === 0)) {
+      this.addError(
+        node,
+        `Loop never runs: condition is always false — the body is unreachable.`,
+        'warning',
+      );
+    }
+    // Compile-time constant-false comparison, e.g. `while (10 < 5)` or
+    // an initial-state comparison like `int x = 10; while (x < 5)` where x
+    // is never modified between init and the loop. Use the same const-fold
+    // helper the symbolic executor would use; here a lightweight literal
+    // check covers the most common beginner case from the bug report.
+    if (cond?.type === 'BinaryOp' &&
+        (cond.left?.type === 'Integer'  || cond.left?.type === 'Float') &&
+        (cond.right?.type === 'Integer' || cond.right?.type === 'Float')) {
+      const lv = cond.left.value, rv = cond.right.value;
+      const result =
+        cond.operator === '<'  ? lv <  rv :
+        cond.operator === '<=' ? lv <= rv :
+        cond.operator === '>'  ? lv >  rv :
+        cond.operator === '>=' ? lv >= rv :
+        cond.operator === '==' ? lv === rv :
+        cond.operator === '!=' ? lv !== rv :
+        null;
+      if (result === false) {
+        this.addError(
+          node,
+          `Loop never runs: condition '${lv} ${cond.operator} ${rv}' is always false — the body is unreachable.`,
+          'warning',
+        );
+      }
     }
 
     // FIX 16: Infinite-loop detection (only when body is non-empty and no exit statement)
@@ -1102,7 +1160,25 @@ if (['&', '|', '^', '<<', '>>'].includes(bin.operator)) {
   // =========================================================================
   private visitCinStatement(node: ASTNode): string | null {
     const cin = node as any;
-    const targets: Array<string | ASTNode> = cin.targets || (cin.target ? [cin.target] : []);
+
+    // The grammar produces `targets` as either a single leaf (Identifier
+    // string / ArrayAccess node) for `cin >> a`, or a left-folded BinaryOp
+    // tree for chained `cin >> a >> b >> c`. Older code assumed it was
+    // always an array and crashed with `targets.forEach is not a function`,
+    // which halted the typechecker — and as a knock-on effect, swallowed
+    // logs/symbols (PDF #13). Flatten any of these shapes into an array.
+    const flatten = (n: any): Array<string | ASTNode> => {
+      if (n == null) return [];
+      if (Array.isArray(n)) return n.flatMap(flatten);
+      if (typeof n === 'string') return [n];
+      if (n.type === 'BinaryOp' && (n.operator === '>>' || n.operator === '<<')) {
+        return [...flatten(n.left), ...flatten(n.right)];
+      }
+      return [n];
+    };
+    const targets: Array<string | ASTNode> = cin.targets
+      ? flatten(cin.targets)
+      : (cin.target ? [cin.target] : []);
 
     targets.forEach(target => {
       if (typeof target === 'string') {
@@ -1494,34 +1570,49 @@ if (['&', '|', '^', '<<', '>>'].includes(bin.operator)) {
   // =========================================================================
   // Type compatibility & promotion helpers
   // =========================================================================
-  private isTypeCompatible(target: string, source: string, sourceNode?: any): boolean {
-    if (target.replace(/\s+/g, '') === source.replace(/\s+/g, '')) return true;
-    if (target === 'unknown' || source === 'unknown') return true;
+private isTypeCompatible(target: string, source: string, sourceNode?: any): boolean {
+   console.log('[isTypeCompatible] target:', JSON.stringify(target), 'source:', JSON.stringify(source));
+  // Step 1: Strip ALL whitespace, then normalize references and const
+  const stripRef = (t: string) =>
+    t.replace(/\s+/g, '')       // remove all spaces first: "int &" → "int&"
+     .replace(/&+$/, '')        // remove trailing &:        "int&"  → "int"
+     .replace(/^const/, '');    // remove leading const:     "constint" → "int"
 
-    if (target.endsWith('*')) {
-      if (source === 'nullptr_t') return true;
-      if (source === 'int' && sourceNode?.type === 'Integer' && sourceNode.value === 0) return true;
-      if (target === 'void*' && source.endsWith('*')) return true;
-    }
+  const tBase = stripRef(target);
+  const sBase = stripRef(source);
 
-    if (target === 'bool') return this.isContextuallyConvertibleToBool(source);
+  // Step 2: Fast path — normalized bases match
+  if (tBase === sBase) return true;
 
-    const numWeight: Record<string, number> = {
-      char: 1, short: 1.5, int: 2, long: 2.5, float: 3, double: 4,
-    };
-    if (numWeight[target] !== undefined && numWeight[source] !== undefined) {
-      if (numWeight[target] >= numWeight[source]) return true;
-      this.addError(
-        sourceNode,
-        `Possible data loss: assigning '${source}' to '${target}' (narrowing conversion).`,
-        'warning',
-      );
-      return true;
-    }
+  // Step 3: unknown is always compatible
+  if (tBase === 'unknown' || sBase === 'unknown') return true;
 
-    return false;
+  // Step 4: Pointer compatibility
+  if (tBase.endsWith('*')) {
+    if (sBase === 'nullptr_t') return true;
+    if (sBase === 'int' && sourceNode?.type === 'Integer' && sourceNode.value === 0) return true;
+    if (tBase === 'void*' && sBase.endsWith('*')) return true;
   }
 
+  // Step 5: Bool contextual conversion
+  if (tBase === 'bool') return this.isContextuallyConvertibleToBool(sBase);
+
+  // Step 6: Numeric promotion / narrowing (use normalized bases)
+  const numWeight: Record<string, number> = {
+    char: 1, short: 1.5, int: 2, long: 2.5, float: 3, double: 4,
+  };
+  if (numWeight[tBase] !== undefined && numWeight[sBase] !== undefined) {
+    if (numWeight[tBase] >= numWeight[sBase]) return true;
+    this.addError(
+      sourceNode,
+      `Possible data loss: assigning '${source}' to '${target}' (narrowing conversion).`,
+      'warning',
+    );
+    return true;
+  }
+
+  return false;
+}
   private isContextuallyConvertibleToBool(type: string): boolean {
     if (['bool', 'int', 'char', 'long', 'short', 'float', 'double'].includes(type)) return true;
     if (type.endsWith('*') || type === 'nullptr_t') return true;
@@ -1530,11 +1621,27 @@ if (['&', '|', '^', '<<', '>>'].includes(bin.operator)) {
   }
 
   private isNumericType(type: string): boolean {
-    return ['int', 'float', 'double', 'char', 'long', 'short'].includes(type);
+    if (!type) return false;
+    // Strip reference / pointer / cv qualifiers — `int&`, `const int`,
+    // `unsigned int` should all be considered numeric for arithmetic checks.
+    // Without this, parameters declared `int &n` mis-flag `n++` as
+    // "non-numeric" because the underlying type carries the `&` suffix.
+    const base = type
+      .replace(/[*&\s]+$/g, '')             // trailing *, &, whitespace
+      .replace(/^(const|static|volatile|unsigned|signed|mutable|extern|inline)\s+/g, '')
+      .trim();
+    return ['int', 'float', 'double', 'char', 'long', 'short',
+            'long long', 'unsigned int', 'unsigned long', 'unsigned long long',
+            'size_t'].includes(base);
   }
 
   private isIntegralType(type: string): boolean {
-    return ['int', 'char', 'long', 'short', 'bool'].includes(type);
+    if (!type) return false;
+    const base = type
+      .replace(/[*&\s]+$/g, '')
+      .replace(/^(const|static|volatile|unsigned|signed|mutable|extern|inline)\s+/g, '')
+      .trim();
+    return ['int', 'char', 'long', 'short', 'bool', 'long long', 'size_t'].includes(base);
   }
 
   private isComparable(left: string, right: string): boolean {

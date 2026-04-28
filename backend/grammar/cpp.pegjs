@@ -105,8 +105,12 @@ Namespace
 // Functions
 // ============================================================================
 
+// Use `_` instead of `__` between Type and the identifier — Type may already
+// end with `*` or `&` (pointer / reference), in which case there is no
+// whitespace before the name. BaseType / TypeModifier carry their own
+// word-boundary guard (`!IdentChar`) so this still rejects e.g. `intx`.
 Function
-  = returnType:Type __ name:Identifier _ "(" _ params:ParameterList? _ ")" _
+  = returnType:Type _ name:Identifier _ "(" _ params:ParameterList? _ ")" _
     body:("{" _ Statement* _ "}" / ";") _ {
       return {
         type: body === ";" ? 'FunctionPrototype' : 'FunctionDecl',
@@ -138,8 +142,11 @@ ParameterList
       return [first, ...rest.map(r => r[3])];
     }
 
+// `_` (zero-or-more whitespace) is correct here: Type can end with `*`/`&`,
+// in which case there is no whitespace before the parameter name. BaseType
+// has a `!IdentChar` guard so `intn` / `floatx` won't be silently accepted.
 Parameter
-  = type:Type __ name:Identifier dims:ArrayDimension* _ init:("=" _ Expression)? {
+  = type:Type _ name:Identifier dims:ArrayDimension* _ init:("=" _ Expression)? {
       return {
         type: 'Parameter',
         varType: type,
@@ -251,9 +258,10 @@ CatchClause
       return { type: 'CatchClause', param, body: body.statements, ...loc() };
     }
 
+// `_` so `catch (Error &e)` parses (Type ends with `&`, no whitespace before `e`).
 CatchParam
   = "..." { return { type: 'CatchAll' }; }
-  / type:Type __ name:Identifier { return { type: 'CatchParam', varType: type, name }; }
+  / type:Type _ name:Identifier { return { type: 'CatchParam', varType: type, name }; }
   / type:Type { return { type: 'CatchParam', varType: type, name: null }; }
 
 ThrowStatement
@@ -399,8 +407,9 @@ WhileLoop
 // Range-Based For Loop  (C++11)
 // for ( Type name : expr ) Statement
 // ============================================================================
+// `_` between Type and name — Type may end with `*`/`&` (e.g. `for (auto& x : v)`).
 RangeBasedFor
-  = "for" _ "(" _ type:Type __ name:Identifier _ ":" _ range:Expression _ ")" _ body:Statement {
+  = "for" _ "(" _ type:Type _ name:Identifier _ ":" _ range:Expression _ ")" _ body:Statement {
       return {
         type: 'RangeBasedFor',
         varType: type,
@@ -441,12 +450,18 @@ ExpressionStatement
 
 Expression = Assignment / InitializerList
 
-// FIX: Assignment now includes |= ^= &= <<= >>= (bitwise compound operators)
+// FIX: Assignment now includes |= ^= &= <<= >>= (bitwise compound operators).
+// AssignTarget allows `*p = ...` (dereference) in addition to plain Primaries
+// like identifiers and array accesses, so pointer-assignment statements parse.
 Assignment
-  = target:Primary _ op:("=" / "+=" / "-=" / "*=" / "/=" / "%=" / "&=" / "|=" / "^=" / "<<=" / ">>=") _ value:Expression {
+  = target:AssignTarget _ op:("=" / "+=" / "-=" / "*=" / "/=" / "%=" / "&=" / "|=" / "^=" / "<<=" / ">>=") _ value:Expression {
       return { type: 'Assignment', operator: op, target, value, ...loc() };
     }
   / Conditional
+
+AssignTarget
+  = "*" _ operand:Primary { return { type: 'Dereference', operand, ...loc() }; }
+  / Primary
 
 Conditional
   = condition:LogicalOr _ "?" _ trueExpr:Expression _ ":" _ falseExpr:Conditional {
@@ -651,18 +666,23 @@ Type
       return modStr + base + ptrStr;
     }
 
+// IdentChar: helper used by !IdentChar lookaheads to enforce word boundaries
+// after type keywords. Without these guards, `intx` would mis-parse as
+// `int x` because BaseType's literal `"int"` would match the prefix.
+IdentChar = [a-zA-Z0-9_]
+
 BaseType
-  = "long" _ "long"   { return "long long"; }
-  / "long" _ "double" { return "long double"; }
-  / "unsigned" _ "int"{ return "unsigned int"; }
-  / "unsigned" _ "long" _ "long" { return "unsigned long long"; }
-  / ("int" / "float" / "double" / "char" / "bool" / "void" / "string"
-     / "auto" / "typename" / "class" / "struct" / "enum" / "size_t")
+  = "long" __ "long"                      !IdentChar { return "long long"; }
+  / "long" __ "double"                    !IdentChar { return "long double"; }
+  / "unsigned" __ "int"                   !IdentChar { return "unsigned int"; }
+  / "unsigned" __ "long" __ "long"        !IdentChar { return "unsigned long long"; }
+  / name:("int" / "float" / "double" / "char" / "bool" / "void" / "string"
+     / "auto" / "typename" / "class" / "struct" / "enum" / "size_t") !IdentChar { return name; }
 
 TypeModifier
-  = ("const" / "static" / "extern" / "volatile" / "unsigned" / "signed"
+  = name:("const" / "static" / "extern" / "volatile" / "unsigned" / "signed"
      / "inline" / "virtual" / "public" / "private" / "protected"
-     / "override" / "final" / "mutable" / "explicit")
+     / "override" / "final" / "mutable" / "explicit") !IdentChar { return name; }
 
 // ============================================================================
 // Reserved Keywords — kept in sync with the Lexer keyword list

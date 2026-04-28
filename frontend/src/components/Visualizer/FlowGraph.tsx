@@ -1,23 +1,6 @@
 /**
- * FlowGraph.tsx
- * ─────────────────────────────────────────────────────────────────────────────
- * Interactive flowchart canvas built on React Flow + ELK auto-layout.
- *
- * TABLE OF CONTENTS
- * ─────────────────
- *  §1  Imports & types
- *  §2  Constants  (colors, sizes, default labels, palette items)
- *  §3  Shared node helpers  (useNodeAppearance, BaseNode, NodeLabel, badges)
- *  §4  ISO 5807 node components  (Terminator → Database)
- *  §5  Overlay UI components  (NodePalette, FlowchartLegend, GameStats,
- *                               GenerateCodePanel)
- *  §6  Modal editors  (NodeEditor, EdgeLabelEditor)
- *  §7  Main FlowGraph component  (state, handlers, ReactFlow render)
+ FlowGraph.tsx
  */
-
-// ─────────────────────────────────────────────────────────────────────────────
-// §1  IMPORTS & TYPES
-// ─────────────────────────────────────────────────────────────────────────────
 
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import {
@@ -69,6 +52,11 @@ type FlowNodeType =
 const elk = new ELK();
 let _nodeIdCounter = 1000;
 const newNodeId = () => `user-node-${++_nodeIdCounter}`;
+
+// FIX: stable empty array — never re-creates a new reference on each render,
+// which would cause the useEffect([cfg, safetyChecks]) to fire every render
+// and produce an infinite setEdges → re-render loop.
+const EMPTY_SAFETY_CHECKS: SafetyCheck[] = [];
 
 const NODE_COLORS: Record<FlowNodeType, string> = {
   terminator:         '#42a5f5',
@@ -203,7 +191,6 @@ const PALETTE_ITEMS: {
     type: 'off_page_connector', label: 'Off-page Connector', iso: 'ISO: Off-page Reference',
     shape: (
       <svg width={26} height={24} viewBox="0 0 26 24" style={{ flexShrink: 0 }}>
-        {/* Home-plate / pentagon: flat top + sides, point at bottom */}
         <polygon points="2,2 24,2 24,14 13,22 2,14" fill="#2a2008" stroke="#ffca28" strokeWidth="1.5" strokeLinejoin="round" />
         <text x="13" y="13" textAnchor="middle" fontSize="7" fill="white" fontWeight="800">1</text>
       </svg>
@@ -247,7 +234,6 @@ const PALETTE_ITEMS: {
     type: 'junction', label: 'Junction (Offset)', iso: 'ISO: Junction / Merge',
     shape: (
       <svg width={28} height={28} viewBox="0 0 28 28" style={{ flexShrink: 0 }}>
-        {/* Offset shape: like a small rotated square shifted slightly — used as a merge/split point */}
         <polygon points="14,3 25,14 14,25 3,14" fill="#1a0820" stroke="#e040fb" strokeWidth="1.5" />
         <circle cx="14" cy="14" r="3.5" fill="#e040fb" opacity="0.85" />
       </svg>
@@ -472,9 +458,6 @@ const ConnectorNode = ({ data, selected }: NodeProps<Node<ExtendedNodeData>>) =>
 };
 
 // ── 6b. OFF-PAGE CONNECTOR — pentagon / home-plate ───────────────────────────
-// ISO 5807 "Off-page Reference": flat top + sides, point at bottom — used to
-// jump flow to/from another page (cross-page reference). Distinct from the
-// on-page Connector circle: the home-plate shape signals an off-page link.
 const OffPageConnectorNode = ({ data, selected }: NodeProps<Node<ExtendedNodeData>>) => {
   const W = 70, H = 70;
   const { color } = useNodeAppearance('off_page_connector', data);
@@ -596,11 +579,8 @@ const DatabaseNode = ({ data, selected }: NodeProps<Node<ExtendedNodeData>>) => 
 };
 
 // ── 11. JUNCTION — small offset diamond (merge / split point) ─────────────────
-// This is the "Offset Shape" from ISO 5807 / ANSI — a tiny filled diamond used
-// as a junction where multiple flow lines meet or branch. It renders all four
-// cardinal handles so edges can arrive/depart from any direction.
 const JunctionNode = ({ data, selected }: NodeProps<Node<ExtendedNodeData>>) => {
-  const S = 36; // overall bounding box (square)
+  const S = 36;
   const { color } = useNodeAppearance('junction', data);
   const fill = data.violation ? '#2d0820' : data.visited ? '#1a0d2e' : '#1a0820';
   const points = `${S/2},3 ${S-3},${S/2} ${S/2},${S-3} 3,${S/2}`;
@@ -622,10 +602,8 @@ const JunctionNode = ({ data, selected }: NodeProps<Node<ExtendedNodeData>>) => 
           strokeWidth={selected ? 2.5 : 2}
           strokeLinejoin="round"
         />
-        {/* Centre dot to visually signal "junction" */}
         <circle cx={S/2} cy={S/2} r={4} fill={color} opacity={0.9} />
       </svg>
-      {/* Four cardinal handles — junctions accept / emit from all sides */}
       <Handle type="target" position={Position.Top}    id="t" style={{ ...handleStyle(color), top: -2,    left: '50%', transform: 'translateX(-50%)' }} />
       <Handle type="target" position={Position.Left}   id="l" style={{ ...handleStyle(color), left: -2,   top: '50%',  transform: 'translateY(-50%)' }} />
       <Handle type="source" position={Position.Bottom} id="b" style={{ ...handleStyle(color), bottom: -2, left: '50%', transform: 'translateX(-50%)' }} />
@@ -693,7 +671,6 @@ const NodePalette: React.FC<{
 
           <div style={{ height: 1, background: '#21262d', margin: '4px 0' }} />
 
-          {/* Clear Canvas */}
           <button
             onClick={onClearCanvas}
             title="Remove all nodes and edges from the canvas"
@@ -705,7 +682,6 @@ const NodePalette: React.FC<{
             <span style={{ fontSize: 11, color: '#ff6b6b', fontWeight: 600 }}>Clear Canvas</span>
           </button>
 
-          {/* Keyboard shortcut hints */}
           <div style={{ padding: '5px 4px', fontSize: 9, color: '#484f58', lineHeight: 1.7, borderTop: '1px solid #21262d', marginTop: 2 }}>
             <strong style={{ color: '#3d444d' }}>Tips:</strong> Double-click a node to edit it · Double-click an edge to label it · Press <kbd style={{ background: '#1c2128', border: '1px solid #30363d', borderRadius: 3, padding: '0 3px', fontSize: 8 }}>Backspace</kbd> to delete the selected item · <strong style={{ color: '#e040fb' }}>Alt+click</strong> an edge to insert a Junction at that point
           </div>
@@ -787,7 +763,6 @@ const GameStats: React.FC<{
       pointerEvents: isDrawerOpen ? 'none' : 'auto',
     }}>
 
-      {/* Exploration card */}
       <div style={{ ...cardBase, border: '2px solid #4caf50', boxShadow: '0 4px 20px rgba(76,175,80,0.25)' }}>
         <div
           onClick={() => setExpanded(v => !v)}
@@ -813,7 +788,6 @@ const GameStats: React.FC<{
         )}
       </div>
 
-      {/* Safety card */}
       <div style={{ ...cardBase, border: `2px solid ${safeColor}`, boxShadow: `0 4px 20px ${allSafe ? 'rgba(76,175,80,0.25)' : 'rgba(255,68,68,0.25)'}` }}>
         <div
           onClick={() => setExpanded(v => !v)}
@@ -869,7 +843,6 @@ const GenerateCodePanel: React.FC<{
     }
   };
 
-  // Re-validate whenever the graph changes so stale errors clear automatically
   const liveValidation = showValidation ? validateGraph(nodes, edges) : null;
 
   const handleCopy = () => {
@@ -878,7 +851,6 @@ const GenerateCodePanel: React.FC<{
       setCopied(true);
       setTimeout(() => setCopied(false), 1800);
     }).catch(() => {
-      // Fallback for environments without clipboard API
       const ta = document.createElement('textarea');
       ta.value = generatedCode;
       document.body.appendChild(ta);
@@ -951,7 +923,6 @@ const GenerateCodePanel: React.FC<{
       {expanded && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
 
-          {/* Validation panel */}
           {showValidation && activeValidation && hasIssues && (
             <ValidationPanel
               result={activeValidation}
@@ -959,7 +930,6 @@ const GenerateCodePanel: React.FC<{
             />
           )}
 
-          {/* Instruction hint */}
           {(!showValidation || !hasIssues) && !isDirty && (
             <div style={{ fontSize: 9, color: '#484f58', lineHeight: 1.6, padding: '5px 8px', background: 'rgba(168,85,247,0.06)', borderRadius: 6, border: '1px solid rgba(168,85,247,0.2)' }}>
               Build your flowchart → label decision edges{' '}
@@ -969,14 +939,12 @@ const GenerateCodePanel: React.FC<{
             </div>
           )}
 
-          {/* Outdated notice */}
           {!hasErrors && isDirty && generatedCode && (
             <div style={{ fontSize: 9, color: '#ffa726', padding: '5px 8px', background: 'rgba(255,167,38,0.08)', border: '1px solid rgba(255,167,38,0.3)', borderRadius: 6 }}>
               ⚠️ The graph has changed since the last generation — click Generate to update the output.
             </div>
           )}
 
-          {/* Generate button */}
           <button
             onClick={handleGenerate}
             disabled={nodes.length === 0}
@@ -1003,7 +971,6 @@ const GenerateCodePanel: React.FC<{
             {generateLabel}
           </button>
 
-          {/* Code preview + copy/export */}
           {generatedCode && !hasErrors && (
             <>
               <div style={{ background: '#0d1117', border: `1px solid ${isDirty ? 'rgba(255,167,38,0.3)' : 'rgba(168,85,247,0.3)'}`, borderRadius: 8, padding: 10, maxHeight: 140, overflowY: 'auto' }}>
@@ -1088,7 +1055,7 @@ const NodeEditor: React.FC<{
     const trimmedLabel = label.trim();
     if (!trimmedLabel) {
       labelRef.current?.focus();
-      return; // don't save an empty label
+      return;
     }
     onSave(trimmedLabel, code.trim());
   };
@@ -1108,14 +1075,12 @@ const NodeEditor: React.FC<{
         }}
         style={{ background: '#13181f', border: `1px solid ${accent}44`, borderTop: `3px solid ${accent}`, borderRadius: 14, width: 460, boxShadow: `0 24px 64px rgba(0,0,0,0.85), 0 0 0 1px ${accent}18`, animation: 'editorSlideIn 0.18s ease-out', overflow: 'hidden' }}
       >
-        {/* Header */}
         <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '13px 20px', background: `${accent}0c`, borderBottom: `1px solid ${accent}1e` }}>
           <div style={{ width: 9, height: 9, borderRadius: '50%', background: accent, boxShadow: `0 0 8px ${accent}bb`, flexShrink: 0 }} />
           <div style={{ fontSize: 11, fontWeight: 700, color: accent, textTransform: 'uppercase', letterSpacing: '1.2px', fontFamily: "'IBM Plex Mono', monospace", flex: 1 }}>{title}</div>
           <div style={{ fontSize: 10, color: '#3d444d', fontFamily: "'IBM Plex Mono', monospace" }}>Ctrl+Enter to save · Esc to cancel</div>
         </div>
 
-        {/* Fields */}
         <div style={{ padding: 20, display: 'flex', flexDirection: 'column', gap: 16 }}>
           <div>
             <label style={{ display: 'block', fontSize: 10, fontWeight: 700, color: '#6e7681', textTransform: 'uppercase', letterSpacing: '0.8px', marginBottom: 7, fontFamily: "'IBM Plex Mono', monospace" }}>
@@ -1155,7 +1120,6 @@ const NodeEditor: React.FC<{
           )}
         </div>
 
-        {/* Footer */}
         <div style={{ display: 'flex', gap: 10, padding: '14px 20px', background: '#0d1117', borderTop: '1px solid #1e242c' }}>
           <button
             onClick={handleSave}
@@ -1207,14 +1171,12 @@ const EdgeLabelEditor: React.FC<{
         }}
         style={{ background: 'linear-gradient(135deg,#0d1117,#161b22)', border: '2px solid #64b5f6', borderRadius: 14, padding: 20, width: 320, boxShadow: '0 20px 60px rgba(0,0,0,0.85), 0 0 30px rgba(100,181,246,0.2)', animation: 'editorSlideIn 0.18s ease-out' }}
       >
-        {/* Header */}
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 14 }}>
           <div style={{ width: 8, height: 8, borderRadius: '50%', background: '#64b5f6', boxShadow: '0 0 8px #64b5f6' }} />
           <div style={{ fontSize: 11, fontWeight: 700, color: '#64b5f6', textTransform: 'uppercase', letterSpacing: '1px' }}>Label This Edge</div>
           <div style={{ marginLeft: 'auto', fontSize: 10, color: '#484f58' }}>Enter to save · Esc to cancel</div>
         </div>
 
-        {/* Quick-pick buttons */}
         <div style={{ display: 'flex', gap: 6, marginBottom: 12 }}>
           {QUICK_LABELS.map(ql => (
             <button
@@ -1230,7 +1192,6 @@ const EdgeLabelEditor: React.FC<{
           ))}
         </div>
 
-        {/* Custom label input */}
         <div style={{ display: 'flex', gap: 8 }}>
           <input
             ref={inputRef}
@@ -1269,45 +1230,48 @@ const EdgeLabelEditor: React.FC<{
 // §7  MAIN FlowGraph COMPONENT
 // ─────────────────────────────────────────────────────────────────────────────
 
-// Safety cap — above this, we still render, but we warn the user and defer ELK
 const MAX_NODES_SAFE = 200;
 
 const FlowGraphInner: React.FC<Props> = ({
-  cfg, safetyChecks = [], onNodeClick,
-  isDrawerOpen = false, onGraphChange, onCodeGenerated,
+  cfg,
+  // FIX: do NOT use = [] here — that creates a new array reference on every
+  // render, causing the useEffect([cfg, safetyChecks]) dependency to always
+  // fire, which calls setEdges, which triggers another render, infinite loop.
+  // Instead we resolve to EMPTY_SAFETY_CHECKS (stable module-level constant).
+  safetyChecks,
+  onNodeClick,
+  isDrawerOpen = false,
+  onGraphChange,
+  onCodeGenerated,
 }) => {
+  // Resolve to stable empty array if prop is undefined/null
+  const stableSafetyChecks = safetyChecks ?? EMPTY_SAFETY_CHECKS;
+
   const [nodes, setNodes]                 = useState<Node<ExtendedNodeData>[]>([]);
   const [edges, setEdges]                 = useState<Edge[]>([]);
-  // Lock semantics: when true, nodes are frozen in place AND panning is disabled.
-  // Zoom (wheel / pinch / +/- buttons) stays enabled so the user can still
-  // inspect large graphs without accidentally moving nodes.
   const [isLocked, setIsLocked]           = useState(false);
+  const [showPanel, setShowPanel]         = useState(true);
   const [hoverInfo, setHoverInfo]         = useState<string | null>(null);
   const [mousePos,  setMousePos]          = useState({ x: 0, y: 0 });
   const [editState,     setEditState]     = useState<EditState | null>(null);
   const [edgeEditState, setEdgeEditState] = useState<EdgeEditState | null>(null);
   const [isDirty, setIsDirty]             = useState(false);
 
-  // Used by mid-segment anchoring to convert screen → flow coordinates
   const { screenToFlowPosition } = useReactFlow();
 
   // ── Mid-segment anchoring ──────────────────────────────────────────────────
-  // Alt+Click on any edge inserts a Junction node at the click point and splits
-  // the edge: original_source → junction → original_target. The user can then
-  // draw new edges from the junction to achieve edge-to-point connections.
   const handleEdgeClick = useCallback((evt: React.MouseEvent, edge: Edge) => {
-    if (!evt.altKey) return; // regular click falls through to double-click handler
+    if (!evt.altKey) return;
     evt.preventDefault();
     evt.stopPropagation();
 
-    // Place the junction at the cursor position in flow coordinates
     const flowPos = screenToFlowPosition({ x: evt.clientX, y: evt.clientY });
     const junctionId = `junction-${Date.now()}`;
 
     const junctionNode: Node<ExtendedNodeData> = {
       id:   junctionId,
       type: 'junction',
-      position: { x: flowPos.x - 18, y: flowPos.y - 18 }, // centre on cursor
+      position: { x: flowPos.x - 18, y: flowPos.y - 18 },
       data: {
         id:    junctionId,
         type:  'process',
@@ -1337,7 +1301,6 @@ const FlowGraphInner: React.FC<Props> = ({
                          labelBgStyle: { fill: '#0d1117', fillOpacity: 0.9 },
                          labelBgPadding: [5, 8] as [number, number] };
 
-    // Edge A: original source → junction (inherits original label so user sees it)
     const edgeA: Edge = {
       id:     `${junctionId}-a`,
       source: edge.source,
@@ -1346,7 +1309,6 @@ const FlowGraphInner: React.FC<Props> = ({
       label:  edge.label ?? '',
       ...sharedOpts,
     };
-    // Edge B: junction → original target (no label needed, fresh segment)
     const edgeB: Edge = {
       id:     `${junctionId}-b`,
       source: junctionId,
@@ -1357,7 +1319,6 @@ const FlowGraphInner: React.FC<Props> = ({
 
     setNodes(nds => [...nds, junctionNode]);
     setEdges(eds => {
-      // Remove the original edge, insert the two replacement segments
       const next = [...eds.filter(e => e.id !== edge.id), edgeA, edgeB];
       setNodes(nds2 => { onGraphChange?.(nds2, next); return nds2; });
       return next;
@@ -1462,7 +1423,6 @@ const FlowGraphInner: React.FC<Props> = ({
       return [...current, newNode];
     });
 
-    // Open the editor after the node is in state
     setTimeout(() => {
       setNodes(current => {
         const node = current.find(n => n.id === id);
@@ -1485,10 +1445,6 @@ const FlowGraphInner: React.FC<Props> = ({
   // ── React Flow change handlers ─────────────────────────────────────────────
 
   const onNodesChangeHandler = useCallback((changes: NodeChange<Node<ExtendedNodeData>>[]) => {
-    // Structural changes (add / remove / drag-end) are the only ones that
-    // should bubble up via onGraphChange + isDirty. Mid-drag position updates,
-    // selection flips, and dimension recalcs must NOT round-trip state or the
-    // canvas jitters on large graphs.
     const structural = changes.some((c: NodeChange<Node<ExtendedNodeData>>) =>
       c.type === 'add' ||
       c.type === 'remove' ||
@@ -1537,6 +1493,7 @@ const FlowGraphInner: React.FC<Props> = ({
     setNodes(current =>
       current.map(n => n.id === node.id ? { ...n, data: { ...n.data, visited: true } } : n)
     );
+    // FIX: use stableSafetyChecks (not the raw prop) so this closure stays stable
     const cfgNode = cfg?.nodes.find(n => n.id === node.id);
     if (cfgNode?.line != null && onNodeClick) onNodeClick(cfgNode.line);
   }, [cfg, onNodeClick]);
@@ -1544,23 +1501,26 @@ const FlowGraphInner: React.FC<Props> = ({
   // ── Analysis mode: build graph from CFG with ELK layout ───────────────────
 
   useEffect(() => {
-    if (!cfg?.nodes?.length) return;
-
-    // New CFG starts with all nodes unexplored.
+    if (!cfg?.nodes?.length) {
+      setNodes([]);
+      setEdges([]);
+      return;
+    }
 
     const inferNodeType = (node: ControlFlowNode): FlowNodeType => {
-      const lbl = String(node.label ?? '').toLowerCase();
-      const code = String(node.code ?? '').toLowerCase();
+      const lbl  = String(node.label ?? '').toLowerCase();
+      const code = String(node.code  ?? '').toLowerCase();
 
-      // Honor authoritative types from the CFG generator first — these are
-      // produced by the AST visitor and are more reliable than label
-      // pattern-matching, especially for `Func: main` / `Return` / etc.
       if (node.type === 'start' || node.type === 'end') return 'terminator';
       if (node.type === 'decision')                     return 'decision';
       if (node.type === 'output')                       return 'io';
       if (node.type === 'input')                        return 'manual_input';
+      if (node.type === 'process')                      return 'process';
+      if (node.type === 'junction')                     return 'junction';
+      if (node.type === 'connector')                    return 'connector';
+      if (node.type === 'off_page_connector')           return 'off_page_connector';
+      if (node.type === 'predefined')                   return 'predefined';
 
-      // Label/code-based inference for plain process nodes
       if (lbl === 'start' || lbl === 'end')                                    return 'terminator';
       if (code.includes('cin')    || code.includes('scanf')
        || lbl.includes('cin')     || lbl.includes('scanf'))                    return 'manual_input';
@@ -1579,10 +1539,6 @@ const FlowGraphInner: React.FC<Props> = ({
       return 'process';
     };
 
-    // Robustness guards before rendering:
-    //  1. Dedupe node IDs (bad back-end output can produce collisions that crash React keys)
-    //  2. Cap node count so massive graphs don't freeze the browser
-    //  3. Drop edges referencing non-existent nodes
     const seenIds = new Set<string>();
     const safeNodes = cfg.nodes.filter(n => {
       if (!n?.id) return false;
@@ -1590,7 +1546,7 @@ const FlowGraphInner: React.FC<Props> = ({
       seenIds.add(n.id);
       return true;
     });
-    const hardCap = MAX_NODES_SAFE * 5; // absolute ceiling — we warn at MAX_NODES_SAFE already
+    const hardCap = MAX_NODES_SAFE * 5;
     const capped = safeNodes.length > hardCap ? safeNodes.slice(0, hardCap) : safeNodes;
     const nodeIdSet = new Set(capped.map(n => n.id));
 
@@ -1599,7 +1555,8 @@ const FlowGraphInner: React.FC<Props> = ({
       type: inferNodeType(node),
       data: {
         ...node,
-        violation: safetyChecks.some(c => c.line === node.line && c.status === 'UNSAFE'),
+        // FIX: use stableSafetyChecks here — same stable reference every render
+        violation: stableSafetyChecks.some(c => c.line === node.line && c.status === 'UNSAFE'),
         visited:   false,
         onHover:   setHoverInfo,
         onEdit:    handleOpenEdit,
@@ -1611,7 +1568,8 @@ const FlowGraphInner: React.FC<Props> = ({
     const validCfgEdges = cfg.edges.filter(e => nodeIdSet.has(e.from) && nodeIdSet.has(e.to));
     const initialEdges: Edge[] = validCfgEdges.map((edge, i) => {
       const target       = capped.find(n => n.id === edge.to);
-      const hasViolation = target && safetyChecks.some(c => c.line === target.line && c.status === 'UNSAFE');
+      // FIX: use stableSafetyChecks here too
+      const hasViolation = target && stableSafetyChecks.some(c => c.line === target.line && c.status === 'UNSAFE');
       const isVisited    = false;
       const color = hasViolation ? '#ff4444' : isVisited ? '#4caf50' : '#64b5f6';
       return {
@@ -1625,6 +1583,9 @@ const FlowGraphInner: React.FC<Props> = ({
         labelBgPadding: [5, 8] as [number, number],
       };
     });
+
+    setNodes(initialNodes);
+    setEdges(initialEdges);
 
     elk.layout({
       id: 'root',
@@ -1666,15 +1627,17 @@ const FlowGraphInner: React.FC<Props> = ({
         setEdges(initialEdges);
         onGraphChange?.(fallback, initialEdges);
       });
-  }, [cfg, safetyChecks]); // eslint-disable-line react-hooks/exhaustive-deps
+  // FIX: depend on stableSafetyChecks (stable ref) instead of safetyChecks (new [] each render)
+  }, [cfg, stableSafetyChecks]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── Derived values ─────────────────────────────────────────────────────────
 
-  const totalNodes = nodes.length;
+  const totalNodes   = nodes.length;
   const visitedNodes = new Set(nodes.filter(n => n.data?.visited).map(n => n.id));
-  const safeNodes  = nodes.filter(n => {
+  const safeNodes    = nodes.filter(n => {
     const cfgNode = cfg?.nodes.find(cn => cn.id === n.id);
-    return !cfgNode || !safetyChecks.some(c => c.line === cfgNode.line && c.status === 'UNSAFE');
+    // FIX: use stableSafetyChecks consistently
+    return !cfgNode || !stableSafetyChecks.some(c => c.line === cfgNode.line && c.status === 'UNSAFE');
   }).length;
   const isBuildMode = !cfg;
 
@@ -1684,10 +1647,8 @@ const FlowGraphInner: React.FC<Props> = ({
       onMouseMove={e => setMousePos({ x: e.clientX + 15, y: e.clientY + 15 })}
       style={{ width: '100%', height: '100%', position: 'relative', background: '#0d1117' }}
     >
-      {/* Bottom-left: shape legend */}
       <FlowchartLegend isDrawerOpen={isDrawerOpen} />
 
-      {/* Top-left: exploration + safety stats (analysis mode only) */}
       {!isBuildMode && (
         <GameStats
           visitedNodes={visitedNodes}
@@ -1697,36 +1658,64 @@ const FlowGraphInner: React.FC<Props> = ({
         />
       )}
 
-      {/* Top-right: node palette + code generator — BUILD MODE ONLY */}
       {isBuildMode && (
-        <div style={{
-          position: 'absolute', top: 12, right: 12, zIndex: 1000,
-          width: 230,
-          display: 'flex', flexDirection: 'column', gap: 10,
-          maxHeight: 'calc(100vh - 130px)',
-          overflowY: 'auto', overflowX: 'visible',
-          scrollbarWidth: 'thin',
-          opacity:       isDrawerOpen ? 0.25 : 1,
-          filter:        isDrawerOpen ? 'blur(2px)' : 'none',
-          transition:    'all 0.3s ease',
-          pointerEvents: isDrawerOpen ? 'none' : 'auto',
-        }}>
-          <NodePalette
-            onAddNode={handleAddNode}
-            onClearCanvas={handleClearCanvas}
-            hasGeneratePanel
-          />
-          <GenerateCodePanel
-            nodes={nodes}
-            edges={edges}
-            onCodeGenerated={onCodeGenerated}
-            isDirty={isDirty}
-            onMarkClean={() => setIsDirty(false)}
-          />
-        </div>
+        <>
+          {/* Single toggle — always visible, controls the whole panel */}
+          <button
+            onClick={() => setShowPanel(v => !v)}
+            title={showPanel ? 'Hide tools panel' : 'Show tools panel'}
+            style={{
+              position: 'absolute', top: 12, right: 12, zIndex: 1001,
+              background: 'linear-gradient(135deg,rgba(13,17,23,0.98),rgba(22,27,34,0.98))',
+              border: '2px solid #30363d',
+              color: '#58a6ff',
+              padding: '7px 14px', borderRadius: 10,
+              fontSize: 11, fontWeight: 700, letterSpacing: 0.5, cursor: 'pointer',
+              fontFamily: "'IBM Plex Mono', monospace",
+              display: 'flex', alignItems: 'center', gap: 7,
+              boxShadow: '0 4px 16px rgba(0,0,0,0.4)',
+              transition: 'all 0.2s ease',
+              opacity:       isDrawerOpen ? 0.25 : 1,
+              filter:        isDrawerOpen ? 'blur(2px)' : 'none',
+              pointerEvents: isDrawerOpen ? 'none' : 'auto',
+            }}
+          >
+            <span style={{ fontSize: 13 }}>☰</span>
+            TOOLS
+            <span style={{ fontSize: 9, transition: 'transform 0.25s', transform: showPanel ? 'rotate(180deg)' : 'none' }}>▼</span>
+          </button>
+
+          {/* Collapsible tools panel */}
+          {showPanel && (
+            <div style={{
+              position: 'absolute', top: 52, right: 12, zIndex: 1000,
+              width: 230,
+              display: 'flex', flexDirection: 'column', gap: 10,
+              maxHeight: 'calc(100vh - 170px)',
+              overflowY: 'auto', overflowX: 'visible',
+              scrollbarWidth: 'thin',
+              opacity:       isDrawerOpen ? 0.25 : 1,
+              filter:        isDrawerOpen ? 'blur(2px)' : 'none',
+              transition:    'all 0.3s ease',
+              pointerEvents: isDrawerOpen ? 'none' : 'auto',
+            }}>
+              <NodePalette
+                onAddNode={handleAddNode}
+                onClearCanvas={handleClearCanvas}
+                hasGeneratePanel
+              />
+              <GenerateCodePanel
+                nodes={nodes}
+                edges={edges}
+                onCodeGenerated={onCodeGenerated}
+                isDirty={isDirty}
+                onMarkClean={() => setIsDirty(false)}
+              />
+            </div>
+          )}
+        </>
       )}
 
-      {/* Large-graph warning banner */}
       {nodes.length > MAX_NODES_SAFE && (
         <div style={{
           position: 'absolute', top: 12, left: '50%', transform: 'translateX(-50%)',
@@ -1740,12 +1729,11 @@ const FlowGraphInner: React.FC<Props> = ({
         </div>
       )}
 
-      {/* Lock/Unlock toggle — bottom-right, above the React Flow zoom controls */}
       <button
         onClick={() => setIsLocked(l => !l)}
         title={isLocked ? 'Unlock — re-enable drag & pan' : 'Lock — freeze nodes & pan (zoom stays on)'}
         style={{
-          position: 'absolute', bottom: 130, right: 12, zIndex: 1001,
+          position: 'absolute', bottom: 70, left: 12, zIndex: 1001,
           background: isLocked ? 'rgba(248,81,73,0.15)' : 'rgba(13,17,23,0.9)',
           border: `1px solid ${isLocked ? 'rgba(248,81,73,0.45)' : '#30363d'}`,
           color: isLocked ? '#f85149' : '#8b949e',
@@ -1761,7 +1749,6 @@ const FlowGraphInner: React.FC<Props> = ({
         {isLocked ? 'LOCKED' : 'UNLOCKED'}
       </button>
 
-      {/* React Flow canvas */}
       <ReactFlow
         nodes={nodes} edges={edges} nodeTypes={nodeTypes}
         onNodesChange={onNodesChangeHandler}
@@ -1773,8 +1760,6 @@ const FlowGraphInner: React.FC<Props> = ({
         fitView
         fitViewOptions={{ padding: 0.25, includeHiddenNodes: true, minZoom: 0.1, maxZoom: 1.0, duration: 800 }}
         nodesConnectable={isBuildMode && !isLocked} colorMode="dark"
-        /* Lock freezes node drag + pan, but zoom stays on so users can still
-           inspect large graphs. */
         nodesDraggable={isBuildMode && !isLocked}
         nodesFocusable={!isLocked}
         edgesFocusable={isBuildMode && !isLocked}
@@ -1784,7 +1769,6 @@ const FlowGraphInner: React.FC<Props> = ({
         selectionKeyCode={null}
         multiSelectionKeyCode="Shift"
         deleteKeyCode={isBuildMode && !isLocked ? 'Backspace' : null}
-        /* Zoom always works — lock only freezes position/pan. */
         zoomOnScroll
         zoomOnPinch
         zoomOnDoubleClick={false}
@@ -1800,7 +1784,6 @@ const FlowGraphInner: React.FC<Props> = ({
         />
       </ReactFlow>
 
-      {/* Empty-canvas hint */}
       {nodes.length === 0 && (
         <div style={{ position: 'absolute', inset: 0, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', pointerEvents: 'none', gap: 12 }}>
           <div style={{ fontSize: 48, opacity: 0.12 }}>{isBuildMode ? '🗂' : '📊'}</div>
@@ -1821,7 +1804,6 @@ const FlowGraphInner: React.FC<Props> = ({
         </div>
       )}
 
-      {/* Floating mentor tooltip */}
       {hoverInfo && (
         <div style={{ position: 'fixed', top: mousePos.y, left: mousePos.x, pointerEvents: 'none', zIndex: 9999, background: 'linear-gradient(135deg,#1e1e1e,#2d2d2d)', border: '2px solid #ffa726', borderRadius: 8, padding: 12, maxWidth: 300, boxShadow: '0 8px 24px rgba(0,0,0,0.6)', animation: 'fadeIn 0.2s ease-in-out' }}>
           <div style={{ color: '#ffa726', fontWeight: 'bold', fontSize: 10, textTransform: 'uppercase', marginBottom: 6, borderBottom: '1px solid #444', paddingBottom: 4 }}>💡 Mentor Tip</div>
@@ -1829,11 +1811,9 @@ const FlowGraphInner: React.FC<Props> = ({
         </div>
       )}
 
-      {/* Modals */}
       {editState     && <NodeEditor      editState={editState}     onSave={handleSaveEdit}      onCancel={() => setEditState(null)}     />}
       {edgeEditState && <EdgeLabelEditor editState={edgeEditState} onSave={handleSaveEdgeLabel} onCancel={() => setEdgeEditState(null)} />}
 
-      {/* Global CSS */}
       <style>{`
         @keyframes nodePulse     { 0%,100%{transform:scale(1)}      50%{transform:scale(1.04)} }
         @keyframes bounce        { 0%,100%{transform:translateY(0)}  50%{transform:translateY(-6px)} }
@@ -1852,9 +1832,6 @@ const FlowGraphInner: React.FC<Props> = ({
 };
 
 // ── Provider wrapper ──────────────────────────────────────────────────────────
-// useReactFlow() (used in FlowGraphInner for mid-segment anchoring) must be
-// called inside a ReactFlowProvider subtree. Wrapping here keeps the public
-// API unchanged — callers still import { FlowGraph }.
 export const FlowGraph: React.FC<Props> = (props) => (
   <ReactFlowProvider>
     <FlowGraphInner {...props} />

@@ -210,7 +210,7 @@ export class Translator {
     this.explanations.push(`${this.indent()}📢 **Function Announcement: '${name}'**`);
     this.explanations.push(`${this.indent()}   Parameters: ${params || 'none'}`);
     this.explanations.push(`${this.indent()}   Returns: ${node.returnType}`);
-    this.explanations.push(`${this.indent()}   💡 This is a forward declaration — the full code comes later.`);
+    this.pushTipOnce(`${this.indent()}   💡 This is a forward declaration — the full code comes later.`);
     this.explanations.push('');
   }
 
@@ -454,10 +454,10 @@ export class Translator {
   private visitLoopControl(node: any): void {
     if (node.value === 'break') {
       this.explanations.push(`${this.indent()}🛑 **break** — Exit the loop immediately`);
-      this.explanations.push(`${this.indent()}   💡 Like pulling an emergency stop cord.`);
+      this.pushTipOnce(`${this.indent()}   💡 Like pulling an emergency stop cord.`);
     } else if (node.value === 'continue') {
       this.explanations.push(`${this.indent()}⏭️  **continue** — Skip to the next loop iteration`);
-      this.explanations.push(`${this.indent()}   💡 Like skipping a song and going to the next one.`);
+      this.pushTipOnce(`${this.indent()}   💡 Like skipping a song and going to the next one.`);
     }
     this.explanations.push('');
   }
@@ -497,10 +497,20 @@ private visitCoutStatement(node: any): void {
 }
 
   private visitCinStatement(node: any): void {
-    const targetNames = node.targets
-      ? node.targets.map((t: any) =>
-          typeof t === 'string' ? t : this.cleanName(t.name),
-        ).join(', ')
+    // `node.targets` may be an array, a leaf (Identifier string / ArrayAccess),
+    // or a BinaryOp tree from chained `cin >> a >> b`. Flatten to a list.
+    const flatten = (n: any): any[] => {
+      if (n == null) return [];
+      if (Array.isArray(n)) return n.flatMap(flatten);
+      if (typeof n === 'string') return [n];
+      if (n.type === 'BinaryOp' && (n.operator === '>>' || n.operator === '<<')) {
+        return [...flatten(n.left), ...flatten(n.right)];
+      }
+      return [n];
+    };
+    const items = node.targets ? flatten(node.targets) : (node.target ? [node.target] : []);
+    const targetNames = items.length
+      ? items.map((t: any) => typeof t === 'string' ? t : this.cleanName(t.name)).join(', ')
       : 'a variable';
     this.explanations.push(`${this.indent()}⌨️  **Input from User**`);
     this.explanations.push(`${this.indent()}   Waits for keyboard input → stored in: ${targetNames}`);

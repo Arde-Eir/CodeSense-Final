@@ -84,7 +84,7 @@ export interface Quest {
   requiredxp:     number;
   sortorder:      number;
   isactive:       boolean;
-  question_type:  'drag_drop' | 'pop_balloon' | 'ordering' | 'multiple_choice' | null;
+  question_type:  'drag_drop' | 'pop_balloon' | 'ordering' | 'multiple_choice' | 'code_fill' | null;
   objectives:     string[] | null;
   hints:          HintItem[] | null;
 
@@ -118,8 +118,9 @@ export interface MissionProgress {
   completedat:          string | null;
   first_completed_at:   string | null;
   updatedat:            string | null;
-  xp_gained:            number;
-  completed_activities: ActivityTab[] | null;
+  xp_gained:                number;
+  completed_activities:     ActivityTab[] | null;
+  completion_time_seconds?: number | null;
 }
 
 // ─── Computed UI state for the dashboard ───────────────────────────────────

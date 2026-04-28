@@ -495,3 +495,33 @@ html, body, #root {
 .monaco-editor .selected-text {
   background-color: rgba(88, 166, 255, 0.3) !important;
 }
+
+.npc-layer {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  overflow: hidden;
+  z-index: 0;
+}
+
+/* Base NPC */
+.npc {
+  position: absolute;
+  width: 48px;
+  height: 48px;
+  background-size: contain;
+  background-repeat: no-repeat;
+  opacity: 0.25;
+  animation: npc-walk linear infinite;
+}
+
+/* Walking animation */
+@keyframes npc-walk {
+  0% {
+    transform: translateX(-60px);
+  }
+  100% {
+    transform: translateX(110vw);
+  }
+}
+

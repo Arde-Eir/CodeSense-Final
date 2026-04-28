@@ -420,7 +420,7 @@ export interface AnalysisError {
 
 export interface ControlFlowNode {
   id: string;
-  type: 'start' | 'end' | 'process' | 'decision' | 'input' | 'output';
+  type: 'start' | 'end' | 'process' | 'decision' | 'input' | 'output' | 'junction' | 'connector' | 'off_page_connector' | 'predefined';
   label: string;
   code?: string;
   line?: number;
@@ -471,13 +471,6 @@ export interface TutorialHint {
   xpCost: number;
 }
 
-export interface MissionProgress {
-  questId: string;
-  status: 'active' | 'completed' | 'locked';
-  attempts: number;
-  hintsUsed: number;
-  completedAt?: Date;
-}
 
 export interface LeaderboardEntry {
   playerName: string;
@@ -492,11 +485,11 @@ export interface LeaderboardEntry {
 // ============================================================================
 
 export const XP_LEVELS = {
-  1: { name: 'Squire', minXP: 0,     maxXP: 999   },
-  2: { name: 'Knight', minXP: 1000,  maxXP: 3999  },
-  3: { name: 'Lord',   minXP: 4000,  maxXP: 9999  },
-  4: { name: 'Duke',   minXP: 10000, maxXP: 24999 },
-  5: { name: 'King',   minXP: 25000, maxXP: Infinity },
+  1: { name: 'Squire', minXP: 0,       maxXP: 4999      },
+  2: { name: 'Knight', minXP: 5000,    maxXP: 19999     },
+  3: { name: 'Lord',   minXP: 20000,   maxXP: 74999     },
+  4: { name: 'Duke',   minXP: 75000,   maxXP: 249999    },
+  5: { name: 'King',   minXP: 250000,  maxXP: Infinity  },
 } as const
 
 export function getLevelName(level: 1 | 2 | 3 | 4 | 5): string {
@@ -504,26 +497,26 @@ export function getLevelName(level: 1 | 2 | 3 | 4 | 5): string {
 }
 
 export function getLevelProgress(totalXP: number): number {
-  if (totalXP >= 25000) return 100
-  if (totalXP >= 10000) return Math.floor(((totalXP - 10000) / 15000) * 100)
-  if (totalXP >= 4000)  return Math.floor(((totalXP - 4000)  / 6000)  * 100)
-  if (totalXP >= 1000)  return Math.floor(((totalXP - 1000)  / 3000)  * 100)
-  return Math.floor((totalXP / 1000) * 100)
+  if (totalXP >= 250000) return 100
+  if (totalXP >= 75000)  return Math.floor(((totalXP - 75000)  / 175000) * 100)
+  if (totalXP >= 20000)  return Math.floor(((totalXP - 20000)  / 55000)  * 100)
+  if (totalXP >= 5000)   return Math.floor(((totalXP - 5000)   / 15000)  * 100)
+  return Math.floor((totalXP / 5000) * 100)
 }
 
 export function getXPToNextLevel(totalXP: number): number | null {
-  if (totalXP >= 25000) return null
-  if (totalXP >= 10000) return 25000 - totalXP
-  if (totalXP >= 4000)  return 10000 - totalXP
-  if (totalXP >= 1000)  return 4000  - totalXP
-  return 1000 - totalXP
+  if (totalXP >= 250000) return null
+  if (totalXP >= 75000)  return 250000 - totalXP
+  if (totalXP >= 20000)  return 75000  - totalXP
+  if (totalXP >= 5000)   return 20000  - totalXP
+  return 5000 - totalXP
 }
 
 export function calculateLevel(totalXP: number): 1 | 2 | 3 | 4 | 5 {
-  if (totalXP >= 25000) return 5
-  if (totalXP >= 10000) return 4
-  if (totalXP >= 4000)  return 3
-  if (totalXP >= 1000)  return 2
+  if (totalXP >= 250000) return 5
+  if (totalXP >= 75000)  return 4
+  if (totalXP >= 20000)  return 3
+  if (totalXP >= 5000)   return 2
   return 1
 }
 

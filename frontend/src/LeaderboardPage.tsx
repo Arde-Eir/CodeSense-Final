@@ -17,6 +17,20 @@ interface Player {
   user_type: 'student' | 'professional' | null
 }
 
+interface SpeedRecord {
+  userid: string
+  questid: string
+  completion_time_seconds: number
+  users: Player | null
+  quests: { title: string } | null
+}
+
+const formatTime = (seconds: number): string => {
+  const m = Math.floor(seconds / 60)
+  const s = seconds % 60
+  return `${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`
+}
+
 type SortKey = 'xp' | 'level' | 'sandbox_runs' | 'recent'
 type FilterKey = 'all' | 'student' | 'professional'
 
@@ -56,6 +70,7 @@ const isRecentlyActive = (iso: string | null | undefined): boolean => {
 // ─── Player Detail Modal ─────────────────────────────────────────────────────
 const PlayerDetailModal: React.FC<{ player: Player; currentUserId?: string; onClose: () => void }> = ({ player, currentUserId, onClose }) => {
   const [questsCompleted, setQuestsCompleted] = useState<number | null>(null)
+  const [playerSpeed, setPlayerSpeed] = useState<{ questid: string; completion_time_seconds: number; quests: { title: string } | null }[]>([])
 
   useEffect(() => {
     const fetch = async () => {
@@ -63,6 +78,15 @@ const PlayerDetailModal: React.FC<{ player: Player; currentUserId?: string; onCl
         .from('mission_progress').select('*', { count: 'exact', head: true })
         .eq('userid', player.id).eq('status', 'completed')
       setQuestsCompleted(count ?? 0)
+
+      const { data: speedData } = await supabase
+        .from('mission_progress')
+        .select('questid, completion_time_seconds, quests(title)')
+        .eq('userid', player.id)
+        .not('completion_time_seconds', 'is', null)
+        .order('completion_time_seconds', { ascending: true })
+        .limit(5)
+      setPlayerSpeed((speedData as any[]) ?? [])
     }
     fetch()
   }, [player.id])
@@ -192,6 +216,24 @@ const PlayerDetailModal: React.FC<{ player: Player; currentUserId?: string; onCl
           🕒 Last active <b style={{ color: '#c9d1d9' }}>{timeAgo(player.lastactive)}</b>
         </div>
 
+        {/* Speed records */}
+        {playerSpeed.length > 0 && (
+          <div style={{ marginBottom: '18px' }}>
+            <div style={{ fontSize: '10px', color: '#484f58', letterSpacing: '1.5px', textTransform: 'uppercase' as const, marginBottom: '8px' }}>⚡ Fastest Completions</div>
+            {playerSpeed.map((r, i) => (
+              <div key={i} style={{ display: 'flex', alignItems: 'center', gap: '10px', padding: '7px 0', borderBottom: i < playerSpeed.length - 1 ? '1px solid #21262d' : 'none' }}>
+                <span style={{ color: '#484f58', fontSize: '11px', minWidth: 18, fontFamily: "'JetBrains Mono',monospace" }}>#{i + 1}</span>
+                <span style={{ flex: 1, fontSize: '12px', color: '#c9d1d9', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' as const }}>
+                  {(r.quests as any)?.title ?? r.questid}
+                </span>
+                <span style={{ fontSize: '12px', fontFamily: "'JetBrains Mono',monospace", color: '#3fb950', fontWeight: 700 }}>
+                  {formatTime(r.completion_time_seconds)}
+                </span>
+              </div>
+            ))}
+          </div>
+        )}
+
         <button
           onClick={onClose}
           style={{
@@ -227,6 +269,9 @@ export const LeaderboardPage: React.FC = () => {
   const [detailPlayer, setDetailPlayer] = useState<Player | null>(null)
   const [statsSummary, setStatsSummary] = useState({ totalPlayers: 0, avgXP: 0, topXP: 0, activeToday: 0 })
   const [shareMsg, setShareMsg] = useState('')
+  const [speedRecords, setSpeedRecords] = useState<SpeedRecord[]>([])
+  const [speedLoading, setSpeedLoading] = useState(false)
+  const [speedView, setSpeedView] = useState<'all' | 'best'>('best')
   const searchTimeout = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   // Override overflow:hidden from layout.css
@@ -235,6 +280,8 @@ export const LeaderboardPage: React.FC = () => {
     els.forEach(el => { if (el) el.style.overflow = 'auto' })
     return () => { els.forEach(el => { if (el) el.style.overflow = '' }) }
   }, [])
+
+  useEffect(() => { fetchSpeedRecords() }, [])
 
   useEffect(() => {
     fetchPlayers()
@@ -264,6 +311,23 @@ export const LeaderboardPage: React.FC = () => {
       .subscribe()
     return () => { supabase.removeChannel(channel) }
   }, [user?.id])
+
+  const fetchSpeedRecords = async () => {
+    setSpeedLoading(true)
+    try {
+      const { data } = await supabase
+        .from('mission_progress')
+        .select('userid, questid, completion_time_seconds, users(id, playername, totalxp, currentlevel, sandbox_runs, createdat, lastactive, charactertype, user_type), quests(title)')
+        .not('completion_time_seconds', 'is', null)
+        .order('completion_time_seconds', { ascending: true })
+        .limit(50)
+      setSpeedRecords((data as any[]) ?? [])
+    } catch (e) {
+      console.error('Speed records fetch error:', e)
+    } finally {
+      setSpeedLoading(false)
+    }
+  }
 
   const fetchStatsSummary = async () => {
     const { data } = await supabase.from('users').select('totalxp, lastactive').eq('isactive', true)
@@ -341,6 +405,16 @@ export const LeaderboardPage: React.FC = () => {
 
   // Memo: show podium only for XP-sort, first page, no search
   const showPodium = !searchQuery && page === 0 && sortKey === 'xp' && filterKey === 'all' && players.length >= 3
+
+  // "Best per quest" view: one entry per quest — the fastest time (data already sorted ASC).
+  const speedByQuest = useMemo(() => {
+    const seen = new Set<string>()
+    return speedRecords.filter(r => {
+      if (seen.has(r.questid)) return false
+      seen.add(r.questid)
+      return true
+    })
+  }, [speedRecords])
 
   const statChips = useMemo(() => ([
     { icon: '👥', value: statsSummary.totalPlayers.toLocaleString(),          label: 'Players',      color: '#64b5f6' },
@@ -724,6 +798,116 @@ export const LeaderboardPage: React.FC = () => {
             </span>
           </div>
         )}
+
+        {/* ── Speed Records ── */}
+        <div style={{ marginTop: '36px' }}>
+          {/* Header row */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '16px', flexWrap: 'wrap' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flex: 1 }}>
+              <span style={{ fontSize: '22px' }}>⚡</span>
+              <span style={{ color: '#e6edf3', fontSize: '18px', fontWeight: '800' }}>Speed Records</span>
+              {!speedLoading && speedRecords.length > 0 && (
+                <span style={{ fontSize: '12px', color: '#484f58' }}>· {speedView === 'best' ? `${speedByQuest.length} quests` : `${speedRecords.length} runs`}</span>
+              )}
+            </div>
+            {/* View toggle */}
+            <div style={{ display: 'flex', background: 'rgba(22,27,34,0.9)', border: '1px solid #21262d', borderRadius: '10px', padding: '3px', gap: '2px' }}>
+              {([{ key: 'best', label: '🏅 Best Per Quest' }, { key: 'all', label: '📋 All Runs' }] as const).map(v => {
+                const active = speedView === v.key
+                return (
+                  <button key={v.key} onClick={() => setSpeedView(v.key)} style={{
+                    padding: '6px 14px', borderRadius: '8px', border: 'none', cursor: 'pointer',
+                    background: active ? 'rgba(63,185,80,0.18)' : 'transparent',
+                    color: active ? '#3fb950' : '#8b949e',
+                    fontSize: '12px', fontWeight: 700, transition: 'all 0.15s', fontFamily: 'inherit',
+                  }}>
+                    {v.label}
+                  </button>
+                )
+              })}
+            </div>
+          </div>
+
+          {speedLoading ? (
+            <div style={{ padding: '48px', textAlign: 'center', color: '#8b949e', fontSize: '13px', background: 'rgba(22,27,34,0.9)', borderRadius: '14px', border: '1px solid #21262d' }}>
+              <div style={{ fontSize: '24px', marginBottom: '8px' }}>⏱</div>Loading records…
+            </div>
+          ) : speedRecords.length === 0 ? (
+            <div style={{ padding: '48px', textAlign: 'center', color: '#484f58', fontSize: '13px', background: 'rgba(22,27,34,0.9)', borderRadius: '14px', border: '1px solid #21262d' }}>
+              <div style={{ fontSize: '32px', marginBottom: '8px' }}>⏱</div>
+              No speed records yet — complete quests to appear here!
+            </div>
+          ) : (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+              {(speedView === 'best' ? speedByQuest : speedRecords).map((record, i) => {
+                const p = record.users as Player | null
+                const isMe = p?.id === user?.id
+                const timeColor = i === 0 ? '#ffd700' : i === 1 ? '#c0c0c0' : i === 2 ? '#cd7f32' : '#3fb950'
+                const leftAccent = i === 0 ? '#ffd700' : i === 1 ? '#c0c0c0' : i === 2 ? '#cd7f32' : isMe ? '#3fb950' : 'transparent'
+                return (
+                  <div key={`${record.userid}-${record.questid}-${i}`}
+                    onClick={() => p && setDetailPlayer(p)}
+                    style={{
+                      display: 'flex', alignItems: 'center', gap: '14px',
+                      padding: '14px 18px', borderRadius: '12px',
+                      background: isMe ? 'rgba(63,185,80,0.07)' : 'rgba(22,27,34,0.9)',
+                      border: `1px solid ${isMe ? 'rgba(63,185,80,0.3)' : '#21262d'}`,
+                      borderLeft: `3px solid ${leftAccent}`,
+                      cursor: p ? 'pointer' : 'default',
+                      transition: 'all 0.15s',
+                    }}
+                    onMouseEnter={e => { if (p) (e.currentTarget as HTMLElement).style.background = isMe ? 'rgba(63,185,80,0.13)' : 'rgba(255,255,255,0.05)' }}
+                    onMouseLeave={e => { (e.currentTarget as HTMLElement).style.background = isMe ? 'rgba(63,185,80,0.07)' : 'rgba(22,27,34,0.9)' }}
+                  >
+                    {/* Rank */}
+                    <div style={{ minWidth: 34, textAlign: 'center', flexShrink: 0 }}>
+                      {i < 3
+                        ? <span style={{ fontSize: '22px' }}>{(['🥇', '🥈', '🥉'] as const)[i]}</span>
+                        : <span style={{ fontSize: '13px', fontWeight: 700, color: '#484f58', fontFamily: "'JetBrains Mono',monospace" }}>#{i + 1}</span>}
+                    </div>
+
+                    {/* Avatar */}
+                    <div style={{
+                      width: 38, height: 38, borderRadius: '50%', flexShrink: 0,
+                      background: isMe ? 'linear-gradient(135deg,#4caf50,#2d7a2d)' : 'rgba(100,181,246,0.15)',
+                      border: `2px solid ${isMe ? 'rgba(76,175,80,0.5)' : 'rgba(100,181,246,0.2)'}`,
+                      display: 'flex', alignItems: 'center', justifyContent: 'center',
+                      fontSize: '15px', fontWeight: 700, color: isMe ? 'white' : '#64b5f6',
+                    }}>
+                      {p?.playername?.charAt(0).toUpperCase() ?? '?'}
+                    </div>
+
+                    {/* Player + Quest info */}
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '3px' }}>
+                        <span style={{ color: isMe ? '#4caf50' : '#e6edf3', fontSize: '13px', fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                          {p?.playername ?? '—'}
+                        </span>
+                        {isMe && <span style={{ fontSize: '10px', color: '#4caf50', fontWeight: 700, flexShrink: 0 }}>(you)</span>}
+                        {p?.user_type === 'professional' && <span style={{ fontSize: '10px', flexShrink: 0 }}>💼</span>}
+                      </div>
+                      <div style={{ color: '#484f58', fontSize: '11px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                        📋 {(record.quests as any)?.title ?? record.questid}
+                      </div>
+                    </div>
+
+                    {/* Time */}
+                    <div style={{ textAlign: 'right', flexShrink: 0 }}>
+                      <div style={{ fontSize: '18px', fontFamily: "'JetBrains Mono',monospace", color: timeColor, fontWeight: 800, letterSpacing: '-0.5px' }}>
+                        {formatTime(record.completion_time_seconds)}
+                      </div>
+                      <div style={{ fontSize: '10px', color: '#484f58', marginTop: '1px' }}>
+                        {record.completion_time_seconds}s total
+                      </div>
+                    </div>
+
+                    {p && <span style={{ fontSize: '12px', color: '#484f58', flexShrink: 0 }}>›</span>}
+                  </div>
+                )
+              })}
+            </div>
+          )}
+        </div>
       </div>
 
       {detailPlayer && (

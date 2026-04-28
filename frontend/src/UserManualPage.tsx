@@ -299,6 +299,10 @@ const SECTIONS: ManualSection[] = [
           rows={[
             [<span style={{ color: '#42a5f5' }}>● Blue terminator</span>,        'Start / End node — always exactly one Start in a valid graph.'],
             [<span style={{ color: '#ffa726' }}>◆ Orange diamond</span>,        'Decision — will have true/false outgoing edges.'],
+            [<span style={{ color: '#e040fb' }}>◇ Purple diamond (Junction)</span>, 'Merge point after if / switch / try-catch branches — auto-generated.'],
+            [<span style={{ color: '#26c6da' }}>● Teal circle (Connector)</span>,   'On-page reference — auto-generated for break / continue statements.'],
+            [<span style={{ color: '#ffca28' }}>⬠ Yellow pentagon (Off-page)</span>,'Cross-page reference — auto-generated for user-defined function calls.'],
+            [<span style={{ color: '#ab47bc' }}>▭ Purple rectangle (Predefined)</span>,'stdlib / unknown function call — auto-generated.'],
             [<span style={{ color: '#4caf50' }}>Green edge (animated)</span>,   'Path you have already visited by clicking its source node.'],
             [<span style={{ color: '#ff4444' }}>Red pulsing edge</span>,        'A rule fired on the target node — click it to jump to the source line.'],
             [<span style={{ color: '#64b5f6' }}>Blue edge</span>,                'Default, unvisited path.'],
@@ -333,30 +337,32 @@ const SECTIONS: ManualSection[] = [
     id: 'build-mode',
     icon: '🧩',
     title: 'Build Mode — Flowchart → C++',
-    summary: 'Ten ISO 5807 shapes, eleven validator rules, one compilable output.',
+    summary: 'Twelve ISO 5807 shapes, eleven validator rules, one compilable output.',
     content: (
       <>
         <p>
           Toggle <b>Build Mode</b> in the Sandbox (top of the editor panel). The
-          right side becomes an empty canvas with a shape palette. Drag shapes,
-          wire them, double-click to add code, then click{' '}
-          <b>⚡ GENERATE C++</b>.
+          right side becomes an empty canvas. Click <b>☰ TOOLS</b> (top-right) to
+          open the shape palette and code generator. Drag shapes onto the canvas,
+          wire them, double-click to add code, then click <b>⚡ GENERATE C++</b>.
         </p>
 
-        <h4 style={{ color: '#e6edf3', fontSize: 14, marginTop: 14, marginBottom: 6 }}>The ten ISO 5807 shapes</h4>
+        <h4 style={{ color: '#e6edf3', fontSize: 14, marginTop: 14, marginBottom: 6 }}>The twelve ISO 5807 shapes</h4>
         <DataTable
-          headers={['SHAPE', 'NAME', 'USED FOR']}
+          headers={['SHAPE', 'NAME', 'USED FOR / AUTO-GENERATED FROM']}
           rows={[
-            [<span style={{ color: '#42a5f5' }}>◯</span>, 'Terminator',    'Start / End. Every graph needs exactly one Start and at least one End.'],
-            [<span style={{ color: '#4caf50' }}>▭</span>, 'Process',       'Assignments, expressions, general statements.'],
-            [<span style={{ color: '#ffa726' }}>◆</span>, 'Decision',       'if / while conditions. Must have true/false outgoing edges.'],
-            [<span style={{ color: '#64b5f6' }}>▱</span>, 'I/O',            'Generic output — defaults to cout.'],
-            [<span style={{ color: '#ab47bc' }}>▭</span>, 'Predefined',     'Named function call.'],
-            [<span style={{ color: '#26c6da' }}>●</span>, 'Connector',      'A/B labels to bridge parts of a large flow without crossing lines.'],
-            [<span style={{ color: '#ef5350' }}>▭</span>, 'Document',       'Write to file / generate a report.'],
-            [<span style={{ color: '#ff7043' }}>▱</span>, 'Manual Input',   'cin / user input.'],
-            [<span style={{ color: '#78909c' }}>◗</span>, 'Delay',          'sleep_for / wait.'],
-            [<span style={{ color: '#66bb6a' }}>⚉</span>, 'Database',       'Array / vector / map access.'],
+            [<span style={{ color: '#42a5f5' }}>◯</span>, 'Terminator',        'Start / End. Every graph needs exactly one Start and at least one End.'],
+            [<span style={{ color: '#4caf50' }}>▭</span>, 'Process',           'Assignments, expressions, general statements.'],
+            [<span style={{ color: '#ffa726' }}>◆</span>, 'Decision',          'if / while / for conditions. Must have true/false outgoing edges.'],
+            [<span style={{ color: '#64b5f6' }}>▱</span>, 'I/O',               'Generic output — defaults to cout.'],
+            [<span style={{ color: '#ab47bc' }}>▭</span>, 'Predefined',        'stdlib / unknown function call (auto from code analysis).'],
+            [<span style={{ color: '#26c6da' }}>●</span>, 'Connector',         'On-page reference. Auto-generated for break / continue statements.'],
+            [<span style={{ color: '#ffca28' }}>⬠</span>, 'Off-page Connector','Cross-page reference. Auto-generated for user-defined function calls.'],
+            [<span style={{ color: '#ef5350' }}>▭</span>, 'Document',          'Write to file / generate a report.'],
+            [<span style={{ color: '#ff7043' }}>▱</span>, 'Manual Input',      'cin / user input.'],
+            [<span style={{ color: '#78909c' }}>◗</span>, 'Delay',             'sleep_for / wait.'],
+            [<span style={{ color: '#66bb6a' }}>⚉</span>, 'Database',          'Array / vector / map access.'],
+            [<span style={{ color: '#e040fb' }}>◇</span>, 'Junction',          'Merge point after if/switch/try branches. Auto-generated from analysis.'],
           ]}
         />
 
@@ -429,11 +435,11 @@ const SECTIONS: ManualSection[] = [
         <DataTable
           headers={['LEVEL', 'RANK', 'XP NEEDED', 'ICON']}
           rows={[
-            ['1', <span style={{ color: '#8b949e', fontWeight: 700 }}>Squire</span>, '0',      '🛡️'],
-            ['2', <span style={{ color: '#58a6ff', fontWeight: 700 }}>Knight</span>, '1,000',  '⚔️'],
-            ['3', <span style={{ color: '#a371f7', fontWeight: 700 }}>Lord</span>,   '4,000',  '🌟'],
-            ['4', <span style={{ color: '#e3b341', fontWeight: 700 }}>Duke</span>,   '10,000', '👑'],
-            ['5', <span style={{ color: '#ffd700', fontWeight: 700 }}>King</span>,   '25,000', '🔱'],
+            ['1', <span style={{ color: '#8b949e', fontWeight: 700 }}>Squire</span>, '0',       '🛡️'],
+            ['2', <span style={{ color: '#58a6ff', fontWeight: 700 }}>Knight</span>, '5,000',   '⚔️'],
+            ['3', <span style={{ color: '#a371f7', fontWeight: 700 }}>Lord</span>,   '20,000',  '🌟'],
+            ['4', <span style={{ color: '#e3b341', fontWeight: 700 }}>Duke</span>,   '75,000',  '👑'],
+            ['5', <span style={{ color: '#ffd700', fontWeight: 700 }}>King</span>,   '250,000', '🔱'],
           ]}
         />
         <Callout color="#4caf50" icon="🎨" title="Cosmetic, not locked:">

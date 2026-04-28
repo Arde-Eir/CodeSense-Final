@@ -307,11 +307,11 @@ export const AdminPanel: React.FC = () => {
     setSaving(true)
     const [r1, r2] = await Promise.all([
       supabase.from('system_settings').upsert(
-        { key: 'maintenance_mode',    value: String(maintenanceOn) },
+        { key: 'maintenance_mode',    value: maintenanceOn,              updated_by: user.id },
         { onConflict: 'key' }
       ),
       supabase.from('system_settings').upsert(
-        { key: 'maintenance_message', value: maintenanceMsg },
+        { key: 'maintenance_message', value: maintenanceMsg || '',        updated_by: user.id },
         { onConflict: 'key' }
       ),
     ])
@@ -348,7 +348,8 @@ export const AdminPanel: React.FC = () => {
   const deleteAnnouncement = async (id: string, title: string) => {
     if (!user) return
     if (!window.confirm(`Delete "${title}"?`)) return
-    await supabase.from('announcements').delete().eq('id', id)
+    const { error } = await supabase.from('announcements').delete().eq('id', id)
+    if (error) { showToast(`Delete failed: ${error.message}`, 'error'); return }
     await writeAuditLog(user.id, 'announcement_delete', undefined, { title })
     showToast('Announcement deleted')
     await fetchAnnouncements()
@@ -512,7 +513,12 @@ export const AdminPanel: React.FC = () => {
                             <tbody>
                               {auditLogs.slice(0, 10).map(log => (
                                 <tr key={log.id}>
-                                  <td><span className="badge bg-blue-lt">{log.action}</span></td>
+                                  <td><span className={`badge bg-${
+                                    log.action.includes('ban')         ? 'red'    :
+                                    log.action.includes('admin')       ? 'purple' :
+                                    log.action.includes('maintenance') ? 'orange' :
+                                    log.action.includes('impersonat')  ? 'yellow' : 'blue'
+                                  }-lt`}>{log.action}</span></td>
                                   <td>{(log.admin as any)?.playername ?? log.admin_id?.slice(0, 8)}</td>
                                   <td>{(log.target as any)?.playername ?? (log.target_user_id ? log.target_user_id.slice(0, 8) : '—')}</td>
                                   <td className="text-muted">{fmt(log.created_at)}</td>
@@ -556,7 +562,7 @@ export const AdminPanel: React.FC = () => {
                       <thead>
                         <tr>
                           <th>Player</th><th>Email</th><th>Type</th><th>Level</th><th>XP</th>
-                          <th>Status</th><th>Joined</th><th>Actions</th>
+                          <th>Status</th><th>Joined</th><th>Last Active</th><th>Actions</th>
                         </tr>
                       </thead>
                       <tbody>
@@ -588,6 +594,7 @@ export const AdminPanel: React.FC = () => {
                               }
                             </td>
                             <td className="text-muted" style={{ fontSize: '11px' }}>{fmt(u.createdat)}</td>
+                            <td className="text-muted" style={{ fontSize: '11px' }}>{u.lastactive ? fmt(u.lastactive) : '—'}</td>
                             <td>
                               <div style={{ display: 'flex', gap: '4px', flexWrap: 'wrap' }}>
                                 {u.is_banned ? (
@@ -597,7 +604,8 @@ export const AdminPanel: React.FC = () => {
                                   <button className="btn btn-sm btn-danger" disabled={saving || u.id === user?.id}
                                     onClick={() => {
                                       const reason = window.prompt(`Ban reason for ${u.playername}:`)
-                                      if (reason !== null) banUser(u, reason)
+                                      if (reason !== null && reason.trim() !== '') banUser(u, reason.trim())
+                                      else if (reason !== null) alert('A ban reason is required.')
                                     }}>Ban</button>
                                 )}
                                 {u.id !== user?.id && (
@@ -615,7 +623,7 @@ export const AdminPanel: React.FC = () => {
                           </tr>
                         ))}
                         {filteredUsers.length === 0 && (
-                          <tr><td colSpan={8} className="text-center text-muted py-4">No users found</td></tr>
+                          <tr><td colSpan={9} className="text-center text-muted py-4">No users found</td></tr>
                         )}
                       </tbody>
                     </table>
@@ -652,7 +660,8 @@ export const AdminPanel: React.FC = () => {
                                 log.action.includes('ban') ? 'red' :
                                 log.action.includes('admin') ? 'purple' :
                                 log.action.includes('maintenance') ? 'orange' :
-                                log.action.includes('impersonat') ? 'yellow' : 'blue'
+                                log.action.includes('impersonat')  ? 'yellow' :
+                                log.action.includes('announcement') ? 'teal'   : 'blue'
                               }-lt`}>
                                 {log.action}
                               </span>
@@ -713,6 +722,9 @@ export const AdminPanel: React.FC = () => {
                         <button className="btn btn-primary" disabled={saving} onClick={saveMaintenance}>
                           {saving ? 'Saving…' : 'Save Settings'}
                         </button>
+                        <span id="maintenance-unsaved" style={{ fontSize: '11px', color: '#f76707', marginLeft: '10px', display: 'none' }}>
+                          ● Unsaved changes
+                        </span>
                       </div>
                     </div>
                   </div>

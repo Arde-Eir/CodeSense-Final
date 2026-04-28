@@ -14,12 +14,14 @@ interface Props {
 }
 
 const DragDropGameInner: React.FC<{ items: GameItem[]; zones: DropZone[]; onComplete: (score: number, total: number) => void }> = ({ items, zones, onComplete }) => {
-  const [dropped,   setDropped]   = React.useState<Record<string, string>>({});
-  const [dragOver,  setDragOver]  = React.useState<string | null>(null);
-  const [dragging,  setDragging]  = React.useState<string | null>(null);
-  const [checked,   setChecked]   = React.useState(false);
-  const [results,   setResults]   = React.useState<Record<string, boolean>>({});
-  const [submitted, setSubmitted] = React.useState(false);
+  const [dropped,       setDropped]       = React.useState<Record<string, string>>({});
+  const [dragOver,      setDragOver]      = React.useState<string | null>(null);
+  const [dragging,      setDragging]      = React.useState<string | null>(null);
+  const [checked,       setChecked]       = React.useState(false);
+  const [results,       setResults]       = React.useState<Record<string, boolean>>({});
+  const [submitted,     setSubmitted]     = React.useState(false);
+  // Shuffle term cards once on mount so each attempt has a randomized order.
+  const [shuffledItems] = React.useState(() => [...items].sort(() => Math.random() - 0.5));
 
   const usedIds   = new Set(Object.values(dropped));
   const allFilled = Object.keys(dropped).length >= zones.length;
@@ -54,7 +56,7 @@ const DragDropGameInner: React.FC<{ items: GameItem[]; zones: DropZone[]; onComp
       </div>
       <div style={{ display: 'flex', gap: 14, flex: 1, minHeight: 0, alignItems: 'flex-start' }}>
         <div style={{ width: 130, display: 'flex', flexDirection: 'column', gap: 10, flexShrink: 0 }}>
-          {items.map(item => {
+          {shuffledItems.map(item => {
             const used = usedIds.has(item.id);
             return (
               <div key={item.id} draggable={!used && !submitted}

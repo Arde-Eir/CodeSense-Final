@@ -10,12 +10,13 @@ import {
     TutorialHint 
 } from '../types';
 
-// Level Thresholds (Based on your Thesis methodology)
-const LEVEL_THRESHOLDS = {
-    1: 0,     // Squire (Beginner)
-    2: 100,   // Knight (Intermediate)
-    3: 300,   // Duke (Advanced)
-    4: 600    // Lord (Master)
+// Level Thresholds — must stay in sync with frontend/src/types/index.ts XP_LEVELS
+const LEVEL_THRESHOLDS: Record<number, number> = {
+    1: 0,       // Squire
+    2: 5000,    // Knight
+    3: 20000,   // Lord
+    4: 75000,   // Duke
+    5: 250000,  // King
 };
 
 export class GameEngine {
@@ -65,11 +66,11 @@ export class GameEngine {
         const totalXP = currentProfile.totalXP + earnedXP;
         let newLevel = currentProfile.currentLevel;
 
-        // Check thresholds
-        if (totalXP >= LEVEL_THRESHOLDS[4]) newLevel = 4;
+        if      (totalXP >= LEVEL_THRESHOLDS[5]) newLevel = 5;
+        else if (totalXP >= LEVEL_THRESHOLDS[4]) newLevel = 4;
         else if (totalXP >= LEVEL_THRESHOLDS[3]) newLevel = 3;
         else if (totalXP >= LEVEL_THRESHOLDS[2]) newLevel = 2;
-        else newLevel = 1;
+        else                                      newLevel = 1;
 
         return {
             newLevel,
@@ -84,9 +85,10 @@ export class GameEngine {
         switch (level) {
             case 1: return 'Squire';
             case 2: return 'Knight';
-            case 3: return 'Duke';
-            case 4: return 'Lord';
-            default: return 'Wanderer';
+            case 3: return 'Lord';
+            case 4: return 'Duke';
+            case 5: return 'King';
+            default: return 'Squire';
         }
     }
 

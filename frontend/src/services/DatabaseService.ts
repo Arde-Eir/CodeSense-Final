@@ -76,18 +76,98 @@ export const DatabaseService = {
       })
 
       if (error) {
-        const msg = error.message.toLowerCase()
+        const msg  = error.message.toLowerCase()
         const code = (error as any).code ?? ''
+
+        // ── EMAIL_TAKEN: all known Supabase variants ──────────────────────────
         if (
-          code === 'user_already_exists' ||
-          code === 'email_exists' ||
-          msg.includes('already registered') ||
-          msg.includes('already been registered')
+          code === 'user_already_exists'  ||
+          code === 'email_exists'         ||
+          msg.includes('already registered')      ||
+          msg.includes('already been registered') ||
+          msg.includes('email address is already') ||
+          msg.includes('user already exists')
         ) {
+          // FIX Bug 1: Check whether a users-table profile exists for this email.
+          // If it does NOT, the auth account is a zombie (trigger failed on a
+          // previous attempt). We surface a friendlier error so the user knows
+          // to contact support or try a different email, rather than being
+          // silently blocked by a phantom account.
+          const { data: existingProfile } = await supabase
+            .from('users')
+            .select('id')
+            .ilike('email', email.trim())
+            .maybeSingle()
+
+          if (!existingProfile) {
+            // Orphan auth account: public.users was deleted but auth.users still
+            // holds this email (e.g. manually deleted from the dashboard).
+            // Try to sign in with the supplied credentials — if it works we can
+            // recover by re-inserting the missing profile row.
+            const { data: recoveryData, error: recoveryErr } = await supabase.auth.signInWithPassword({
+              email,
+              password: secretCode,
+            })
+
+            if (!recoveryErr && recoveryData?.user) {
+              // Password matched — re-create the public.users profile.
+              const recoveredId = recoveryData.user.id
+              const { data: newProfile, error: insertErr } = await supabase
+                .from('users')
+                .insert({
+                  id:            recoveredId,
+                  playername:    playerName,
+                  email:         email,
+                  charactertype: 'squire',
+                  user_type:     userType,
+                  totalxp:       0,
+                  currentlevel:  1,
+                  createdat:     new Date().toISOString(),
+                  lastactive:    new Date().toISOString(),
+                })
+                .select()
+                .single()
+
+              if (insertErr) {
+                await supabase.auth.signOut()
+                throw new Error('SERVER_ERROR')
+              }
+
+              return {
+                id:            recoveredId,
+                playerName,
+                email,
+                secretCode:    '***',
+                characterType: 'squire',
+                userType,
+                totalXP:       0,
+                currentLevel:  1,
+                createdAt:     new Date(newProfile?.createdat ?? Date.now()),
+                lastActive:    new Date(),
+              } as ExplorerProfile
+            }
+
+            // Password didn't match — orphan belongs to someone else.
+            throw new Error('EMAIL_ORPHANED')
+          }
           throw new Error('EMAIL_TAKEN')
         }
-        if (code === '23505' || msg.includes('playername') || msg.includes('username')) {
+
+        // ── USERNAME_TAKEN ────────────────────────────────────────────────────
+        // FIX Bug 2: also catch generic 'duplicate key' messages that don't
+        // name the column explicitly.
+        if (
+          code === '23505'                         ||
+          msg.includes('playername')               ||
+          msg.includes('username')                 ||
+          msg.includes('duplicate key value')      ||
+          msg.includes('unique constraint')
+        ) {
           throw new Error('USERNAME_TAKEN')
+        }
+
+        if (msg.includes('database error saving new user') || msg.includes('unexpected_failure')) {
+          throw new Error('SERVER_ERROR')
         }
         throw new Error(error.message)
       }
@@ -98,9 +178,11 @@ export const DatabaseService = {
 
       const userId = data.user.id
 
-      // Poll up to 3 times (1s apart) for the trigger to create the row
+      // FIX Bug 3: Poll up to 5 times (1 s apart) for the DB trigger to create
+      // the profile row. If the row already exists when we attempt the fallback
+      // INSERT we treat that as success (not USERNAME_TAKEN).
       let profile: any = null
-      for (let attempt = 0; attempt < 3; attempt++) {
+      for (let attempt = 0; attempt < 5; attempt++) {
         await new Promise(r => setTimeout(r, 1000))
         const { data: row, error: rowErr } = await supabase
           .from('users')
@@ -129,17 +211,29 @@ export const DatabaseService = {
           .single()
 
         if (insertErr) {
-          if (insertErr.message.toLowerCase().includes('playername') ||
-              insertErr.code === '23505') {
-            throw new Error('USERNAME_TAKEN')
+          // FIX Bug 3b: if the row appeared between our last poll and the INSERT
+          // (race condition), fetch it instead of throwing USERNAME_TAKEN.
+          if (insertErr.code === '23505') {
+            const { data: racedRow } = await supabase
+              .from('users')
+              .select('*')
+              .eq('id', userId)
+              .maybeSingle()
+            if (racedRow) {
+              profile = racedRow
+            } else {
+              // Truly a duplicate playername from another account
+              throw new Error('USERNAME_TAKEN')
+            }
+          } else {
+            throw new Error(insertErr.message)
           }
-          throw new Error(insertErr.message)
+        } else {
+          profile = inserted
         }
-
-        profile = inserted
       }
 
-      await supabase
+      const { error: updateErr } = await supabase
         .from('users')
         .update({
           charactertype: 'squire',
@@ -149,12 +243,15 @@ export const DatabaseService = {
           currentlevel:  1,
         })
         .eq('id', userId)
+      if (updateErr) console.warn('Profile update after signup failed (non-fatal):', updateErr.message)
 
       return {
         id:            userId,
         playerName,
+        email,
         secretCode:    '***',
         characterType: 'squire',
+        userType,
         totalXP:       0,
         currentLevel:  1,
         createdAt:     new Date(profile?.createdat ?? Date.now()),
@@ -189,13 +286,13 @@ export const DatabaseService = {
       const { data: { session } } = await supabase.auth.getSession()
       if (!session?.user) return null
 
-      const { data: profile } = await supabase
+      const { data: profile, error: profileErr } = await supabase
         .from('users')
         .select('*')
         .eq('id', session.user.id)
         .single()
 
-      if (!profile) return null
+      if (profileErr || !profile) return null
       return mapProfile(profile)
 
     } catch (error) {
@@ -208,19 +305,20 @@ export const DatabaseService = {
 
   async addXP(userId: string, xpEarned: number): Promise<ExplorerProfile | null> {
     try {
-      const { data: current } = await supabase
+      const { data: current, error: currentErr } = await supabase
         .from('users')
         .select('totalxp, currentlevel, playername, charactertype, createdat')
         .eq('id', userId)
         .single()
 
-      if (!current) return null
+      if (currentErr || !current) return null
 
       const newTotal = (current.totalxp || 0) + xpEarned
-      let newLevel: 1 | 2 | 3 | 4 = 1
-      if      (newTotal >= 600) newLevel = 4
-      else if (newTotal >= 300) newLevel = 3
-      else if (newTotal >= 100) newLevel = 2
+      let newLevel: 1 | 2 | 3 | 4 | 5 = 1
+      if      (newTotal >= 250000) newLevel = 5
+      else if (newTotal >= 75000)  newLevel = 4
+      else if (newTotal >= 20000)  newLevel = 3
+      else if (newTotal >= 5000)   newLevel = 2
 
       const { data: updated } = await supabase
         .from('users')
