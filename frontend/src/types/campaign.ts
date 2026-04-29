@@ -80,6 +80,9 @@ export interface Quest {
   difficulty:     'easy' | 'medium' | 'hard' | null;
   level:          1 | 2 | 3 | null;
   phase:          Phase | null;
+  /** Discriminates campaign quests from other modes (e.g. 'sandbox'). Queried
+   *  via `.eq('mode', 'campaign')` in AdminPanel and elsewhere. */
+  mode:           'campaign' | 'sandbox' | string | null;
   basexp:         number;
   requiredxp:     number;
   sortorder:      number;

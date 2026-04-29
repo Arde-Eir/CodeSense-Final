@@ -12,6 +12,14 @@ export const WelcomePage: React.FC = () => {
 
   const playerName = isGuest ? 'Explorer' : (user?.playerName ?? 'Explorer')
 
+  // Redirect returning (non-guest) users who already have XP — they've been
+  // here before and shouldn't see the new-user welcome screen again.
+  useEffect(() => {
+    if (!isGuest && user && (user.totalXP ?? 0) > 0) {
+      navigate('/home', { replace: true })
+    }
+  }, [isGuest, user, navigate])
+
   useEffect(() => {
     const t = setTimeout(() => setVisible(true), 50)
     return () => {

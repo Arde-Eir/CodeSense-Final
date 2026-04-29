@@ -21,6 +21,7 @@ interface PlayerRow {
   totalxp: number
   currentlevel: number
   sandbox_runs: number
+  quests_completed: number   // ← pulled directly from users table
   createdat: string
   lastactive: string | null
   charactertype: string | null
@@ -49,7 +50,6 @@ export const PlayerDetailModal: React.FC<{
   onClose: () => void
 }> = ({ userId, currentUserId, onClose }) => {
   const [player, setPlayer] = useState<PlayerRow | null>(null)
-  const [questsCompleted, setQuestsCompleted] = useState<number | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
 
@@ -57,23 +57,38 @@ export const PlayerDetailModal: React.FC<{
     let cancelled = false
     const fetchAll = async () => {
       setLoading(true)
+
+      // Single query — quests_completed now lives on the users row (synced by DB trigger)
       const { data, error: err } = await supabase
         .from('users')
-        .select('id, playername, totalxp, currentlevel, sandbox_runs, createdat, lastactive, charactertype, user_type')
+        .select('id, playername, totalxp, currentlevel, sandbox_runs, quests_completed, createdat, lastactive, charactertype, user_type')
         .eq('id', userId)
         .maybeSingle()
+
       if (cancelled) return
+
       if (err || !data) {
         setError(err?.message ?? 'Could not load profile — likely blocked by RLS SELECT policy on users table.')
         setLoading(false)
         return
       }
+
+      // Fallback: if quests_completed column doesn't exist yet (pre-migration),
+      // count from mission_progress so the UI never shows stale zeros.
+      if ((data as any).quests_completed == null) {
+        const { count } = await supabase
+          .from('mission_progress')
+          .select('*', { count: 'exact', head: true })
+          .eq('userid', userId)
+          .eq('status', 'completed')
+        if (!cancelled) {
+          setPlayer({ ...data, quests_completed: count ?? 0 } as PlayerRow)
+          setLoading(false)
+        }
+        return
+      }
+
       setPlayer(data as PlayerRow)
-      const { count } = await supabase
-        .from('mission_progress').select('*', { count: 'exact', head: true })
-        .eq('userid', userId).eq('status', 'completed')
-      if (cancelled) return
-      setQuestsCompleted(count ?? 0)
       setLoading(false)
     }
     fetchAll()
@@ -205,9 +220,9 @@ export const PlayerDetailModal: React.FC<{
             {/* Stats grid */}
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '8px', marginBottom: '18px' }}>
               {[
-                { icon: '⭐', value: player.totalxp.toLocaleString(), label: 'Total XP',      color: '#ffc107' },
-                { icon: '🔬', value: player.sandbox_runs,             label: 'Analyses',      color: '#4caf50' },
-                { icon: '⚔️', value: questsCompleted ?? '…',           label: 'Quests done',   color: '#ffa726' },
+                { icon: '⭐', value: player.totalxp.toLocaleString(), label: 'Total XP',    color: '#ffc107' },
+                { icon: '🔬', value: player.sandbox_runs,             label: 'Analyses',    color: '#4caf50' },
+                { icon: '⚔️', value: player.quests_completed,          label: 'Quests done', color: '#ffa726' },
               ].map(s => (
                 <div key={s.label} style={{ background: 'rgba(255,255,255,0.03)', border: '1px solid #21262d', borderRadius: '10px', padding: '10px 6px', textAlign: 'center' }}>
                   <div style={{ fontSize: '18px', marginBottom: '3px' }}>{s.icon}</div>

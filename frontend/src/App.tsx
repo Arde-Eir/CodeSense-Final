@@ -1,6 +1,7 @@
-import React, { useEffect } from 'react';
+import React, { useEffect, useState } from 'react';
 import { BrowserRouter, Routes, Route, Navigate, useNavigate } from 'react-router-dom';
 import { AuthProvider, useAuth } from './components/AuthScreen';
+import { OnboardingWalkthrough, ONBOARD_KEY } from './components/OnboardingWalkthrough';
 import { HomeDashboard } from './HomeDashboard';
 import { SignupPage } from './Signuppage';
 import { LoginPage } from './Loginpage';
@@ -63,9 +64,18 @@ const ImpersonationBanner: React.FC = () => {
 };
 
 // ── Route guards ──────────────────────────────────────────────────────────────
+
+// Allows any session — both real accounts AND guest sessions.
 const ProtectedRoute: React.FC<{ children: React.ReactElement }> = ({ children }) => {
   const { isAuthenticated, isGuest } = useAuth();
   if (!isAuthenticated && !isGuest) return <Navigate to="/login" replace />;
+  return children;
+};
+
+// Requires a real account — guests are redirected to sign up.
+const AccountRoute: React.FC<{ children: React.ReactElement }> = ({ children }) => {
+  const { isAuthenticated, isGuest } = useAuth();
+  if (!isAuthenticated || isGuest) return <Navigate to="/signup" replace />;
   return children;
 };
 
@@ -78,10 +88,46 @@ const AdminRoute: React.FC<{ children: React.ReactElement }> = ({ children }) =>
   return children;
 };
 
+// ── Tour controller — lives outside <Routes> so the overlay persists across ──
+// all page navigations. Auto-shows for new accounts; responds to the global
+// 'cs-replay-tour' event dispatched by the profile-menu "Replay Welcome Tour"
+// button. Guests never see the tour.
+const TourController: React.FC = () => {
+  const { user, isGuest, isAdmin } = useAuth();
+  const [showTour, setShowTour] = useState(false);
+
+  // Auto-trigger for new users (localStorage key not yet set).
+  useEffect(() => {
+    if (!user || isGuest) return;
+    try {
+      if (localStorage.getItem(ONBOARD_KEY) !== 'done') {
+        const t = setTimeout(() => setShowTour(true), 800);
+        return () => clearTimeout(t);
+      }
+    } catch { /* localStorage unavailable */ }
+  }, [user?.id, isGuest]);
+
+  // Allow any page to trigger a replay via a custom event.
+  useEffect(() => {
+    const handler = () => { if (user && !isGuest) setShowTour(true); };
+    window.addEventListener('cs-replay-tour', handler);
+    return () => window.removeEventListener('cs-replay-tour', handler);
+  }, [user, isGuest]);
+
+  if (!showTour || !user || isGuest) return null;
+  return (
+    <OnboardingWalkthrough
+      isAdmin={isAdmin}
+      onFinish={() => setShowTour(false)}
+    />
+  );
+};
+
 export const App: React.FC = () => {
   return (
     <BrowserRouter>
       <AuthProvider>
+        <TourController />
         <ImpersonationBanner />
         <Routes>
           {/* Public Routes */}
@@ -93,18 +139,18 @@ export const App: React.FC = () => {
           <Route path="/manual" element={<UserManualPage />} />
           <Route path="/tutorials" element={<TutorialsPage />} />
 
-          {/* Protected Routes */}
-          <Route path="/home"     element={<ProtectedRoute><HomeDashboard /></ProtectedRoute>} />
-          <Route path="/progress" element={<ProtectedRoute><ProgressPage /></ProtectedRoute>} />
-          <Route path="/sandbox"  element={<ProtectedRoute><SandboxPage /></ProtectedRoute>} />
-          <Route path="/profile"  element={<ProtectedRoute><ProfileSettings /></ProtectedRoute>} />
+          {/* Protected Routes — guests allowed */}
+          <Route path="/home"    element={<ProtectedRoute><HomeDashboard /></ProtectedRoute>} />
+          <Route path="/sandbox" element={<ProtectedRoute><SandboxPage /></ProtectedRoute>} />
 
-          {/* Campaign Routes — CampaignInside handles all 3 phases (beginner /
-              intermediate / advanced). The old `/level/1` route was removed
-              because Level 1 is no longer special-cased. */}
-          <Route path="/campaign"               element={<ProtectedRoute><CampaignPage /></ProtectedRoute>} />
-          <Route path="/campaign/inside/:phase" element={<ProtectedRoute><CampaignInside /></ProtectedRoute>} />
-          <Route path="/lesson/:questId"        element={<ProtectedRoute><LessonActivity /></ProtectedRoute>} />
+          {/* Account-only Routes — guests are redirected to sign up */}
+          <Route path="/progress" element={<AccountRoute><ProgressPage /></AccountRoute>} />
+          <Route path="/profile"  element={<AccountRoute><ProfileSettings /></AccountRoute>} />
+
+          {/* Campaign Routes — account required to track progress */}
+          <Route path="/campaign"               element={<AccountRoute><CampaignPage /></AccountRoute>} />
+          <Route path="/campaign/inside/:phase" element={<AccountRoute><CampaignInside /></AccountRoute>} />
+          <Route path="/lesson/:questId"        element={<AccountRoute><LessonActivity /></AccountRoute>} />
 
           {/* Admin Route — only accessible to users with is_admin = true */}
           <Route path="/admin" element={<AdminRoute><AdminPanel /></AdminRoute>} />

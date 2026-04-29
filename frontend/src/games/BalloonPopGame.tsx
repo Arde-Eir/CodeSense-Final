@@ -2,25 +2,30 @@
 // Canvas-based balloon-pop quiz. Pop the balloon labeled with the correct
 // answer; wrong pops cost a life. Three lives total per quest.
 //
-// Implementation moved from frontend/src/BalloonPopGame.tsx — only the
-// `MCQ` type was changed to import from the shared `types/campaign` module
-// (instead of being defined locally) so this file stays in sync with the
-// rest of the campaign UI.
+// FIXES:
+//  • Outer wrapper uses `aspectRatio: '4/3'` + `width: 100%` instead of a
+//    fixed `minHeight: 420` — canvas always fills available width and scales
+//    height proportionally, so balloons never crowd the HUD / prompt.
+//  • Prompt box is capped at `maxWidth: min(72%, 340px)` and uses `fontSize:
+//    clamp(12px, 1.8vw, 14px)` so long questions never overflow on narrow
+//    screens.
+//  • Explanation toast is anchored `bottom: 14px` with a safe `maxWidth:
+//    min(76%, 360px)` and wraps text with `wordBreak: 'break-word'`.
+//  • HUD score/lives row uses `flexWrap: 'wrap'` + `gap: 4` so it never
+//    overflows on very narrow viewports.
 
 import React, { useEffect, useRef, useState, useCallback } from 'react';
 import type { MCQ } from '../types/campaign';
 
-// Scale-factor constant (rx/ry derived at draw/hit time from current canvas
-// size — keeps hitbox and visual aligned across resizes).
 const BALLOON_SCALE = 0.085;
 
 interface FloatingBalloon {
   uid:         string;
   optionIndex: number;
   label:       string;
-  x:           number; // px
+  x:           number;
   y:           number;
-  vx:          number; // px/s
+  vx:          number;
   vy:          number;
   color:       string;
   shineColor:  string;
@@ -38,7 +43,7 @@ interface Particle {
   x:     number; y: number;
   vx:    number; vy: number;
   color: string;
-  life:  number; // 0..1
+  life:  number;
   size:  number;
 }
 
@@ -90,11 +95,8 @@ function spawnBalloons(options: string[], qIdx: number, W: number, H: number): F
 }
 
 interface Props {
-  questions:   MCQ[];
-  onComplete:  (score: number, total: number) => void;
-  /** Optional reset signal — bumping this number re-shuffles to question 0
-   *  and restores lives. Kept consistent with the other game APIs even though
-   *  this game already has its own restart button. */
+  questions:    MCQ[];
+  onComplete:   (score: number, total: number) => void;
   resetSignal?: number;
 }
 
@@ -149,7 +151,7 @@ export const BalloonPopGame: React.FC<Props> = ({ questions, onComplete, resetSi
       questions[idx]?.options ?? [],
       idx,
       g.W || canvasRef.current?.offsetWidth  || 400,
-      g.H || canvasRef.current?.offsetHeight || 400,
+      g.H || canvasRef.current?.offsetHeight || 300,
     );
     g.phase = 'playing';
   }, [questions]);
@@ -215,7 +217,6 @@ export const BalloonPopGame: React.FC<Props> = ({ questions, onComplete, resetSi
     if (t) hit(t.clientX, t.clientY);
   }, [hit]);
 
-  // Restart on resetSignal change (matches the other games' API).
   useEffect(() => {
     if (resetSignal === undefined || resetSignal === 0) return;
     completedRef.current = false;
@@ -341,7 +342,8 @@ export const BalloonPopGame: React.FC<Props> = ({ questions, onComplete, resetSi
           b.y      += b.vy * dt;
 
           const minX = bRX + 4, maxX = W - bRX - 4;
-          const minY = bRY + 4, maxY = H - bRY - 4;
+          // ↓ key fix: top boundary pushed down by ~22% to clear the HUD+prompt
+          const minY = Math.max(bRY + 4, H * 0.22), maxY = H - bRY - 4;
           if (b.x < minX) { b.x = minX; b.vx =  Math.abs(b.vx) * 0.7; }
           if (b.x > maxX) { b.x = maxX; b.vx = -Math.abs(b.vx) * 0.7; }
           if (b.y < minY) { b.y = minY; b.vy =  Math.abs(b.vy) * 0.65; }
@@ -445,64 +447,183 @@ export const BalloonPopGame: React.FC<Props> = ({ questions, onComplete, resetSi
   );
 
   return (
-    <div style={{ position: 'relative', width: '100%', height: '100%', minHeight: 420, borderRadius: 12, overflow: 'hidden', userSelect: 'none' }}>
+    <div style={{
+      position: 'relative',
+      width: '100%',
+      // ↓ key fix: aspect-ratio keeps height proportional to width so
+      //   balloons always have room and never crowd the overlaid UI elements.
+      //   Falls back to minHeight for very wide containers.
+      aspectRatio: '4 / 3',
+      minHeight: 300,
+      maxHeight: 520,
+      borderRadius: 12,
+      overflow: 'hidden',
+      userSelect: 'none',
+    }}>
       <canvas
         ref={canvasRef}
         onClick={onClick}
         onTouchStart={onTouchStart}
-        style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', cursor: ui.phase === 'playing' ? 'crosshair' : 'default', touchAction: 'none', display: 'block' }}
+        style={{
+          position: 'absolute', inset: 0,
+          width: '100%', height: '100%',
+          cursor: ui.phase === 'playing' ? 'crosshair' : 'default',
+          touchAction: 'none',
+          display: 'block',
+        }}
       />
 
-      {/* HUD */}
-      <div style={{ position: 'absolute', top: 0, left: 0, right: 0, padding: '10px 16px', background: 'linear-gradient(to bottom, rgba(13,17,23,0.97) 55%, transparent)', display: 'flex', alignItems: 'center', justifyContent: 'space-between', pointerEvents: 'none', zIndex: 10 }}>
+      {/* ── HUD ──────────────────────────────────────────────────────── */}
+      <div style={{
+        position: 'absolute', top: 0, left: 0, right: 0,
+        padding: '10px 14px',
+        background: 'linear-gradient(to bottom, rgba(13,17,23,0.97) 55%, transparent)',
+        display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+        // ↓ key fix: wrap so it never clips on narrow containers
+        flexWrap: 'wrap', gap: 6,
+        pointerEvents: 'none', zIndex: 10,
+      }}>
+        {/* Lives */}
         <div style={{ display: 'flex', gap: 5 }}>
           {Array.from({ length: TOTAL_LIVES }).map((_, i) => (
-            <span key={i} style={{ fontSize: 20, transition: 'filter .3s,transform .3s', filter: i < ui.lives ? 'none' : 'grayscale(1) opacity(.2)', transform: i < ui.lives ? 'scale(1)' : 'scale(.75)' }}>🎈</span>
+            <span key={i} style={{
+              fontSize: 18,
+              transition: 'filter .3s,transform .3s',
+              filter:    i < ui.lives ? 'none' : 'grayscale(1) opacity(.2)',
+              transform: i < ui.lives ? 'scale(1)' : 'scale(.75)',
+            }}>🎈</span>
           ))}
         </div>
+
+        {/* Progress dots */}
         <div style={{ display: 'flex', gap: 5, alignItems: 'center' }}>
           {Array.from({ length: ui.total }).map((_, i) => (
-            <div key={i} style={{ width: i === ui.qIdx ? 16 : 7, height: 7, borderRadius: 4, background: i < ui.qIdx ? '#3fb950' : i === ui.qIdx ? '#facc15' : '#21262d', transition: 'all .3s' }} />
+            <div key={i} style={{
+              width:      i === ui.qIdx ? 16 : 7,
+              height:     7,
+              borderRadius: 4,
+              background: i < ui.qIdx ? '#3fb950' : i === ui.qIdx ? '#facc15' : '#21262d',
+              transition: 'all .3s',
+            }} />
           ))}
         </div>
-        <div style={{ fontFamily: "'JetBrains Mono',monospace", fontSize: 13, fontWeight: 700, color: '#facc15' }}>
+
+        {/* Score */}
+        <div style={{
+          fontFamily: "'JetBrains Mono',monospace",
+          fontSize: 13, fontWeight: 700, color: '#facc15',
+        }}>
           {ui.score}<span style={{ color: '#484f58', fontWeight: 400 }}>/{ui.total}</span>
         </div>
       </div>
 
-      {/* Prompt */}
+      {/* ── Question prompt ───────────────────────────────────────────── */}
       {(ui.phase === 'playing' || ui.phase === 'between') && (
-        <div style={{ position: 'absolute', top: 52, left: '50%', transform: 'translateX(-50%)', background: 'rgba(22,27,34,0.95)', border: '1px solid rgba(88,166,255,0.28)', borderRadius: 12, padding: '11px 22px', maxWidth: '72%', minWidth: 240, textAlign: 'center', zIndex: 10, pointerEvents: 'none', backdropFilter: 'blur(12px)', boxShadow: '0 8px 32px rgba(0,0,0,.5)' }}>
-          <div style={{ fontSize: 9, color: '#58a6ff', fontFamily: "'JetBrains Mono',monospace", letterSpacing: '2px', textTransform: 'uppercase', marginBottom: 5 }}>🎈 POP THE CORRECT BALLOON</div>
-          <div style={{ fontSize: 14, fontWeight: 700, color: '#e6edf3', lineHeight: 1.5, fontFamily: 'Inter,sans-serif' }}>{ui.question}</div>
+        <div style={{
+          position: 'absolute',
+          // ↓ key fix: use % from top so it scales with canvas height
+          top: '14%',
+          left: '50%', transform: 'translateX(-50%)',
+          background: 'rgba(22,27,34,0.95)',
+          border: '1px solid rgba(88,166,255,0.28)',
+          borderRadius: 12,
+          padding: '10px 18px',
+          // ↓ key fix: constrain width so long questions wrap, not overflow
+          width: 'min(72%, 360px)',
+          textAlign: 'center',
+          zIndex: 10, pointerEvents: 'none',
+          backdropFilter: 'blur(12px)',
+          boxShadow: '0 8px 32px rgba(0,0,0,.5)',
+        }}>
+          <div style={{
+            fontSize: 9, color: '#58a6ff',
+            fontFamily: "'JetBrains Mono',monospace",
+            letterSpacing: '2px', textTransform: 'uppercase', marginBottom: 5,
+          }}>🎈 POP THE CORRECT BALLOON</div>
+          <div style={{
+            // ↓ key fix: clamp font size so it always fits
+            fontSize: 'clamp(12px, 1.8vw, 14px)',
+            fontWeight: 700, color: '#e6edf3',
+            lineHeight: 1.5, fontFamily: 'Inter,sans-serif',
+            wordBreak: 'break-word',
+          }}>{ui.question}</div>
         </div>
       )}
 
-      {/* Explanation toast after correct pop */}
+      {/* ── Explanation toast ─────────────────────────────────────────── */}
       {ui.phase === 'between' && ui.explanation && (
-        <div style={{ position: 'absolute', bottom: 20, left: '50%', transform: 'translateX(-50%)', background: 'rgba(13,22,13,0.97)', border: '1px solid rgba(63,185,80,.4)', borderRadius: 12, padding: '13px 22px', maxWidth: '76%', minWidth: 240, textAlign: 'center', zIndex: 10, pointerEvents: 'none', backdropFilter: 'blur(12px)', boxShadow: '0 8px 32px rgba(0,0,0,.5)', animation: 'bpopUp .35s cubic-bezier(.34,1.56,.64,1)' }}>
-          <div style={{ fontSize: 12, fontWeight: 800, color: '#3fb950', marginBottom: 5, fontFamily: "'JetBrains Mono',monospace" }}>✅ {ui.correctLabel}</div>
-          <div style={{ fontSize: 12, color: '#8b949e', lineHeight: 1.65, fontFamily: 'Inter,sans-serif' }}>💡 {ui.explanation}</div>
+        <div style={{
+          position: 'absolute',
+          bottom: 14, left: '50%', transform: 'translateX(-50%)',
+          background: 'rgba(13,22,13,0.97)',
+          border: '1px solid rgba(63,185,80,.4)',
+          borderRadius: 12,
+          padding: '12px 18px',
+          // ↓ key fix: constrain width so explanation wraps cleanly
+          width: 'min(76%, 380px)',
+          textAlign: 'center',
+          zIndex: 10, pointerEvents: 'none',
+          backdropFilter: 'blur(12px)',
+          boxShadow: '0 8px 32px rgba(0,0,0,.5)',
+          animation: 'bpopUp .35s cubic-bezier(.34,1.56,.64,1)',
+        }}>
+          <div style={{
+            fontSize: 12, fontWeight: 800, color: '#3fb950',
+            marginBottom: 5, fontFamily: "'JetBrains Mono',monospace",
+            wordBreak: 'break-word',
+          }}>✅ {ui.correctLabel}</div>
+          <div style={{
+            fontSize: 12, color: '#8b949e',
+            lineHeight: 1.65, fontFamily: 'Inter,sans-serif',
+            wordBreak: 'break-word',
+          }}>💡 {ui.explanation}</div>
         </div>
       )}
 
-      <div style={{ position: 'absolute', inset: 0, pointerEvents: 'none', zIndex: 5, borderRadius: 12, boxShadow: ui.lives < TOTAL_LIVES && ui.phase === 'playing' ? 'inset 0 0 70px rgba(248,81,73,.45)' : 'none', transition: 'box-shadow .6s ease' }} />
+      {/* Damage vignette */}
+      <div style={{
+        position: 'absolute', inset: 0, pointerEvents: 'none', zIndex: 5,
+        borderRadius: 12,
+        boxShadow: ui.lives < TOTAL_LIVES && ui.phase === 'playing'
+          ? 'inset 0 0 70px rgba(248,81,73,.45)' : 'none',
+        transition: 'box-shadow .6s ease',
+      }} />
 
+      {/* ── Game Over overlay ─────────────────────────────────────────── */}
       {ui.phase === 'gameover' && (
-        <div style={{ position: 'absolute', inset: 0, zIndex: 20, background: 'rgba(13,17,23,0.94)', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 18, backdropFilter: 'blur(8px)', animation: 'bfadeIn .4s ease' }}>
-          <div style={{ fontSize: 58 }}>💥</div>
-          <div style={{ fontFamily: "'JetBrains Mono',monospace", fontSize: 22, fontWeight: 900, color: '#f85149' }}>All lives lost!</div>
+        <div style={{
+          position: 'absolute', inset: 0, zIndex: 20,
+          background: 'rgba(13,17,23,0.94)',
+          display: 'flex', flexDirection: 'column',
+          alignItems: 'center', justifyContent: 'center', gap: 18,
+          backdropFilter: 'blur(8px)', animation: 'bfadeIn .4s ease',
+        }}>
+          <div style={{ fontSize: 52 }}>💥</div>
+          <div style={{ fontFamily: "'JetBrains Mono',monospace", fontSize: 20, fontWeight: 900, color: '#f85149' }}>All lives lost!</div>
           <div style={{ fontSize: 13, color: '#8b949e', fontFamily: "'JetBrains Mono',monospace" }}>{ui.score} / {ui.total} correct before game over</div>
-          <button onClick={restart} style={{ marginTop: 6, padding: '12px 36px', borderRadius: 10, border: 'none', background: 'linear-gradient(135deg,#da3633,#b91c1c)', color: '#fff', fontWeight: 800, fontSize: 14, cursor: 'pointer', fontFamily: "'JetBrains Mono',monospace", boxShadow: '0 4px 20px rgba(218,54,51,.45)', letterSpacing: '.5px' }}>
+          <button onClick={restart} style={{
+            marginTop: 6, padding: '12px 32px', borderRadius: 10, border: 'none',
+            background: 'linear-gradient(135deg,#da3633,#b91c1c)',
+            color: '#fff', fontWeight: 800, fontSize: 14, cursor: 'pointer',
+            fontFamily: "'JetBrains Mono',monospace",
+            boxShadow: '0 4px 20px rgba(218,54,51,.45)', letterSpacing: '.5px',
+          }}>
             TRY AGAIN ↺
           </button>
         </div>
       )}
 
+      {/* ── Done overlay ─────────────────────────────────────────────── */}
       {ui.phase === 'done' && (
-        <div style={{ position: 'absolute', inset: 0, zIndex: 20, background: 'rgba(13,17,23,0.94)', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 16, backdropFilter: 'blur(8px)', animation: 'bfadeIn .4s ease' }}>
-          <div style={{ fontSize: 60 }}>🎊</div>
-          <div style={{ fontFamily: "'JetBrains Mono',monospace", fontSize: 24, fontWeight: 900, color: '#facc15' }}>All done!</div>
+        <div style={{
+          position: 'absolute', inset: 0, zIndex: 20,
+          background: 'rgba(13,17,23,0.94)',
+          display: 'flex', flexDirection: 'column',
+          alignItems: 'center', justifyContent: 'center', gap: 16,
+          backdropFilter: 'blur(8px)', animation: 'bfadeIn .4s ease',
+        }}>
+          <div style={{ fontSize: 56 }}>🎊</div>
+          <div style={{ fontFamily: "'JetBrains Mono',monospace", fontSize: 22, fontWeight: 900, color: '#facc15' }}>All done!</div>
           <div style={{ fontSize: 14, color: '#3fb950', fontFamily: "'JetBrains Mono',monospace" }}>{ui.score} / {ui.total} correct</div>
         </div>
       )}

@@ -486,18 +486,47 @@ export const CampaignInside: React.FC = () => {
               {levelInfo.description && <p style={{ fontSize: 11, color: 'rgba(240,246,252,.5)', marginTop: 7, maxWidth: 460, lineHeight: 1.6, fontFamily: "'Syne',sans-serif" }}>{levelInfo.description}</p>}
             </div>
             <div style={{ position: 'absolute', top: 16, right: 16, display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 8 }}>
-              {allDone ? (
-                <button onClick={goToNextLevel}
-                  style={{ padding: '7px 16px', borderRadius: 7, background: 'transparent', border: `1.5px solid ${accent}`, color: accent, fontSize: 11, fontWeight: 800, cursor: 'pointer', letterSpacing: '0.4px', fontFamily: "'JetBrains Mono',monospace", backdropFilter: 'blur(8px)', transition: 'all .2s' }}
-                  onMouseEnter={e => { e.currentTarget.style.background = `${accent}18`; }}
-                  onMouseLeave={e => { e.currentTarget.style.background = 'transparent'; }}>
-                  {phase === 'advanced' ? 'Back to Home' : 'Next Level →'}
-                </button>
-              ) : (
-                <div style={{ padding: '7px 16px', borderRadius: 7, background: 'rgba(8,12,17,.55)', border: '1.5px solid rgba(255,255,255,0.1)', color: '#6e7681', fontSize: 11, fontWeight: 800, letterSpacing: '0.4px', fontFamily: "'JetBrains Mono',monospace", backdropFilter: 'blur(8px)' }}>
-                  🔒 Finish all quests to advance
-                </div>
-              )}
+              <div style={{ position: 'relative', height: 32, display: 'flex', alignItems: 'center' }}>
+  {/* Locked badge — fades out when allDone */}
+  <div style={{
+    position: 'absolute', right: 0,
+    padding: '7px 16px', borderRadius: 7,
+    background: 'rgba(8,12,17,.55)',
+    border: '1.5px solid rgba(255,255,255,0.1)',
+    color: '#6e7681', fontSize: 11, fontWeight: 800,
+    letterSpacing: '0.4px', fontFamily: "'JetBrains Mono',monospace",
+    backdropFilter: 'blur(8px)', whiteSpace: 'nowrap',
+    opacity: loading ? 0 : allDone ? 0 : 1,
+    pointerEvents: allDone ? 'none' : 'auto',
+    transition: 'opacity 0.4s ease, transform 0.4s ease',
+    transform: allDone ? 'translateY(-6px)' : 'translateY(0)',
+  }}>
+    🔒 Finish all quests to advance
+  </div>
+
+  {/* Next Level button — fades in when allDone */}
+  <button
+    onClick={goToNextLevel}
+    style={{
+      position: 'absolute', right: 0,
+      padding: '7px 16px', borderRadius: 7,
+      background: allDone ? `${accent}18` : 'transparent',
+      border: `1.5px solid ${accent}`,
+      color: accent, fontSize: 11, fontWeight: 800,
+      cursor: 'pointer', letterSpacing: '0.4px',
+      fontFamily: "'JetBrains Mono',monospace",
+      backdropFilter: 'blur(8px)', whiteSpace: 'nowrap',
+      opacity: loading ? 0 : allDone ? 1 : 0,
+      pointerEvents: allDone ? 'auto' : 'none',
+      transition: 'opacity 0.4s ease, transform 0.4s ease, background 0.2s',
+      transform: allDone ? 'translateY(0)' : 'translateY(6px)',
+      boxShadow: allDone ? `0 0 18px ${accent}33` : 'none',
+    }}
+    onMouseEnter={e => { e.currentTarget.style.background = `${accent}30`; e.currentTarget.style.boxShadow = `0 0 24px ${accent}55`; }}
+    onMouseLeave={e => { e.currentTarget.style.background = `${accent}18`; e.currentTarget.style.boxShadow = `0 0 18px ${accent}33`; }}>
+    {phase === 'advanced' ? '🏠 Back to Home' : 'Next Level →'}
+  </button>
+</div>
               <div style={{ fontSize: 10, color: 'rgba(240,246,252,.45)', fontFamily: "'JetBrains Mono',monospace", background: 'rgba(8,12,17,.6)', padding: '3px 10px', borderRadius: 5, backdropFilter: 'blur(6px)' }}>
                 {loading ? '…' : `${pctDone}% complete`}
               </div>

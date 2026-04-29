@@ -4,7 +4,6 @@ import { useNavigate } from 'react-router-dom';
 import { useAuth } from './components/AuthScreen';
 import { supabase } from './services/supabase';
 import { getLevelProgress, getXPToNextLevel, getRank } from './types'
-import { OnboardingWalkthrough, ONBOARD_KEY } from './components/OnboardingWalkthrough'
 import { PlayerDetailModal } from './components/PlayerDetailModal'
 
 // ── Maintenance Banner ─────────────────────────────────────────────────────────
@@ -1055,7 +1054,6 @@ export const HomeDashboard: React.FC = () => {
 
   const [announcementsOpen, setAnnouncementsOpen] = useState(false)
   const [lastSnippet, setLastSnippet] = useState<{ sourcecode: string; createdat: string } | null>(null)
-  const [showOnboarding, setShowOnboarding] = useState(false)
   const [peekUserId, setPeekUserId] = useState<string | null>(null)
 
   const [searchQuery, setSearchQuery] = useState('')
@@ -1089,16 +1087,6 @@ export const HomeDashboard: React.FC = () => {
   }, [user?.id])
 
   useEffect(() => {
-    if (!user || isGuest) return
-    try {
-      if (localStorage.getItem(ONBOARD_KEY) !== 'done') {
-        const t = setTimeout(() => setShowOnboarding(true), 600)
-        return () => clearTimeout(t)
-      }
-    } catch { /* localStorage unavailable */ }
-  }, [user?.id, isGuest])
-
-  useEffect(() => {
     const handler = (e: MouseEvent) => {
       if (searchRef.current && !searchRef.current.contains(e.target as Node)) setSearchOpen(false)
     }
@@ -1120,13 +1108,13 @@ export const HomeDashboard: React.FC = () => {
   }, [])
 
   const QUICK_ACTIONS = [
-    { label: 'Sandbox Mode',         icon: '🔬', desc: 'Experiment freely with code',      path: '/sandbox',  keywords: ['sandbox','experiment','code','run','free'] },
-    { label: 'Campaign Mode',        icon: '⚔️', desc: 'Complete quests and earn XP',      path: '/campaign', keywords: ['campaign','quest','mission','learn','level'] },
-    { label: 'Progress Report',      icon: '📊', desc: 'View your stats and activity',     path: '/progress', keywords: ['progress','report','stats','activity','xp','chart'] },
-    { label: 'Profile Settings',     icon: '👤', desc: 'Edit your profile and avatar',     path: '/profile',  keywords: ['profile','avatar','settings','edit','account','image'] },
-    { label: 'Leaderboard',          icon: '🏆', desc: 'See top players ranking',          path: '/progress', keywords: ['leaderboard','rank','ranking','top','players'] },
-    { label: 'System Announcements', icon: '📢', desc: 'View latest updates and notices',  path: '',          keywords: ['announcement','announcements','news','update','notice','system'] },
-  ]
+    { label: 'Sandbox Mode',         icon: '🔬', desc: 'Experiment freely with code',      path: '/sandbox',  guestOk: true,  keywords: ['sandbox','experiment','code','run','free'] },
+    { label: 'Campaign Mode',        icon: '⚔️', desc: 'Complete quests and earn XP',      path: '/campaign', guestOk: false, keywords: ['campaign','quest','mission','learn','level'] },
+    { label: 'Progress Report',      icon: '📊', desc: 'View your stats and activity',     path: '/progress', guestOk: false, keywords: ['progress','report','stats','activity','xp','chart'] },
+    { label: 'Profile Settings',     icon: '👤', desc: 'Edit your profile and avatar',     path: '/profile',  guestOk: false, keywords: ['profile','avatar','settings','edit','account','image'] },
+    { label: 'Leaderboard',          icon: '🏆', desc: 'See top players ranking',          path: '/leaderboard', guestOk: true, keywords: ['leaderboard','rank','ranking','top','players'] },
+    { label: 'System Announcements', icon: '📢', desc: 'View latest updates and notices',  path: '',          guestOk: true,  keywords: ['announcement','announcements','news','update','notice','system'] },
+  ].filter(a => !isGuest || a.guestOk)
 
   const searchAbortRef = useRef<AbortController | null>(null)
 
@@ -1261,12 +1249,6 @@ export const HomeDashboard: React.FC = () => {
         />
       )}
 
-      {showOnboarding && (
-        <OnboardingWalkthrough
-          isAdmin={isAdmin}
-          onFinish={() => setShowOnboarding(false)}
-        />
-      )}
       {peekUserId && (
         <PlayerDetailModal
           userId={peekUserId}
@@ -1364,7 +1346,7 @@ export const HomeDashboard: React.FC = () => {
                   {searchResults.quests.map((q: any) => {
                     const pc = q.phase === 'beginner' ? '#4caf50' : q.phase === 'intermediate' ? '#ffa726' : '#f44336'
                     return (
-                      <button key={q.id} className="cs-search-result-btn" onClick={() => { setSearchOpen(false); setSearchQuery(''); navigate('/campaign') }}
+                      <button key={q.id} className="cs-search-result-btn" onClick={() => { setSearchOpen(false); setSearchQuery(''); navigate(isGuest ? '/signup' : '/campaign') }}
                         style={{ width: '100%', background: 'transparent', border: 'none', padding: '10px 16px', display: 'flex', alignItems: 'center', gap: '12px', cursor: 'pointer', textAlign: 'left' }}>
                         <div style={{ width: '32px', height: '32px', borderRadius: '8px', background: `${pc}22`, border: `1px solid ${pc}66`, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
                           <span style={{ fontSize: '16px' }}>⚔️</span>
@@ -1449,12 +1431,12 @@ export const HomeDashboard: React.FC = () => {
                       navigate('/sandbox'); setProfileMenuOpen(false)
                     },
                   }] : []),
-                  { icon: '🖼️', tint: '#58a6ff', label: 'Profile Image',         action: () => { navigate('/profile');   setProfileMenuOpen(false) } },
+                  ...(!isGuest ? [{ icon: '🖼️', tint: '#58a6ff', label: 'Profile Image',    action: () => { navigate('/profile');   setProfileMenuOpen(false) } }] : []),
                   { icon: '📢', tint: '#ffa726', label: 'System Announcements',  action: () => { setProfileMenuOpen(false); setAnnouncementsOpen(true) } },
-                  { icon: '📊', tint: '#3fb950', label: 'Progress Report',        action: () => { navigate('/progress');  setProfileMenuOpen(false) } },
+                  ...(!isGuest ? [{ icon: '📊', tint: '#3fb950', label: 'Progress Report', action: () => { navigate('/progress');  setProfileMenuOpen(false) } }] : []),
                   { icon: '🎓', tint: '#a371f7', label: 'Tutorials',              action: () => { navigate('/tutorials'); setProfileMenuOpen(false) } },
                   { icon: '📘', tint: '#26c6da', label: 'User Manual',            action: () => { navigate('/manual');    setProfileMenuOpen(false) } },
-                  { icon: '🗺️', tint: '#e3b341', label: 'Replay Welcome Tour',    action: () => { setProfileMenuOpen(false); setShowOnboarding(true) } },
+                  ...(!isGuest ? [{ icon: '🗺️', tint: '#e3b341', label: 'Replay Welcome Tour', action: () => { setProfileMenuOpen(false); window.dispatchEvent(new CustomEvent('cs-replay-tour')) } }] : []),
                   ...(isAdmin ? [{ icon: '🛡️', tint: '#f85149', label: 'Admin Panel', action: () => { navigate('/admin'); setProfileMenuOpen(false) } }] : []),
                 ].map((item: any) => (
                   <button key={item.label} className="cs-menu-item" onClick={item.action}

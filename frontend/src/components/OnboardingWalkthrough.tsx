@@ -248,8 +248,10 @@ export const OnboardingWalkthrough: React.FC<{
   const goToAction = () => {
     if (!step.action) return
     if (step.action.path) {
-      finish()
       navigate(step.action.path)
+      // Advance to the next step so the tour continues after the navigation.
+      // Do NOT call finish() — the tour is a persistent overlay at App level.
+      if (!isLast) setIdx(i => Math.min(steps.length - 1, i + 1))
     } else {
       step.action.onClick?.()
     }

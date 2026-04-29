@@ -11,6 +11,7 @@ interface Player {
   totalxp: number
   currentlevel: number
   sandbox_runs: number
+  quests_completed: number
   createdat: string
   lastactive: string
   charactertype: string | null
@@ -31,16 +32,17 @@ const formatTime = (seconds: number): string => {
   return `${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`
 }
 
-type SortKey = 'xp' | 'level' | 'sandbox_runs' | 'recent'
+type SortKey = 'xp' | 'level' | 'sandbox_runs' | 'recent' | 'quests'
 type FilterKey = 'all' | 'student' | 'professional'
 
 const PAGE_SIZE = 20
 
 const SORT_OPTIONS: { key: SortKey; label: string; column: string; ascending: boolean }[] = [
-  { key: 'xp',            label: 'Highest XP',        column: 'totalxp',      ascending: false },
-  { key: 'level',         label: 'Highest Level',     column: 'currentlevel', ascending: false },
-  { key: 'sandbox_runs',  label: 'Most Active',       column: 'sandbox_runs', ascending: false },
-  { key: 'recent',        label: 'Recently Joined',   column: 'createdat',    ascending: false },
+  { key: 'xp',            label: 'Highest XP',        column: 'totalxp',         ascending: false },
+  { key: 'level',         label: 'Highest Level',     column: 'currentlevel',    ascending: false },
+  { key: 'sandbox_runs',  label: 'Most Active',       column: 'sandbox_runs',    ascending: false },
+  { key: 'quests',        label: 'Most Quests',       column: 'quests_completed', ascending: false },
+  { key: 'recent',        label: 'Recently Joined',   column: 'createdat',       ascending: false },
 ]
 
 const FILTER_OPTIONS: { key: FilterKey; label: string; icon: string }[] = [
@@ -291,7 +293,7 @@ export const LeaderboardPage: React.FC = () => {
     if (!user) return
     const fetchMyRank = async () => {
       const { data: me } = await supabase
-        .from('users').select('id, playername, totalxp, currentlevel, sandbox_runs, createdat, lastactive, charactertype, user_type')
+        .from('users').select('id, playername, totalxp, currentlevel, sandbox_runs, quests_completed, createdat, lastactive, charactertype, user_type')
         .eq('id', user.id).single()
       if (me) {
         setMyPlayer(me as Player)
@@ -346,7 +348,7 @@ export const LeaderboardPage: React.FC = () => {
       const sortCfg = SORT_OPTIONS.find(s => s.key === sortKey) ?? SORT_OPTIONS[0]
       let query = supabase
         .from('users')
-        .select('id, playername, totalxp, currentlevel, sandbox_runs, createdat, lastactive, charactertype, user_type', { count: 'exact' })
+        .select('id, playername, totalxp, currentlevel, sandbox_runs,  quests_completed, createdat, lastactive, charactertype, user_type', { count: 'exact' })
         .eq('isactive', true)
 
       if (filterKey !== 'all') {
@@ -358,7 +360,6 @@ export const LeaderboardPage: React.FC = () => {
       } else {
         query = query.order(sortCfg.column, { ascending: sortCfg.ascending })
       }
-
       if (searchQuery.trim()) {
         query = query.ilike('playername', `%${searchQuery.trim()}%`)
       } else {
