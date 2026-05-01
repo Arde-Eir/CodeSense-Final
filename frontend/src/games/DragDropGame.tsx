@@ -155,7 +155,18 @@ const DragDropGameInner: React.FC<{
                 onDrop={e => {
                   e.preventDefault();
                   if (dragging && !submitted) {
-                    setDropped(p => ({ ...p, [zone.id]: dragging }));
+                    setDropped(prev => {
+                      // If the target zone already holds a different term, the
+                      // displaced item automatically returns to the unplaced pool
+                      // (it just won't be in `dropped` anymore — no extra step needed).
+                      const next = { ...prev };
+                      // Remove the dragged item from any zone it was already in.
+                      for (const zid of Object.keys(next)) {
+                        if (next[zid] === dragging) { delete next[zid]; break; }
+                      }
+                      next[zone.id] = dragging;
+                      return next;
+                    });
                     setDragOver(null); setChecked(false);
                   }
                 }}

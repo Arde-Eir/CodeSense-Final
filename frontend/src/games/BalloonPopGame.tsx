@@ -218,7 +218,7 @@ export const BalloonPopGame: React.FC<Props> = ({ questions, onComplete, resetSi
   }, [hit]);
 
   useEffect(() => {
-    if (resetSignal === undefined || resetSignal === 0) return;
+    if (!resetSignal) return;
     completedRef.current = false;
     Object.assign(gs.current, {
       lives: TOTAL_LIVES, qIdx: 0, score: 0,

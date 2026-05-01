@@ -67,11 +67,13 @@ const TAB_SUBTITLE: Record<ActivityTab, string> = {
  *  question_type identifies the PRIMARY tab — it appears first so the user
  *  lands on the designated activity by default. Other populated activities
  *  are still accessible as additional tabs.
- *  Exception: mc_questions backs either 'balloon' or 'mc' — balloon only
- *  when question_type explicitly designates it, mc otherwise. */
+ *  Exception: mc_questions backs EITHER 'balloon' or 'mc' — never both.
+ *  'pop_balloon' → balloon tab only. Everything else with mc_questions → mc tab only.
+ *  (If you genuinely want both, set two separate question entries in the DB.) */
 function computeAvailableTabs(quest: Quest | null): ActivityTab[] {
   if (!quest) return [];
   const qt = (quest.question_type ?? '').trim().toLowerCase();
+  const isBalloon = qt === 'pop_balloon';
   const isMC =
     qt === 'multiple_choice' || qt === 'multiple-choice' ||
     qt === 'mc' || qt === 'mcq' || qt === 'quiz';
@@ -85,13 +87,17 @@ function computeAvailableTabs(quest: Quest | null): ActivityTab[] {
   else if (isMC)                 primary = 'mc';
 
   // Collect all activities that have data.
-  // mc_questions backs both 'balloon' and 'mc' — both show when data is present.
+  // mc_questions backs EITHER balloon OR mc — determined by question_type.
+  // Default (no question_type set) falls through to mc.
   const all: ActivityTab[] = [];
   if (quest.game_items?.length && quest.drop_zones?.length) all.push('drag');
   if (quest.code_fill_items?.length)                        all.push('code_fill');
   if (quest.ordering_items?.length)                         all.push('ordering');
-  if (quest.mc_questions?.length)                           all.push('balloon');
-  if (quest.mc_questions?.length)                           all.push('mc');
+  if (quest.mc_questions?.length) {
+    // Only add the mc_questions-backed tab that matches question_type.
+    // Never add both — that would require completing the same data twice.
+    all.push(isBalloon ? 'balloon' : 'mc');
+  }
 
   if (all.length === 0) return [];
 
@@ -603,10 +609,12 @@ export const LessonActivity: React.FC = () => {
   const handleNextQuest = useCallback(() => {
     if (nextQuestId) {
       navigate(`/lesson/${nextQuestId}`);
-    } else if (quest?.phase) {
-      navigate(`/campaign/inside/${quest.phase}`);
     } else {
-      navigate(-1);
+      // Last quest in the phase — go back to the level overview.
+      // Prefer the explicit phase route over navigate(-1) so direct-URL
+      // arrivals don't get sent back to an unrelated page.
+      const dest = quest?.phase ? `/campaign/inside/${quest.phase}` : '/campaign';
+      navigate(dest);
     }
   }, [nextQuestId, quest?.phase, navigate]);
 
@@ -659,7 +667,10 @@ export const LessonActivity: React.FC = () => {
     cumulativeXPRef.current += xpGainedNow;
 
     const allDone           = availableTabs.every(t => newFinished.includes(t));
-    const isFirstFullFinish = allDone && !isCompleted && !everCompletedRef.current.length;
+    // True only when this specific handleComplete call is what tips the quest
+    // to fully done for the first time. isCompleted is the React state from
+    // the previous render — still false here if we haven't called setIsCompleted yet.
+    const isFirstFullFinish = allDone && !isCompleted;
 
     try {
       let rpcResult: any = null;
@@ -873,10 +884,10 @@ export const LessonActivity: React.FC = () => {
     const tabs = computeAvailableTabs(quest);
     if (tabs.length > 0) setActiveTab(tabs[0]);
     setAppPhase('tutorial');
-
-    // Re-sync from DB so UI state can't get stuck on stale completed status.
-    await doFetch();
-  }, [user?.id, quest, doFetch]);
+    // Do NOT call doFetch() here — it would overwrite everCompletedRef with the
+    // DB's completed_activities (which was just cleared to []), destroying the
+    // replay-XP context we set above. The quest data is already in state.
+  }, [user?.id, quest]);
 
   const handleReset  = () => setResetSignal(s => s + 1);
   const handleGoBack = () => setAppPhase('tutorial');
@@ -896,13 +907,30 @@ export const LessonActivity: React.FC = () => {
     : `Level ${quest.level ?? 1}`;
 
   return (
-    <div style={{ height: '100vh', display: 'flex', flexDirection: 'column', background: '#080c11', color: '#e6edf3', overflow: 'hidden' }}>
+    <div style={{ minHeight: '100vh', height: '100vh', display: 'flex', flexDirection: 'column', background: '#080c11', color: '#e6edf3', overflow: 'hidden' }}>
       <style>{ANIM_CSS}</style>
 
       {/* Header */}
       <header style={{ height: 56, background: 'rgba(13,17,23,0.97)', borderBottom: '1px solid #21262d', display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '0 24px', flexShrink: 0 }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-          <button onClick={() => navigate(-1)} style={{ background: 'transparent', border: 'none', color: '#8b949e', cursor: 'pointer', fontSize: 14 }}>←</button>
+          <button
+            onClick={() => navigate(-1)}
+            title="Back to level"
+            style={{
+              background: 'rgba(255,255,255,0.06)',
+              border: '1px solid rgba(255,255,255,0.1)',
+              color: '#c9d1d9',
+              cursor: 'pointer',
+              fontSize: 16,
+              width: 32, height: 32,
+              borderRadius: '50%',
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+              flexShrink: 0,
+              transition: 'all .15s',
+            }}
+            onMouseEnter={e => { e.currentTarget.style.background = 'rgba(255,255,255,0.12)'; e.currentTarget.style.color = '#e6edf3'; }}
+            onMouseLeave={e => { e.currentTarget.style.background = 'rgba(255,255,255,0.06)'; e.currentTarget.style.color = '#c9d1d9'; }}
+          >←</button>
           <span style={{ fontSize: 11, color: '#484f58', fontFamily: "'JetBrains Mono',monospace", letterSpacing: '1px' }}>{phaseLabel}</span>
           <span style={{ color: '#21262d' }}>›</span>
           <span style={{ fontSize: 13, fontWeight: 700, color: '#e6edf3', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: 480 }}>{quest.title}</span>
@@ -917,7 +945,8 @@ export const LessonActivity: React.FC = () => {
         </div>
       </header>
 
-      {/* Body */}
+      {/* Body — overflowY:auto lets the layout scroll at high browser zoom
+           instead of clipping the bottom action bar */}
       <div ref={bodyRef} style={{ flex: 1, display: 'flex', overflow: 'hidden', minHeight: 0 }}>
         {appPhase === 'tutorial' ? (
           <TutorialLearnPhase
@@ -930,7 +959,7 @@ export const LessonActivity: React.FC = () => {
         ) : (
           <>
             {/* Left: tab bar + active game */}
-            <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minWidth: 0 }}>
+            <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minWidth: 0, overflowY: 'auto' }}>
               {!isCompleted && availableTabs.length > 1 && (
                 <div style={{ display: 'flex', gap: 4, padding: '10px 22px 0', borderBottom: '1px solid #21262d', flexShrink: 0 }}>
                   {availableTabs.map(t => {
@@ -974,13 +1003,16 @@ export const LessonActivity: React.FC = () => {
                 </div>
               )}
 
-              <div style={{ flex: 1, padding: !isCompleted && activeTab === 'balloon' ? 0 : '16px 22px', display: 'flex', flexDirection: 'column', overflow: 'hidden', minHeight: 0 }}>
+              <div style={{ flex: 1, padding: !isCompleted && activeTab === 'balloon' ? 0 : '16px 22px', display: 'flex', flexDirection: 'column', overflowY: 'auto', minHeight: 0 }}>
                 {isCompleted ? (
                   <LockedBanner
                     earnedXP={earnedXP}
                     title={quest.title}
                     onRetake={handleRetake}
-                    onBack={() => navigate(-1)}
+                    onBack={() => {
+                      const dest = quest.phase ? `/campaign/inside/${quest.phase}` : '/campaign';
+                      navigate(dest);
+                    }}
                   />
                 ) : completedActivitiesRef.current.includes(activeTab) ? (
                   <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', flexDirection: 'column', gap: 12 }}>

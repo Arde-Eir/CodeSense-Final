@@ -53,29 +53,53 @@ interface QFormTheory    { id: string; type: string; heading: string; body: stri
 interface QFormMCQ       { id: string; question: string; options: [string,string,string,string]; correct: number; explanation: string }
 interface QFormDragItem  { id: string; label: string; color: string }
 interface QFormDropZone  { id: string; label: string; accepted: string }
-interface QFormOrderItem { id: string; label: string; description: string }
 interface QFormCodeFill  { id: string; code_lines: string; language: string; answers: string; hint: string; caption: string }
+
+// Multi-problem types
+interface QFormDragProblem  { id: string; question: string; items: QFormDragItem[]; drop_zones: QFormDropZone[] }
+interface QFormBalloonItem  { id: string; label: string; color: string; is_correct: boolean }
+interface QFormBalloonProblem { id: string; question: string; items: QFormBalloonItem[] }
+interface QFormOrderItem    { id: string; label: string; description: string }
+interface QFormOrderProblem { id: string; question: string; items: QFormOrderItem[] }
 
 interface QuestFormState {
   title: string; description: string
-  difficulty: 'easy' | 'medium' | 'hard'; level: 1 | 2 | 3
+  difficulty: 'beginner' | 'intermediate' | 'advanced' | 'expert'; level: 1 | 2 | 3
   basexp: number; requiredxp: number; sortorder: number; isactive: boolean
   tutorial_title: string; tutorial_body: string
   theory_sections: QFormTheory[]; objectives: string[]
   act_mc: boolean; act_drag: boolean; act_balloon: boolean; act_ordering: boolean; act_codefill: boolean
-  mc_questions: QFormMCQ[]; game_items: QFormDragItem[]; drop_zones: QFormDropZone[]
-  ordering_items: QFormOrderItem[]; code_fill_items: QFormCodeFill[]
-  balloon_items: QFormDragItem[]
+  mc_questions: QFormMCQ[]
+  drag_problems: QFormDragProblem[]
+  balloon_problems: QFormBalloonProblem[]
+  ordering_problems: QFormOrderProblem[]
+  code_fill_items: QFormCodeFill[]
+  // legacy flat fields kept for DB compat — built from problems on save
+  game_items: QFormDragItem[]; drop_zones: QFormDropZone[]
 }
 
+const newDragProblem = (): QFormDragProblem => ({
+  id: `dp_${Date.now()}`, question: '', items: [], drop_zones: [],
+})
+const newBalloonProblem = (): QFormBalloonProblem => ({
+  id: `bp_${Date.now()}`, question: '', items: [],
+})
+const newOrderProblem = (): QFormOrderProblem => ({
+  id: `op_${Date.now()}`, question: '', items: [],
+})
+
 const defaultQF = (): QuestFormState => ({
-  title: '', description: '', difficulty: 'easy',
+  title: '', description: '', difficulty: 'beginner',
   level: 1, basexp: 100, requiredxp: 0, sortorder: 99, isactive: true,
   tutorial_title: '', tutorial_body: '',
   theory_sections: [], objectives: [''],
   act_mc: true, act_drag: false, act_balloon: false, act_ordering: false, act_codefill: false,
   mc_questions: [{ id: '1', question: '', options: ['', '', '', ''], correct: 0, explanation: '' }],
-  game_items: [], drop_zones: [], ordering_items: [], code_fill_items: [], balloon_items: [],
+  drag_problems: [newDragProblem()],
+  balloon_problems: [newBalloonProblem()],
+  ordering_problems: [newOrderProblem()],
+  code_fill_items: [],
+  game_items: [], drop_zones: [],
 })
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -361,11 +385,13 @@ export const AdminPanel: React.FC = () => {
     setSaving(true)
     const [r1, r2] = await Promise.all([
       supabase.from('system_settings').upsert(
-        { key: 'maintenance_mode',    value: maintenanceOn,              updated_by: user.id },
+        { key: 'maintenance_mode',    value: maintenanceOn,                          updated_by: user.id },
         { onConflict: 'key' }
       ),
       supabase.from('system_settings').upsert(
-        { key: 'maintenance_message', value: maintenanceMsg || '',        updated_by: user.id },
+        // The `value` column is jsonb — wrap the string so Supabase doesn't
+        // try to parse a bare string as a JSON object and throw a parse error.
+        { key: 'maintenance_message', value: JSON.stringify(maintenanceMsg || ''),   updated_by: user.id },
         { onConflict: 'key' }
       ),
     ])
@@ -440,22 +466,46 @@ export const AdminPanel: React.FC = () => {
         }))
       : null
 
+    // Drag & Drop: flatten problems → game_items carries problem_id+question; drop_zones same
     const game_items = (() => {
-      if (questForm.act_drag && questForm.game_items.length > 0)
-        return questForm.game_items.map(g => ({ id: g.id, label: g.label, color: g.color }))
-      if (questForm.act_balloon && questForm.balloon_items.length > 0)
-        return questForm.balloon_items.map(g => ({ id: g.id, label: g.label, color: g.color }))
+      if (questForm.act_drag && questForm.drag_problems.length > 0) {
+        const all: any[] = []
+        questForm.drag_problems.forEach(p =>
+          p.items.forEach(g => all.push({ id: g.id, label: g.label, color: g.color, problem_id: p.id, question: p.question }))
+        )
+        return all.length > 0 ? all : null
+      }
+      if (questForm.act_balloon && questForm.balloon_problems.length > 0) {
+        const all: any[] = []
+        questForm.balloon_problems.forEach(p =>
+          p.items.forEach(g => all.push({ id: g.id, label: g.label, color: g.color, is_correct: g.is_correct, problem_id: p.id, question: p.question }))
+        )
+        return all.length > 0 ? all : null
+      }
       return null
     })()
 
-    const drop_zones = questForm.act_drag && questForm.drop_zones.length > 0
-      ? questForm.drop_zones.map(z => ({ id: z.id, label: z.label, accepted: z.accepted }))
+    const drop_zones_final = questForm.act_drag && questForm.drag_problems.length > 0
+      ? (() => {
+          const all: any[] = []
+          questForm.drag_problems.forEach(p =>
+            p.drop_zones.forEach(z => all.push({ id: z.id, label: z.label, accepted: z.accepted, problem_id: p.id }))
+          )
+          return all.length > 0 ? all : null
+        })()
       : null
 
-    const ordering_items = questForm.act_ordering && questForm.ordering_items.length > 0
-      ? questForm.ordering_items.map((o, i) => ({
-          id: o.id, label: o.label, description: o.description || undefined, correct_order: i + 1,
-        }))
+    const ordering_items = questForm.act_ordering && questForm.ordering_problems.length > 0
+      ? (() => {
+          const all: any[] = []
+          questForm.ordering_problems.forEach(p =>
+            p.items.forEach((o, i) => all.push({
+              id: o.id, label: o.label, description: o.description || undefined,
+              correct_order: i + 1, problem_id: p.id, question: p.question,
+            }))
+          )
+          return all.length > 0 ? all : null
+        })()
       : null
 
     const code_fill_items = questForm.act_codefill && questForm.code_fill_items.length > 0
@@ -481,7 +531,7 @@ export const AdminPanel: React.FC = () => {
       tutorial_body: questForm.tutorial_body.trim() || null,
       tutorial_image: null,
       theory_sections: theory_sections.length > 0 ? theory_sections : null,
-      mc_questions, game_items, drop_zones, ordering_items, code_fill_items,
+      mc_questions, game_items, drop_zones: drop_zones_final, ordering_items, code_fill_items,
     }
 
     setQuestSaving(true)
@@ -506,9 +556,53 @@ export const AdminPanel: React.FC = () => {
   }
 
   const loadQuestForEdit = (q: any) => {
+    // Reconstruct drag problems from flat game_items + drop_zones (grouped by problem_id)
+    const dragProblems: QFormDragProblem[] = (() => {
+      if (!q.game_items?.length || !q.drop_zones?.length) return [newDragProblem()]
+      const problemMap = new Map<string, QFormDragProblem>()
+      ;(q.game_items as any[]).forEach(g => {
+        const pid = g.problem_id ?? 'default'
+        if (!problemMap.has(pid)) problemMap.set(pid, { id: pid, question: g.question ?? '', items: [], drop_zones: [] })
+        problemMap.get(pid)!.items.push({ id: g.id ?? String(Math.random()), label: g.label ?? '', color: g.color ?? '#58a6ff' })
+      })
+      ;(q.drop_zones as any[]).forEach(z => {
+        const pid = z.problem_id ?? 'default'
+        if (!problemMap.has(pid)) problemMap.set(pid, { id: pid, question: z.question ?? '', items: [], drop_zones: [] })
+        problemMap.get(pid)!.drop_zones.push({ id: z.id ?? String(Math.random()), label: z.label ?? '', accepted: z.accepted ?? '' })
+      })
+      return problemMap.size > 0 ? Array.from(problemMap.values()) : [newDragProblem()]
+    })()
+
+    // Reconstruct balloon problems from flat game_items (is_correct field, grouped by problem_id)
+    const balloonProblems: QFormBalloonProblem[] = (() => {
+      // Balloon quests have game_items but NO drop_zones.
+      if (!q.game_items?.length || q.drop_zones?.length > 0) return [newBalloonProblem()]
+      const problemMap = new Map<string, QFormBalloonProblem>()
+      ;(q.game_items as any[]).forEach(g => {
+        const pid = g.problem_id ?? 'default'
+        if (!problemMap.has(pid)) problemMap.set(pid, { id: pid, question: g.question ?? '', items: [] })
+        problemMap.get(pid)!.items.push({ id: g.id ?? String(Math.random()), label: g.label ?? '', color: g.color ?? '#3fb950', is_correct: g.is_correct ?? false })
+      })
+      return problemMap.size > 0 ? Array.from(problemMap.values()) : [newBalloonProblem()]
+    })()
+
+    // Reconstruct ordering problems from flat ordering_items (grouped by problem_id)
+    const orderingProblems: QFormOrderProblem[] = (() => {
+      if (!q.ordering_items?.length) return [newOrderProblem()]
+      const problemMap = new Map<string, QFormOrderProblem>()
+      ;(q.ordering_items as any[])
+        .slice().sort((a: any, b: any) => (a.correct_order ?? 0) - (b.correct_order ?? 0))
+        .forEach((o: any) => {
+          const pid = o.problem_id ?? 'default'
+          if (!problemMap.has(pid)) problemMap.set(pid, { id: pid, question: o.question ?? '', items: [] })
+          problemMap.get(pid)!.items.push({ id: o.id ?? String(Math.random()), label: o.label ?? '', description: o.description ?? '' })
+        })
+      return problemMap.size > 0 ? Array.from(problemMap.values()) : [newOrderProblem()]
+    })()
+
     setQuestForm({
       title: q.title ?? '', description: q.description ?? '',
-      difficulty: q.difficulty ?? 'easy', level: q.level ?? 1,
+      difficulty: q.difficulty ?? 'beginner', level: q.level ?? 1,
       basexp: q.basexp ?? 100, requiredxp: q.requiredxp ?? 0,
       sortorder: q.sortorder ?? 99, isactive: q.isactive ?? true,
       tutorial_title: q.tutorial_title ?? '', tutorial_body: q.tutorial_body ?? '',
@@ -526,11 +620,9 @@ export const AdminPanel: React.FC = () => {
         id: m.id ?? String(Math.random()), question: m.question ?? '',
         options: m.options ?? ['', '', '', ''], correct: m.correct ?? 0, explanation: m.explanation ?? '',
       })),
-      game_items: q.drop_zones?.length
-        ? (q.game_items ?? []).map((g: any) => ({ id: g.id ?? String(Math.random()), label: g.label ?? '', color: g.color ?? '#58a6ff' }))
-        : [],
-      drop_zones: (q.drop_zones ?? []).map((z: any) => ({ id: z.id ?? String(Math.random()), label: z.label ?? '', accepted: z.accepted ?? '' })),
-      ordering_items: (q.ordering_items ?? []).map((o: any) => ({ id: o.id ?? String(Math.random()), label: o.label ?? '', description: o.description ?? '' })),
+      drag_problems: dragProblems,
+      balloon_problems: balloonProblems,
+      ordering_problems: orderingProblems,
       code_fill_items: (q.code_fill_items ?? []).map((c: any) => ({
         id: c.id ?? String(Math.random()),
         code_lines: Array.isArray(c.code_lines) ? c.code_lines.join('\n') : (c.code_lines ?? ''),
@@ -538,9 +630,7 @@ export const AdminPanel: React.FC = () => {
         answers: Array.isArray(c.answers) ? c.answers.join(', ') : (c.answers ?? ''),
         hint: c.hint ?? '', caption: c.caption ?? '',
       })),
-      balloon_items: q.drop_zones?.length
-        ? []
-        : (q.game_items ?? []).map((g: any) => ({ id: g.id ?? String(Math.random()), label: g.label ?? '', color: g.color ?? '#3fb950' })),
+      game_items: [], drop_zones: [],
     })
     setReplaceTarget(q.id)
     setQuestSubTab('create')
@@ -935,9 +1025,6 @@ export const AdminPanel: React.FC = () => {
                         <button className="btn btn-primary" disabled={saving} onClick={saveMaintenance}>
                           {saving ? 'Saving…' : 'Save Settings'}
                         </button>
-                        <span id="maintenance-unsaved" style={{ fontSize: '11px', color: '#f76707', marginLeft: '10px', display: 'none' }}>
-                          ● Unsaved changes
-                        </span>
                       </div>
                     </div>
                   </div>
@@ -1085,9 +1172,10 @@ export const AdminPanel: React.FC = () => {
                               <div className="col-4">
                                 <label className="form-label">Difficulty</label>
                                 <select className="form-select" value={questForm.difficulty} onChange={e => qSet({ difficulty: e.target.value as any })}>
-                                  <option value="easy">Easy</option>
-                                  <option value="medium">Medium</option>
-                                  <option value="hard">Hard</option>
+                                  <option value="beginner">Beginner</option>
+                                  <option value="intermediate">Intermediate</option>
+                                  <option value="advanced">Advanced</option>
+                                  <option value="expert">Expert</option>
                                 </select>
                               </div>
                               <div className="col-4">
@@ -1252,47 +1340,74 @@ export const AdminPanel: React.FC = () => {
                         {/* Drag & Drop */}
                         {questForm.act_drag && (
                           <div className="card mb-3">
-                            <div className="card-header"><h3 className="card-title">Drag & Drop</h3></div>
-                            <div className="card-body">
-                              <div className="row g-2">
-                                <div className="col-6">
-                                  <div className="d-flex justify-content-between align-items-center mb-1">
-                                    <label className="form-label mb-0" style={{ fontSize: '12px' }}>Draggable Items</label>
-                                    <button className="btn btn-xs btn-outline-primary" onClick={() => qSet({ game_items: [...questForm.game_items, { id: `item_${Date.now()}`, label: '', color: '#58a6ff' }] })}>+</button>
+                            <div className="card-header d-flex justify-content-between align-items-center">
+                              <h3 className="card-title mb-0">🎯 Drag & Drop Problems</h3>
+                              <button className="btn btn-xs btn-outline-primary" onClick={() => qSet({ drag_problems: [...questForm.drag_problems, newDragProblem()] })}>+ Add Problem</button>
+                            </div>
+                            <div className="card-body" style={{ maxHeight: '500px', overflowY: 'auto' }}>
+                              {questForm.drag_problems.map((prob, pi) => (
+                                <div key={prob.id} className="border rounded p-2 mb-3" style={{ background: '#f8fafc' }}>
+                                  <div className="d-flex justify-content-between align-items-center mb-2">
+                                    <strong style={{ fontSize: '12px', color: '#374151' }}>Problem {pi + 1}</strong>
+                                    {questForm.drag_problems.length > 1 && (
+                                      <button className="btn btn-xs btn-ghost-danger" onClick={() => qSet({ drag_problems: questForm.drag_problems.filter((_, j) => j !== pi) })}>✕ Remove</button>
+                                    )}
                                   </div>
-                                  {questForm.game_items.map((item, i) => (
-                                    <div key={item.id} className="d-flex gap-1 mb-1">
-                                      <input type="color" value={item.color} style={{ width: '30px', padding: '1px 2px', border: '1px solid #ddd', borderRadius: '4px', cursor: 'pointer' }}
-                                        onChange={e => { const g = [...questForm.game_items]; g[i] = { ...g[i], color: e.target.value }; qSet({ game_items: g }) }} />
-                                      <input className="form-control form-control-sm" placeholder={`Item ${i + 1}`} value={item.label}
-                                        onChange={e => { const g = [...questForm.game_items]; g[i] = { ...g[i], label: e.target.value }; qSet({ game_items: g }) }} />
-                                      <button className="btn btn-xs btn-ghost-danger" onClick={() => qSet({ game_items: questForm.game_items.filter((_, j) => j !== i) })}>✕</button>
-                                    </div>
-                                  ))}
-                                </div>
-                                <div className="col-6">
-                                  <div className="d-flex justify-content-between align-items-center mb-1">
-                                    <label className="form-label mb-0" style={{ fontSize: '12px' }}>Drop Zones</label>
-                                    <button className="btn btn-xs btn-outline-primary" onClick={() => qSet({ drop_zones: [...questForm.drop_zones, { id: `zone_${Date.now()}`, label: '', accepted: '' }] })}>+</button>
+                                  <div className="mb-2">
+                                    <input className="form-control form-control-sm" placeholder="Question / instruction (e.g. Match each keyword to its meaning)" value={prob.question}
+                                      onChange={e => { const dp = [...questForm.drag_problems]; dp[pi] = { ...dp[pi], question: e.target.value }; qSet({ drag_problems: dp }) }} />
                                   </div>
-                                  {questForm.drop_zones.map((zone, i) => (
-                                    <div key={zone.id} className="mb-2">
-                                      <div className="d-flex gap-1 mb-1">
-                                        <input className="form-control form-control-sm" placeholder={`Zone ${i + 1} label`} value={zone.label}
-                                          onChange={e => { const z = [...questForm.drop_zones]; z[i] = { ...z[i], label: e.target.value }; qSet({ drop_zones: z }) }} />
-                                        <button className="btn btn-xs btn-ghost-danger" onClick={() => qSet({ drop_zones: questForm.drop_zones.filter((_, j) => j !== i) })}>✕</button>
+                                  <div className="row g-2">
+                                    <div className="col-6">
+                                      <div className="d-flex justify-content-between align-items-center mb-1">
+                                        <label className="form-label mb-0" style={{ fontSize: '11px', fontWeight: 600 }}>Draggable Items</label>
+                                        <button className="btn btn-xs btn-outline-secondary" onClick={() => {
+                                          const dp = [...questForm.drag_problems]
+                                          dp[pi] = { ...dp[pi], items: [...dp[pi].items, { id: `item_${Date.now()}`, label: '', color: '#58a6ff' }] }
+                                          qSet({ drag_problems: dp })
+                                        }}>+</button>
                                       </div>
-                                      <select className="form-select form-select-sm" value={zone.accepted}
-                                        onChange={e => { const z = [...questForm.drop_zones]; z[i] = { ...z[i], accepted: e.target.value }; qSet({ drop_zones: z }) }}>
-                                        <option value="">— Accepts which item? —</option>
-                                        {questForm.game_items.map(gi => (
-                                          <option key={gi.id} value={gi.id}>{gi.label || gi.id}</option>
-                                        ))}
-                                      </select>
+                                      {prob.items.map((item, ii) => (
+                                        <div key={item.id} className="d-flex gap-1 mb-1">
+                                          <input type="color" value={item.color} style={{ width: '28px', padding: '1px 2px', border: '1px solid #ddd', borderRadius: '4px', cursor: 'pointer' }}
+                                            onChange={e => { const dp = [...questForm.drag_problems]; dp[pi].items[ii] = { ...dp[pi].items[ii], color: e.target.value }; qSet({ drag_problems: dp }) }} />
+                                          <input className="form-control form-control-sm" placeholder={`Item ${ii + 1}`} value={item.label}
+                                            onChange={e => { const dp = [...questForm.drag_problems]; dp[pi].items[ii] = { ...dp[pi].items[ii], label: e.target.value }; qSet({ drag_problems: dp }) }} />
+                                          <button className="btn btn-xs btn-ghost-danger" onClick={() => { const dp = [...questForm.drag_problems]; dp[pi].items = dp[pi].items.filter((_, j) => j !== ii); qSet({ drag_problems: dp }) }}>✕</button>
+                                        </div>
+                                      ))}
+                                      {prob.items.length === 0 && <div className="text-muted" style={{ fontSize: '11px' }}>No items yet</div>}
                                     </div>
-                                  ))}
+                                    <div className="col-6">
+                                      <div className="d-flex justify-content-between align-items-center mb-1">
+                                        <label className="form-label mb-0" style={{ fontSize: '11px', fontWeight: 600 }}>Drop Zones</label>
+                                        <button className="btn btn-xs btn-outline-secondary" onClick={() => {
+                                          const dp = [...questForm.drag_problems]
+                                          dp[pi] = { ...dp[pi], drop_zones: [...dp[pi].drop_zones, { id: `zone_${Date.now()}`, label: '', accepted: '' }] }
+                                          qSet({ drag_problems: dp })
+                                        }}>+</button>
+                                      </div>
+                                      {prob.drop_zones.map((zone, zi) => (
+                                        <div key={zone.id} className="mb-2">
+                                          <div className="d-flex gap-1 mb-1">
+                                            <input className="form-control form-control-sm" placeholder={`Zone ${zi + 1} label`} value={zone.label}
+                                              onChange={e => { const dp = [...questForm.drag_problems]; dp[pi].drop_zones[zi] = { ...dp[pi].drop_zones[zi], label: e.target.value }; qSet({ drag_problems: dp }) }} />
+                                            <button className="btn btn-xs btn-ghost-danger" onClick={() => { const dp = [...questForm.drag_problems]; dp[pi].drop_zones = dp[pi].drop_zones.filter((_, j) => j !== zi); qSet({ drag_problems: dp }) }}>✕</button>
+                                          </div>
+                                          <select className="form-select form-select-sm" value={zone.accepted}
+                                            onChange={e => { const dp = [...questForm.drag_problems]; dp[pi].drop_zones[zi] = { ...dp[pi].drop_zones[zi], accepted: e.target.value }; qSet({ drag_problems: dp }) }}>
+                                            <option value="">— Accepts which item? —</option>
+                                            {prob.items.map(gi => (
+                                              <option key={gi.id} value={gi.id}>{gi.label || gi.id}</option>
+                                            ))}
+                                          </select>
+                                        </div>
+                                      ))}
+                                      {prob.drop_zones.length === 0 && <div className="text-muted" style={{ fontSize: '11px' }}>No zones yet</div>}
+                                    </div>
+                                  </div>
                                 </div>
-                              </div>
+                              ))}
                             </div>
                           </div>
                         )}
@@ -1301,20 +1416,50 @@ export const AdminPanel: React.FC = () => {
                         {questForm.act_balloon && (
                           <div className="card mb-3">
                             <div className="card-header d-flex justify-content-between align-items-center">
-                              <h3 className="card-title mb-0">Balloon Pop Items</h3>
-                              <button className="btn btn-xs btn-outline-primary" onClick={() => qSet({ balloon_items: [...questForm.balloon_items, { id: `b_${Date.now()}`, label: '', color: '#3fb950' }] })}>+ Add</button>
+                              <h3 className="card-title mb-0">🎈 Balloon Pop Problems</h3>
+                              <button className="btn btn-xs btn-outline-primary" onClick={() => qSet({ balloon_problems: [...questForm.balloon_problems, newBalloonProblem()] })}>+ Add Problem</button>
                             </div>
-                            <div className="card-body">
-                              {questForm.balloon_items.map((item, i) => (
-                                <div key={item.id} className="d-flex gap-1 mb-1">
-                                  <input type="color" value={item.color} style={{ width: '30px', padding: '1px 2px', border: '1px solid #ddd', borderRadius: '4px', cursor: 'pointer' }}
-                                    onChange={e => { const b = [...questForm.balloon_items]; b[i] = { ...b[i], color: e.target.value }; qSet({ balloon_items: b }) }} />
-                                  <input className="form-control form-control-sm" placeholder={`Balloon ${i + 1} label`} value={item.label}
-                                    onChange={e => { const b = [...questForm.balloon_items]; b[i] = { ...b[i], label: e.target.value }; qSet({ balloon_items: b }) }} />
-                                  <button className="btn btn-xs btn-ghost-danger" onClick={() => qSet({ balloon_items: questForm.balloon_items.filter((_, j) => j !== i) })}>✕</button>
+                            <div className="card-body" style={{ maxHeight: '500px', overflowY: 'auto' }}>
+                              <div className="text-muted mb-2" style={{ fontSize: '11px' }}>Each problem has a question. Mark balloons ✓ correct (should be popped) or ✗ incorrect (should not).</div>
+                              {questForm.balloon_problems.map((prob, pi) => (
+                                <div key={prob.id} className="border rounded p-2 mb-3" style={{ background: '#f8fafc' }}>
+                                  <div className="d-flex justify-content-between align-items-center mb-2">
+                                    <strong style={{ fontSize: '12px', color: '#374151' }}>Problem {pi + 1}</strong>
+                                    {questForm.balloon_problems.length > 1 && (
+                                      <button className="btn btn-xs btn-ghost-danger" onClick={() => qSet({ balloon_problems: questForm.balloon_problems.filter((_, j) => j !== pi) })}>✕ Remove</button>
+                                    )}
+                                  </div>
+                                  <div className="mb-2">
+                                    <input className="form-control form-control-sm" placeholder="Question (e.g. Pop all valid C variable names)" value={prob.question}
+                                      onChange={e => { const bp = [...questForm.balloon_problems]; bp[pi] = { ...bp[pi], question: e.target.value }; qSet({ balloon_problems: bp }) }} />
+                                  </div>
+                                  <div className="d-flex justify-content-between align-items-center mb-1">
+                                    <label className="form-label mb-0" style={{ fontSize: '11px', fontWeight: 600 }}>Balloons</label>
+                                    <button className="btn btn-xs btn-outline-secondary" onClick={() => {
+                                      const bp = [...questForm.balloon_problems]
+                                      bp[pi] = { ...bp[pi], items: [...bp[pi].items, { id: `b_${Date.now()}`, label: '', color: '#3fb950', is_correct: true }] }
+                                      qSet({ balloon_problems: bp })
+                                    }}>+ Add Balloon</button>
+                                  </div>
+                                  {prob.items.map((item, ii) => (
+                                    <div key={item.id} className="d-flex gap-1 mb-1 align-items-center">
+                                      <input type="color" value={item.color} style={{ width: '28px', padding: '1px 2px', border: '1px solid #ddd', borderRadius: '4px', cursor: 'pointer' }}
+                                        onChange={e => { const bp = [...questForm.balloon_problems]; bp[pi].items[ii] = { ...bp[pi].items[ii], color: e.target.value }; qSet({ balloon_problems: bp }) }} />
+                                      <input className="form-control form-control-sm" placeholder={`Balloon ${ii + 1} label`} value={item.label}
+                                        onChange={e => { const bp = [...questForm.balloon_problems]; bp[pi].items[ii] = { ...bp[pi].items[ii], label: e.target.value }; qSet({ balloon_problems: bp }) }} />
+                                      <button
+                                        title={item.is_correct ? 'Correct (pop this)' : 'Incorrect (do not pop)'}
+                                        className={`btn btn-xs ${item.is_correct ? 'btn-success' : 'btn-outline-danger'}`}
+                                        style={{ minWidth: '28px', fontSize: '11px' }}
+                                        onClick={() => { const bp = [...questForm.balloon_problems]; bp[pi].items[ii] = { ...bp[pi].items[ii], is_correct: !bp[pi].items[ii].is_correct }; qSet({ balloon_problems: bp }) }}>
+                                        {item.is_correct ? '✓' : '✗'}
+                                      </button>
+                                      <button className="btn btn-xs btn-ghost-danger" onClick={() => { const bp = [...questForm.balloon_problems]; bp[pi].items = bp[pi].items.filter((_, j) => j !== ii); qSet({ balloon_problems: bp }) }}>✕</button>
+                                    </div>
+                                  ))}
+                                  {prob.items.length === 0 && <div className="text-muted" style={{ fontSize: '11px' }}>No balloons yet</div>}
                                 </div>
                               ))}
-                              {questForm.balloon_items.length === 0 && <div className="text-muted" style={{ fontSize: '12px' }}>No items yet</div>}
                             </div>
                           </div>
                         )}
@@ -1323,24 +1468,46 @@ export const AdminPanel: React.FC = () => {
                         {questForm.act_ordering && (
                           <div className="card mb-3">
                             <div className="card-header d-flex justify-content-between align-items-center">
-                              <h3 className="card-title mb-0">Ordering Items</h3>
-                              <button className="btn btn-xs btn-outline-primary" onClick={() => qSet({ ordering_items: [...questForm.ordering_items, { id: `o_${Date.now()}`, label: '', description: '' }] })}>+ Add</button>
+                              <h3 className="card-title mb-0">📋 Ordering Problems</h3>
+                              <button className="btn btn-xs btn-outline-primary" onClick={() => qSet({ ordering_problems: [...questForm.ordering_problems, newOrderProblem()] })}>+ Add Problem</button>
                             </div>
-                            <div className="card-body">
-                              <div className="text-muted mb-2" style={{ fontSize: '11px' }}>Add items in the correct order — top = first.</div>
-                              {questForm.ordering_items.map((item, i) => (
-                                <div key={item.id} className="d-flex gap-1 align-items-start mb-2">
-                                  <span className="badge bg-secondary mt-1" style={{ minWidth: '22px' }}>{i + 1}</span>
-                                  <div style={{ flex: 1 }}>
-                                    <input className="form-control form-control-sm mb-1" placeholder="Item label" value={item.label}
-                                      onChange={e => { const o = [...questForm.ordering_items]; o[i] = { ...o[i], label: e.target.value }; qSet({ ordering_items: o }) }} />
-                                    <input className="form-control form-control-sm" placeholder="Description (optional)" value={item.description}
-                                      onChange={e => { const o = [...questForm.ordering_items]; o[i] = { ...o[i], description: e.target.value }; qSet({ ordering_items: o }) }} />
+                            <div className="card-body" style={{ maxHeight: '500px', overflowY: 'auto' }}>
+                              <div className="text-muted mb-2" style={{ fontSize: '11px' }}>Add items in the correct order — top = first. Each problem has its own question.</div>
+                              {questForm.ordering_problems.map((prob, pi) => (
+                                <div key={prob.id} className="border rounded p-2 mb-3" style={{ background: '#f8fafc' }}>
+                                  <div className="d-flex justify-content-between align-items-center mb-2">
+                                    <strong style={{ fontSize: '12px', color: '#374151' }}>Problem {pi + 1}</strong>
+                                    {questForm.ordering_problems.length > 1 && (
+                                      <button className="btn btn-xs btn-ghost-danger" onClick={() => qSet({ ordering_problems: questForm.ordering_problems.filter((_, j) => j !== pi) })}>✕ Remove</button>
+                                    )}
                                   </div>
-                                  <button className="btn btn-xs btn-ghost-danger mt-1" onClick={() => qSet({ ordering_items: questForm.ordering_items.filter((_, j) => j !== i) })}>✕</button>
+                                  <div className="mb-2">
+                                    <input className="form-control form-control-sm" placeholder="Question (e.g. Arrange these steps in order)" value={prob.question}
+                                      onChange={e => { const op = [...questForm.ordering_problems]; op[pi] = { ...op[pi], question: e.target.value }; qSet({ ordering_problems: op }) }} />
+                                  </div>
+                                  <div className="d-flex justify-content-between align-items-center mb-1">
+                                    <label className="form-label mb-0" style={{ fontSize: '11px', fontWeight: 600 }}>Items (correct order, top = first)</label>
+                                    <button className="btn btn-xs btn-outline-secondary" onClick={() => {
+                                      const op = [...questForm.ordering_problems]
+                                      op[pi] = { ...op[pi], items: [...op[pi].items, { id: `o_${Date.now()}`, label: '', description: '' }] }
+                                      qSet({ ordering_problems: op })
+                                    }}>+ Add Item</button>
+                                  </div>
+                                  {prob.items.map((item, ii) => (
+                                    <div key={item.id} className="d-flex gap-1 align-items-start mb-2">
+                                      <span className="badge bg-secondary mt-1" style={{ minWidth: '22px', fontSize: '11px' }}>{ii + 1}</span>
+                                      <div style={{ flex: 1 }}>
+                                        <input className="form-control form-control-sm mb-1" placeholder="Item label" value={item.label}
+                                          onChange={e => { const op = [...questForm.ordering_problems]; op[pi].items[ii] = { ...op[pi].items[ii], label: e.target.value }; qSet({ ordering_problems: op }) }} />
+                                        <input className="form-control form-control-sm" placeholder="Description (optional)" value={item.description}
+                                          onChange={e => { const op = [...questForm.ordering_problems]; op[pi].items[ii] = { ...op[pi].items[ii], description: e.target.value }; qSet({ ordering_problems: op }) }} />
+                                      </div>
+                                      <button className="btn btn-xs btn-ghost-danger mt-1" onClick={() => { const op = [...questForm.ordering_problems]; op[pi].items = op[pi].items.filter((_, j) => j !== ii); qSet({ ordering_problems: op }) }}>✕</button>
+                                    </div>
+                                  ))}
+                                  {prob.items.length === 0 && <div className="text-muted" style={{ fontSize: '11px' }}>No items yet</div>}
                                 </div>
                               ))}
-                              {questForm.ordering_items.length === 0 && <div className="text-muted" style={{ fontSize: '12px' }}>No items yet</div>}
                             </div>
                           </div>
                         )}

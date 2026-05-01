@@ -187,9 +187,12 @@ const ActivityTypesPanel: React.FC<{ quests: QuestRow[] }> = ({ quests }) => {
   const counts: Record<string, number> = {};
   const bump = (k: string) => { counts[k] = (counts[k] ?? 0) + 1; };
   for (const q of quests) {
-    if (q.game_items?.length)      bump('drag_drop');
-    if (q.code_fill_items?.length) bump('code_fill');
-    if (q.ordering_items?.length)  bump('ordering');
+    // Mirror computeAvailableTabs: drag needs BOTH game_items AND drop_zones;
+    // balloon only needs game_items (no drop_zones); mc_questions goes to
+    // balloon or mc depending on question_type.
+    if (q.game_items?.length && q.drop_zones?.length) bump('drag_drop');
+    if (q.code_fill_items?.length)                    bump('code_fill');
+    if (q.ordering_items?.length)                     bump('ordering');
     if (q.mc_questions?.length) {
       if (isMultipleChoiceType(q.question_type)) bump('multiple_choice');
       else                                       bump('pop_balloon');
@@ -221,8 +224,9 @@ const ActivityTypesPanel: React.FC<{ quests: QuestRow[] }> = ({ quests }) => {
 };
 
 const QuestMixPanel: React.FC<{ quests: QuestRow[] }> = ({ quests }) => {
-  const lessons = quests.filter(q => !isMultipleChoiceType(q.question_type)).length;
-  const quizzes = quests.filter(q => isMultipleChoiceType(q.question_type)).length;
+  const lessons  = quests.filter(q => !isMultipleChoiceType(q.question_type) && q.question_type !== 'pop_balloon').length;
+  const quizzes  = quests.filter(q => isMultipleChoiceType(q.question_type)).length;
+  const balloons = quests.filter(q => q.question_type === 'pop_balloon').length;
   const totalXP = quests.reduce((s, q) => s + (q.basexp ?? 0), 0);
   const seen    = new Set<string>();
   for (const q of quests) {
@@ -245,6 +249,7 @@ const QuestMixPanel: React.FC<{ quests: QuestRow[] }> = ({ quests }) => {
       <div style={{ fontSize: 9, fontWeight: 700, color: '#484f58', letterSpacing: '1.5px', textTransform: 'uppercase', marginBottom: 10, fontFamily: "'JetBrains Mono',monospace" }}>Quest Mix</div>
       <Row icon="📚" label="Lessons"    value={lessons} />
       <Row icon="🧠" label="Quizzes"    value={quizzes} />
+      {balloons > 0 && <Row icon="🎈" label="Balloon Pop" value={balloons} />}
       <Row icon="⚡" label="Max XP"     value={totalXP.toLocaleString()} />
       <Row icon="🎯" label="Activities" value={seen.size} />
     </div>
@@ -430,7 +435,9 @@ export const CampaignInside: React.FC = () => {
   );
 
   // Level fully complete = every quest has been finished at least once.
-  const allDone = stats.total > 0 && stats.finished >= stats.total;
+  // Also treat a phase with zero active quests as "done" so the next-level
+  // button still appears and the user isn't stuck.
+  const allDone = stats.total === 0 ? !loading : stats.finished >= stats.total;
 
   const goToNextLevel = () => {
     if (phase === 'beginner')          navigate('/campaign/inside/intermediate');

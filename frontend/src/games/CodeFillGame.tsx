@@ -44,10 +44,16 @@ export const CodeFillGame: React.FC<Props> = ({ items, onComplete, resetSignal }
     setResults(res); setChecked(true);
     const allCorrect = res.every(Boolean);
     if (allCorrect) scoreRef.current += 1;
+    // Advance automatically only on a correct last answer — the user must
+    // press "Next →" / "Finish ✓" for incorrect attempts so they can retry.
     if (allCorrect && isLast) {
       setTimeout(() => onComplete(scoreRef.current, items.length), 700);
     }
   };
+
+  // Count filled blanks — use length check, not .filter(Boolean), so a blank
+  // answer of '0' or ' ' (single space) is still counted.
+  const filledCount = item.answers.reduce((n, _, i) => n + (answers[i] !== undefined && answers[i] !== '' ? 1 : 0), 0);
 
   const doNext = () => {
     if (isLast) { onComplete(scoreRef.current, items.length); return; }
@@ -123,7 +129,7 @@ export const CodeFillGame: React.FC<Props> = ({ items, onComplete, resetSignal }
       )}
       <div style={{ display: 'flex', gap: 10 }}>
         {!checked
-          ? <button onClick={doCheck} disabled={answers.filter(Boolean).length < item.answers.length} style={{ flex: 1, padding: '11px', borderRadius: 8, border: 'none', background: answers.filter(Boolean).length < item.answers.length ? 'rgba(72,79,88,0.2)' : 'linear-gradient(135deg,#238636,#196127)', color: answers.filter(Boolean).length < item.answers.length ? '#484f58' : '#fff', fontWeight: 700, fontSize: 13, cursor: answers.filter(Boolean).length < item.answers.length ? 'not-allowed' : 'pointer', fontFamily: 'Inter,sans-serif' }}>Check Answers</button>
+          ? <button onClick={doCheck} disabled={filledCount < item.answers.length} style={{ flex: 1, padding: '11px', borderRadius: 8, border: 'none', background: filledCount < item.answers.length ? 'rgba(72,79,88,0.2)' : 'linear-gradient(135deg,#238636,#196127)', color: filledCount < item.answers.length ? '#484f58' : '#fff', fontWeight: 700, fontSize: 13, cursor: filledCount < item.answers.length ? 'not-allowed' : 'pointer', fontFamily: 'Inter,sans-serif' }}>Check Answers</button>
           : results.every(Boolean)
             ? <button onClick={doNext} style={{ flex: 1, padding: '11px', borderRadius: 8, border: 'none', background: isLast ? '#facc15' : '#238636', color: '#000', fontWeight: 700, fontSize: 13, cursor: 'pointer', fontFamily: 'Inter,sans-serif' }}>
                 {isLast ? 'Finish ✓' : 'Next →'}

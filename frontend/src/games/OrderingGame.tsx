@@ -13,16 +13,23 @@ interface Props {
 const OrderingGameInner: React.FC<{ rawItems: OrderItem[]; onComplete: (score: number, total: number) => void; resetSignal: number }> = ({ rawItems, onComplete, resetSignal }) => {
   const [shuffleSeed, setShuffleSeed] = React.useState(0);
   const seededShuffle = React.useCallback((items: OrderItem[], seed: number) => {
-    const arr = [...items];
+    if (items.length <= 1) return [...items];
     let s = Math.max(1, seed | 0);
     const nextRand = () => {
       // Linear congruential generator (deterministic, render-safe).
       s = (1664525 * s + 1013904223) >>> 0;
       return s / 0x100000000;
     };
+    let arr = [...items];
     for (let i = arr.length - 1; i > 0; i--) {
       const j = Math.floor(nextRand() * (i + 1));
       [arr[i], arr[j]] = [arr[j], arr[i]];
+    }
+    // If the result happens to be in the correct order, swap the first two
+    // items to guarantee the puzzle is not trivially solved on load.
+    const alreadyCorrect = arr.every((item, i) => item.correct_order === i + 1);
+    if (alreadyCorrect && arr.length >= 2) {
+      [arr[0], arr[1]] = [arr[1], arr[0]];
     }
     return arr;
   }, []);
@@ -75,20 +82,23 @@ const OrderingGameInner: React.FC<{ rawItems: OrderItem[]; onComplete: (score: n
       <div style={{ background: 'rgba(163,113,247,0.08)', border: '1px solid rgba(163,113,247,0.25)', borderRadius: 8, padding: '10px 14px', fontSize: 13, color: '#8b949e', fontFamily: 'Inter,sans-serif' }}>
         🔢 Drag the steps into the correct order
       </div>
-      {order.map((item, i) => (
+      {order.map((item, i) => {
+        const rowCorrect = checked ? item.correct_order === i + 1 : null;
+        return (
         <div key={item.id} draggable={!submitted}
           onDragStart={() => handleDragStart(i)}
           onDragOver={e => e.preventDefault()}
           onDrop={() => handleDrop(i)}
-          style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '12px 14px', borderRadius: 8, border: `1px solid ${checked ? correct ? '#238636' : '#da3633' : dragging === i ? '#a371f7' : '#30363d'}`, background: checked ? correct ? 'rgba(35,134,54,0.07)' : 'rgba(218,54,51,0.07)' : dragging === i ? 'rgba(163,113,247,0.08)' : '#0d1117', cursor: submitted ? 'default' : 'grab', transition: 'all .15s', userSelect: 'none' }}>
+          style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '12px 14px', borderRadius: 8, border: `1px solid ${checked ? rowCorrect ? '#238636' : '#da3633' : dragging === i ? '#a371f7' : '#30363d'}`, background: checked ? rowCorrect ? 'rgba(35,134,54,0.07)' : 'rgba(218,54,51,0.07)' : dragging === i ? 'rgba(163,113,247,0.08)' : '#0d1117', cursor: submitted ? 'default' : 'grab', transition: 'all .15s', userSelect: 'none' }}>
           <div style={{ width: 28, height: 28, borderRadius: 6, background: 'rgba(163,113,247,0.15)', border: '1px solid rgba(163,113,247,0.3)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 12, fontWeight: 700, color: '#a371f7', fontFamily: "'JetBrains Mono',monospace", flexShrink: 0 }}>{i + 1}</div>
           <div style={{ flex: 1 }}>
             <div style={{ fontSize: 13, color: '#e6edf3', fontFamily: 'Inter,sans-serif', fontWeight: 600 }}>{item.label}</div>
             {item.description && <div style={{ fontSize: 11, color: '#8b949e', marginTop: 2, fontFamily: 'Inter,sans-serif' }}>{item.description}</div>}
           </div>
-          {checked && <span style={{ fontSize: 16 }}>{correct ? '✅' : '❌'}</span>}
+          {checked && <span style={{ fontSize: 16 }}>{rowCorrect ? '✅' : '❌'}</span>}
         </div>
-      ))}
+        );
+      })}
       {checked && (
         <div style={{ padding: '10px 14px', borderRadius: 8, background: correct ? 'rgba(35,134,54,0.1)' : 'rgba(218,54,51,0.09)', border: `1px solid ${correct ? 'rgba(35,134,54,0.4)' : 'rgba(218,54,51,0.35)'}`, fontSize: 13, textAlign: 'center', fontFamily: 'Inter,sans-serif', color: correct ? '#3fb950' : '#f85149' }}>
           {correct ? '🎉 Perfect order!' : '❌ Not quite — try rearranging the steps.'}
