@@ -125,8 +125,15 @@ export const LoginPage: React.FC = () => {
   };
 
   return (
+    <>
+    <style>{`
+      @media (max-width: 480px) {
+        .login-card { padding: 28px 20px !important; }
+        .login-card input { font-size: 16px !important; }
+      }
+    `}</style>
     <div style={containerStyle}>
-      <div style={cardStyle}>
+      <div className="login-card" style={cardStyle}>
         <div style={{ width: '100%', marginBottom: '15px', textAlign: 'left' }}>
           <button 
             onClick={() => navigate('/')} 
@@ -194,13 +201,14 @@ export const LoginPage: React.FC = () => {
 
       {banInfo && <BannedModal reason={banInfo.reason} onClose={() => setBanInfo(null)} />}
     </div>
+    </>
   );
 };
 
 const containerStyle: React.CSSProperties = { minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#0d1117', padding: '20px' };
 const cardStyle = { background: '#161b22', padding: '40px', borderRadius: '16px', border: '1px solid #30363d', width: '100%', maxWidth: '400px', boxShadow: '0 8px 32px rgba(0, 0, 0, 0.4)' };
 const labelStyle = { display: 'block', color: '#8b949e', fontSize: '12px', marginBottom: '8px', fontWeight: 'bold' as const };
-const inputStyle = { width: '100%', padding: '12px', background: '#0d1117', border: '1px solid #30363d', borderRadius: '8px', color: 'white', outline: 'none' };
+const inputStyle = { width: '100%', padding: '12px', background: '#0d1117', border: '1px solid #30363d', borderRadius: '8px', color: 'white', outline: 'none', fontSize: '16px' };
 const primaryBtnStyle = { width: '100%', padding: '12px', background: '#238636', color: 'white', border: 'none', borderRadius: '8px', fontWeight: 'bold' as const, cursor: 'pointer' };
 const secondaryBtnStyle = { width: '100%', padding: '12px', background: 'transparent', color: '#58a6ff', border: '1px solid #58a6ff', borderRadius: '8px', fontWeight: 'bold' as const, cursor: 'pointer' };
 const linkStyle = { color: '#58a6ff', cursor: 'pointer', textDecoration: 'underline' };

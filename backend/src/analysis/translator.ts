@@ -51,12 +51,51 @@ export class Translator {
   }
 
   private cleanName(name: any): string {
-  if (!name) return 'unknown';
-  if (typeof name === 'string') return name;
-  if (name.type === 'Identifier') return name.name;
-  if (Array.isArray(name)) return name.map(n => this.cleanName(n)).join('');
-  return String(name);
-}
+    if (!name) return 'unknown';
+    if (typeof name === 'string') return name;
+    if (name.type === 'Identifier') return name.name;
+    if (Array.isArray(name)) return name.map(n => this.cleanName(n)).join('');
+    return String(name);
+  }
+
+  /** True when a type string is a reference (& but not &&). */
+  private isRefType(t: string): boolean {
+    return t.includes('&') && !t.includes('&&');
+  }
+
+  /** True when a type string is a pointer. */
+  private isPtrType(t: string): boolean {
+    return t.includes('*');
+  }
+
+  /**
+   * Describes one function parameter in plain English, noting how it's passed.
+   * Copy, pass-by-reference, and pass-by-pointer all get different wording.
+   */
+  private describeParam(p: any): string {
+    const t    = String(p.varType || '');
+    const name = p.name || '?';
+    const def  = p.defaultValue ? ` (default: ${this.formatExpr(p.defaultValue)})` : '';
+    if (this.isRefType(t))
+      return `${t} ${name} — passed by reference (changes you make affect the caller's variable!)${def}`;
+    if (this.isPtrType(t))
+      return `${t} ${name} — passed as a pointer (you get its memory address, can modify the original)${def}`;
+    return `${t} ${name} — passed by value (your own private copy; changes stay local)${def}`;
+  }
+
+  /** One-word label for use in compact param lists. */
+  private shortParamTag(t: string): string {
+    if (this.isRefType(t)) return 'by ref!';
+    if (this.isPtrType(t)) return 'by ptr';
+    return 'copy';
+  }
+
+  /** True when a value node is nullptr / NULL — not plain integer 0, which is ambiguous. */
+  private isNullptr(node: any): boolean {
+    if (!node) return false;
+    if (node.type === 'Identifier') return node.name === 'nullptr' || node.name === 'NULL';
+    return false;
+  }
 
   private indent(): string {
     return '  '.repeat(this.indentLevel);
@@ -65,9 +104,222 @@ export class Translator {
   translate(ast: ASTNode): string[] {
     this.explanations = [];
     this.indentLevel = 0;
-    this.emittedTips = new Set(); // FIX #4: reset the tip-dedupe set per call
+    this.emittedTips = new Set();
     this.visit(ast);
     return this.explanations;
+  }
+
+  /**
+   * One friendly sentence per CFG node — emoji, plain English, a tiny metaphor.
+   * Does NOT recurse into children.
+   */
+  translateBrief(node: ASTNode | null | undefined): string {
+    if (!node) return '';
+    const n = node as any;
+
+    switch (node.type) {
+
+      // ── Functions ───────────────────────────────────────────────────────────
+      case 'FunctionDecl': {
+        if (n.name === 'main')
+          return '🚀 Your program wakes up here — this is where everything begins!';
+        const paramTags = (n.params || [])
+          .map((p: any) => `${p.varType} ${p.name || '?'} [${this.shortParamTag(String(p.varType || ''))}]`)
+          .join(', ');
+        const gives = n.returnType === 'void' ? 'gives nothing back' : `gives back a ${n.returnType}`;
+        return `🔧 A reusable task called "${n.name}" — takes ${paramTags || 'nothing'} and ${gives}.`;
+      }
+      case 'FunctionPrototype': {
+        const paramTags = (n.params || [])
+          .map((p: any) => `${p.varType} ${p.name || '?'} [${this.shortParamTag(String(p.varType || ''))}]`)
+          .join(', ');
+        return `📢 Early announcement: "${n.name}" exists and takes ${paramTags || 'nothing'} — the full code comes later.`;
+      }
+      case 'FunctionCall': {
+        const args = (n.arguments || []).map((a: any) => this.formatExpr(a)).join(', ');
+        return args
+          ? `📞 Ask "${n.name}" to do its job with: ${args}`
+          : `📞 Ask "${n.name}" to do its job.`;
+      }
+      case 'ReturnStatement':
+        return n.value
+          ? `↩️ Done! Hand back the result: ${this.formatExpr(n.value)}`
+          : `↩️ All done here — exit this function.`;
+
+      // ── Variables ───────────────────────────────────────────────────────────
+      case 'VariableDecl': {
+        const mods: string[] = Array.isArray(n.modifiers) ? n.modifiers : [];
+        const isConst = mods.includes('const') || mods.includes('constexpr');
+        const vt      = String(n.varType || '');
+        const isRef   = this.isRefType(vt);
+        const isPtr   = this.isPtrType(vt);
+        const isArr   = n.dimensions && n.dimensions.length > 0;
+        const name    = this.cleanName(n.name);
+        if (isConst) {
+          const val = n.value ? this.formatExpr(n.value) : '?';
+          return `❄️ Locked box "${name}" = ${val} — this value can never be changed.`;
+        }
+        if (isRef) {
+          return n.value
+            ? `🔗 "${name}" is an alias for ${this.formatExpr(n.value)} — same variable, different name. Changes affect the original!`
+            : `🔗 Reference "${name}" (${vt}) — another name for an existing variable. Must be bound at creation.`;
+        }
+        if (isPtr) {
+          if (n.value && this.isNullptr(n.value))
+            return `📌 Pointer "${name}" — set to nullptr right away (safe — it points at nothing for now).`;
+          return n.value
+            ? `📌 Pointer "${name}" — stores a memory address, currently pointing at ${this.formatExpr(n.value)}.`
+            : `📌 Pointer "${name}" — stores a memory address (like a GPS pin), currently unset!`;
+        }
+        if (isArr) {
+          const size = n.dimensions[0] ? this.formatExpr(n.dimensions[0]) : '?';
+          return `📦 Row of ${size} boxes called "${name}" — like ${size} numbered lockers side by side.`;
+        }
+        return n.value
+          ? `📦 Box "${name}" created and filled with ${this.formatExpr(n.value)}.`
+          : `⚠️ Empty box "${name}" created — it holds random garbage until you put something in it!`;
+      }
+      case 'Assignment': {
+        const tgt = typeof n.target === 'string' ? n.target : this.formatExpr(n.target);
+        if (n.operator === '=' && this.isNullptr(n.value))
+          return `📌 Set pointer "${tgt}" to null — it now safely points at nothing.`;
+        const val = this.formatExpr(n.value);
+        const opFriendly: Record<string, string> = {
+          '=': 'Replace', '+=': 'Add to', '-=': 'Subtract from',
+          '*=': 'Multiply', '/=': 'Divide', '%=': 'Modulo update',
+        };
+        const verb = opFriendly[n.operator] || 'Update';
+        return `✏️ ${verb} "${tgt}" — new value becomes ${val}.`;
+      }
+      case 'ArrayAccess': {
+        const idx = (n.indices || []).map((i: any) => this.formatExpr(i)).join(', ');
+        return `🔍 Reach into box "${n.name}" and grab item at slot [${idx}].`;
+      }
+
+      // ── Decisions ───────────────────────────────────────────────────────────
+      case 'IfStatement': {
+        const cond = this.formatExpr(n.condition);
+        return `🤔 Decision: is ${cond}? If yes, go one way; if no, go another — like a fork in the road.`;
+      }
+      case 'SwitchStatement': {
+        const count = (n.cases || []).length;
+        return `🎯 Check "${this.formatExpr(n.condition)}" and jump to the matching option — like a ${count}-item menu.`;
+      }
+      case 'ConditionalExpression': {
+        const cond  = this.formatExpr(n.condition);
+        const yes   = this.formatExpr(n.trueExpression);
+        const no    = this.formatExpr(n.falseExpression);
+        return `❓ Quick pick: if ${cond} then ${yes}, otherwise ${no}.`;
+      }
+
+      // ── Loops ────────────────────────────────────────────────────────────────
+      case 'WhileLoop':
+        return `🔁 Keep looping as long as "${this.formatExpr(n.condition)}" stays true — stops the moment it's false.`;
+      case 'DoWhileLoop':
+        return `🔄 Do the work first, then ask: "${this.formatExpr(n.condition)}" — always runs at least once.`;
+      case 'ForLoop': {
+        const cond = n.condition ? this.formatExpr(n.condition) : 'forever';
+        const upd  = n.update    ? `, stepping by ${this.formatExpr(n.update)}` : '';
+        return `🔢 Count loop — keep going while ${cond}${upd}.`;
+      }
+      case 'RangeBasedFor':
+        return `🔁 Walk through every item in "${this.formatExpr(n.range)}", calling each one "${n.name}".`;
+      case 'LoopControl':
+        return n.value === 'break'
+          ? '🛑 Emergency exit! Jump out of the loop right now.'
+          : '⏭️ Skip the rest of this round and jump straight to the next one.';
+
+      // ── I/O ──────────────────────────────────────────────────────────────────
+      case 'CoutStatement': {
+        const items = this.flattenCout(n.values)
+          .filter(s => s !== 'cout' && s !== 'std::cout').join(', ');
+        return `🖥️ Print to the screen: ${items || 'a blank line'}.`;
+      }
+      case 'CinStatement': {
+        const flatten = (x: any): any[] => {
+          if (!x) return [];
+          if (x.type === 'BinaryOp' && x.operator === '>>') return [...flatten(x.left), ...flatten(x.right)];
+          return [x];
+        };
+        const names = flatten(n.targets ?? n.target)
+          .map((t: any) => typeof t === 'string' ? t : this.cleanName(t.name ?? t))
+          .filter((s: string) => s !== 'cin' && s !== 'std::cin');
+        return `⌨️ Pause and wait for the user to type — save what they enter into "${names.join('", "') || 'a variable'}".`;
+      }
+
+      // ── Memory ───────────────────────────────────────────────────────────────
+      case 'NewExpression':
+        return n.size
+          ? `🆕 Reserve fresh memory for ${this.formatExpr(n.size)} ${n.baseType} values — remember to free it when done!`
+          : `🆕 Create a brand-new ${n.baseType} in memory — remember to free it when done!`;
+      case 'DeleteStatement':
+        return n.isArray
+          ? `🗑️ Release the whole array "${this.cleanName(n.target)}" back to the system — it's gone!`
+          : `🗑️ Free "${this.cleanName(n.target)}" from memory — don't touch that pointer anymore!`;
+
+      // ── Errors ───────────────────────────────────────────────────────────────
+      case 'TryStatement':
+        return '🛡️ Risky zone — if anything crashes here, the catch block swoops in to handle it.';
+      case 'ThrowStatement': {
+        const val = n.value ? this.formatExpr(n.value) : 'the current error';
+        return `🚀 Toss the error "${val}" — the nearest catch block will catch it.`;
+      }
+
+      // ── Type ops ─────────────────────────────────────────────────────────────
+      case 'CastExpression':
+        return `🔄 Convert "${this.formatExpr(n.operand)}" into type ${n.targetType} — like converting miles to km.`;
+      case 'SizeofExpression':
+        return `📏 How many bytes does "${this.formatExpr(n.value)}" take up in memory?`;
+
+      // ── Pointers ─────────────────────────────────────────────────────────────
+      case 'AddressOf':
+        return `📍 Find where "${this.cleanName(n.operand)}" lives in memory — returns its GPS address.`;
+      case 'Dereference':
+        return `🎯 Follow the pointer "${this.cleanName(n.operand)}" and read the value it's pointing at.`;
+      case 'PreIncrement':
+        return `⬆️ Add 1 to "${this.cleanName(n.operand)}" first, then use the new value.`;
+      case 'PostIncrement':
+        return `⬆️ Use "${this.cleanName(n.operand)}" as-is right now, then add 1 to it afterward.`;
+      case 'PreDecrement':
+        return `⬇️ Subtract 1 from "${this.cleanName(n.operand)}" first, then use the new value.`;
+      case 'PostDecrement':
+        return `⬇️ Use "${this.cleanName(n.operand)}" as-is right now, then subtract 1 afterward.`;
+
+      // ── Goto / Labels ─────────────────────────────────────────────────────────
+      case 'GotoStatement':
+        return `🏃 Jump straight to the marker called "${n.label}".`;
+      case 'LabelStatement':
+        return `🏷️ Marker "${n.label}" — a landing spot that goto can jump to.`;
+
+      // ── Expressions ──────────────────────────────────────────────────────────
+      case 'BinaryOp':
+        return `🧮 Calculate: ${this.formatExpr(node)}`;
+      case 'ExpressionStatement':
+        return `▶️ Run: ${this.formatExpr(n.expression)}`;
+      case 'InitializerList': {
+        const vals = (n.values || []).map((v: any) => this.formatExpr(v)).join(', ');
+        return `📋 Fill all slots at once with: { ${vals} }`;
+      }
+
+      // ── Structure ─────────────────────────────────────────────────────────────
+      case 'Block':
+        return `📂 A grouped block of statements — they run together as a unit.`;
+      case 'LambdaExpression': {
+        const cap = n.capture ? `captures [${n.capture}]` : 'captures nothing';
+        return `🎭 Inline mini-function (lambda) — ${cap}, defined right here on the spot.`;
+      }
+      case 'GlobalAccess':
+        return `🌐 Access "${n.name}" from the global scope.`;
+      case 'CatchClause': {
+        const param = n.param?.type === 'CatchAll'
+          ? 'any error'
+          : `${n.param?.varType ?? ''} ${n.param?.name ?? ''}`.trim();
+        return `🪤 Catch block — handles errors of type: ${param}.`;
+      }
+
+      default:
+        return node.type.replace(/([A-Z])/g, ' $1').trim();
+    }
   }
 
   private visit(node: ASTNode | null | string | undefined): void {
@@ -149,13 +401,18 @@ export class Translator {
   private visitVariableDecl(node: VariableDeclNode): void {
     const name = this.cleanName(node.name);
     const isConst = Array.isArray((node as any).modifiers) && (node as any).modifiers.includes('const');
-    const isPtr   = node.varType.includes('*');
+    const isRef   = this.isRefType(node.varType);
+    const isPtr   = this.isPtrType(node.varType);
     const isArray = node.dimensions && node.dimensions.length > 0;
 
     // 1. Identify the "Storage Type"
     if (isConst) {
       this.explanations.push(`${this.indent()}❄️ **Constant (Frozen): '${name}'** (type: ${node.varType})`);
       this.explanations.push(`${this.indent()}   This value is locked! It cannot be changed after this line.`);
+    } else if (isRef) {
+      this.explanations.push(`${this.indent()}🔗 **Reference Alias: '${name}'** (type: ${node.varType})`);
+      this.explanations.push(`${this.indent()}   This is just another name for the same variable — like a nickname. Changing '${name}' changes the original!`);
+      this.pushTipOnce(`${this.indent()}   💡 References must be bound when declared and can never be rebound to another variable.`);
     } else if (isPtr) {
       this.explanations.push(`${this.indent()}📌 **Pointer: '${name}'** (type: ${node.varType})`);
       this.explanations.push(`${this.indent()}   This doesn't store data directly; it stores a **memory address** (like a GPS coordinate) pointing to data elsewhere.`);
@@ -192,8 +449,14 @@ export class Translator {
     const value = this.formatExpr(node.value);
     const opLabel = COMPOUND_OP_LABELS[node.operator] || 'update';
 
-    this.explanations.push(`${this.indent()}✏️  **${opLabel}: '${target}'**`);
-    this.explanations.push(`${this.indent()}   New value: ${value}`);
+    if (node.operator === '=' && this.isNullptr(node.value)) {
+      this.explanations.push(`${this.indent()}📌 **Null Out Pointer: '${target}'**`);
+      this.explanations.push(`${this.indent()}   Setting '${target}' to nullptr — it now safely points at nothing.`);
+      this.pushTipOnce(`${this.indent()}   💡 Always null out a pointer after deleting it to avoid accidental reuse.`);
+    } else {
+      this.explanations.push(`${this.indent()}✏️  **${opLabel}: '${target}'**`);
+      this.explanations.push(`${this.indent()}   New value: ${value}`);
+    }
     this.explanations.push('');
   }
 
@@ -202,13 +465,17 @@ export class Translator {
   // =========================================================================
 
   private visitFunctionPrototype(node: FunctionPrototypeNode): void {
-    const name   = this.cleanName(node.name);
-    const params = node.params.map((p: any) =>
-      p.name ? `${p.varType} ${p.name}` : p.varType,
-    ).join(', ');
+    const name = this.cleanName(node.name);
 
     this.explanations.push(`${this.indent()}📢 **Function Announcement: '${name}'**`);
-    this.explanations.push(`${this.indent()}   Parameters: ${params || 'none'}`);
+    if (node.params.length > 0) {
+      this.explanations.push(`${this.indent()}   Parameters:`);
+      node.params.forEach((p: any) => {
+        this.explanations.push(`${this.indent()}     • ${this.describeParam(p)}`);
+      });
+    } else {
+      this.explanations.push(`${this.indent()}   Parameters: none`);
+    }
     this.explanations.push(`${this.indent()}   Returns: ${node.returnType}`);
     this.pushTipOnce(`${this.indent()}   💡 This is a forward declaration — the full code comes later.`);
     this.explanations.push('');
@@ -224,11 +491,15 @@ export class Translator {
         this.explanations.push('🚀 **MAIN FUNCTION**');
         this.explanations.push('This is the entry point of your program.');
     } else {
-        const params = (node.params || []).map((p: any) =>
-            `${p.varType} ${p.name || '?'}`
-        ).join(', ');
         this.explanations.push(`🔧 **FUNCTION: ${name}**`);
-        this.explanations.push(`• **Inputs:** ${params || 'none'}`);
+        if ((node.params || []).length > 0) {
+          this.explanations.push('• **Inputs:**');
+          (node.params || []).forEach((p: any) => {
+            this.explanations.push(`    – ${this.describeParam(p)}`);
+          });
+        } else {
+          this.explanations.push('• **Inputs:** none');
+        }
         this.explanations.push(`• **Returns:** ${node.returnType}`);
     }
 
@@ -314,13 +585,12 @@ export class Translator {
 
   private visitBinaryOp(node: BinaryOpNode): void {
     const expr = this.formatExpr(node);
-    // Only add an explanation if it's a significant calculation (not just a simple assignment)
+    // formatExpr already renders the full expression tree — no need to recurse.
     if (this.indentLevel > 0) {
-        this.explanations.push(`${this.indent()}🧮 **Calculating:** ${expr}`);
+      this.explanations.push(`${this.indent()}🧮 **Calculating:** ${expr}`);
+      this.explanations.push('');
     }
-  this.visit(node.left);
-  this.visit(node.right);
-}
+  }
 
   private visitWhileLoop(node: WhileLoopNode): void {
     const condition = this.formatExpr(node.condition);
@@ -583,10 +853,11 @@ private visitCoutStatement(node: any): void {
   }
 
   private visitAddressOf(node: UnaryOpNode): void {
-  const v = this.cleanName(node.operand);
-  this.explanations.push(`${this.indent()}📍 **&${v}** — Finding the Address`);
-  this.explanations.push(`${this.indent()}   Instead of looking at what's inside '${v}', we are looking for its coordinates in memory (like a GPS location).`);
-}
+    const v = this.cleanName(node.operand);
+    this.explanations.push(`${this.indent()}📍 **&${v}** — Finding the Address`);
+    this.explanations.push(`${this.indent()}   Instead of looking at what's inside '${v}', we are looking for its coordinates in memory (like a GPS location).`);
+    this.explanations.push('');
+  }
 
   private visitDereference(node: UnaryOpNode): void {
     const v = this.cleanName(node.operand);
@@ -737,6 +1008,41 @@ private visitCoutStatement(node: any): void {
     const val = node.value ? this.formatExpr(node.value) : '(rethrow)';
     this.explanations.push(`${this.indent()}🚀 **Throw:** Signals an error with value: ${val}`);
     this.explanations.push(`${this.indent()}   Execution jumps to the nearest matching catch block.`);
+    this.explanations.push('');
+  }
+
+  // =========================================================================
+  //  GOTO / LABELS
+  // =========================================================================
+
+  private visitGotoStatement(node: any): void {
+    this.explanations.push(`${this.indent()}🏃 **goto ${node.label}** — Jumps directly to the '${node.label}' marker`);
+    this.pushTipOnce(`${this.indent()}   💡 goto can make code hard to follow — modern C++ rarely needs it.`);
+    this.explanations.push('');
+  }
+
+  private visitLabelStatement(node: any): void {
+    this.explanations.push(`${this.indent()}🏷️ **Label: '${node.label}'** — a named landing spot`);
+    this.explanations.push(`${this.indent()}   Execution can jump here via 'goto ${node.label}'.`);
+    if (node.statement) this.visit(node.statement);
+    this.explanations.push('');
+  }
+
+  // =========================================================================
+  //  LAMBDA EXPRESSIONS
+  // =========================================================================
+
+  private visitLambdaExpression(node: any): void {
+    const capture = node.capture ? `[${node.capture}]` : '[]';
+    this.explanations.push(`${this.indent()}🎭 **Lambda (Inline Function):** ${capture}`);
+    this.explanations.push(`${this.indent()}   A mini function defined right here, not at the top level.`);
+    if (node.capture && node.capture !== '') {
+      this.explanations.push(`${this.indent()}   Captures from outer scope: ${node.capture}`);
+    }
+    this.explanations.push('');
+    this.indentLevel++;
+    (node.body || []).forEach((stmt: any) => this.visit(stmt));
+    this.indentLevel--;
     this.explanations.push('');
   }
 

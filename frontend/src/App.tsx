@@ -18,6 +18,7 @@ import LessonActivity from './lessonactivity';
 import { AdminPanel } from './AdminPanel';
 import UserManualPage from './UserManualPage';
 import TutorialsPage from './TutorialsPage';
+import PatchNotesPage from './PatchNotesPage';
 
 // ── Impersonation banner — shown globally when an admin is previewing a user ──
 const BANNER_HEIGHT = 40; // px — keep in sync with banner padding + line-height
@@ -138,6 +139,7 @@ export const App: React.FC = () => {
           <Route path="/leaderboard" element={<LeaderboardPage />} />
           <Route path="/manual" element={<UserManualPage />} />
           <Route path="/tutorials" element={<TutorialsPage />} />
+          <Route path="/patch-notes" element={<PatchNotesPage />} />
 
           {/* Protected Routes — guests allowed */}
           <Route path="/home"    element={<ProtectedRoute><HomeDashboard /></ProtectedRoute>} />

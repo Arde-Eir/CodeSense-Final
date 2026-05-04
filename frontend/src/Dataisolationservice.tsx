@@ -120,8 +120,8 @@ export class DataIsolationService {
 
   static getSandboxCode(userId: string | null, filename: string): string | null {
     const key  = userId
-      ? this.getUserKey(userId, `sandbox_${filename}`)
-      : this.getGuestKey(`sandbox_${filename}`);
+      ? this.getUserKey(userId, `${this.SANDBOX_PREFIX}${filename}`)
+      : this.getGuestKey(`${this.SANDBOX_PREFIX}${filename}`);
     const data = userId ? localStorage.getItem(key) : sessionStorage.getItem(key);
     if (!data) return null;
     return JSON.parse(data).code;

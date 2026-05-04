@@ -127,8 +127,9 @@ export function validateGraph(nodes: Node[], edges: Edge[]): ValidationResult {
 
   // ── 5. Unreachable from Start ──────────────────────────────────────────────
   if (startNodes.length === 1) {
-    const reachable   = reachableFrom(startNodes[0].id, edges);
-    const unreachable = nodes.filter(n => !reachable.has(n.id));
+    const reachable    = reachableFrom(startNodes[0].id, edges);
+    const isolatedSet  = new Set(isolated.map(n => n.id)); // already reported in rule 4
+    const unreachable  = nodes.filter(n => !reachable.has(n.id) && !isolatedSet.has(n.id));
     if (unreachable.length > 0) {
       push('error', 'UNREACHABLE_NODES',
         `${unreachable.length} node(s) cannot be reached from Start and will never execute: ` +

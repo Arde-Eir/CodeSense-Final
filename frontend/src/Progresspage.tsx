@@ -411,6 +411,33 @@ export const ProgressPage: React.FC = () => {
   })()
 
   return (
+    <>
+    <style>{`
+      @media (max-width: 768px) {
+        .prog-header {
+          flex-wrap: wrap !important;
+          gap: 8px 12px !important;
+          padding: 10px 14px !important;
+        }
+        .prog-title-group {
+          order: -1;
+          width: 100%;
+          justify-content: center !important;
+        }
+        .prog-title-group h1 { font-size: 16px !important; }
+        .prog-back-btn { font-size: 12px !important; min-height: 36px; }
+        .prog-actions { gap: 6px !important; }
+        .prog-share-label { display: none; }
+        .prog-share-icon { display: inline !important; }
+        .prog-refresh-full { display: none; }
+        .prog-refresh-short { display: inline !important; }
+        .prog-share-btn, .prog-refresh-btn {
+          padding: 8px 10px !important;
+          font-size: 12px !important;
+          min-height: 36px !important;
+        }
+      }
+    `}</style>
     <div style={{
       minHeight: '100vh', width: '100%',
       background: 'linear-gradient(135deg, #0d1117 0%, #1a1f2e 100%)',
@@ -418,22 +445,22 @@ export const ProgressPage: React.FC = () => {
       boxSizing: 'border-box' as const
     }}>
       {/* ── Header ── */}
-      <header style={{
+      <header className="prog-header" style={{
         display: 'flex', justifyContent: 'space-between', alignItems: 'center',
         padding: '16px 20px', background: 'rgba(22, 27, 34, 0.95)',
         borderBottom: '1px solid #30363d', width: '100%', boxSizing: 'border-box' as const,
         position: 'sticky', top: 0, zIndex: 10, backdropFilter: 'blur(8px)',
       }}>
-        <button onClick={() => navigate('/home')}
+        <button className="prog-back-btn" onClick={() => navigate('/home')}
           style={{ background: 'transparent', border: 'none', color: '#8b949e', cursor: 'pointer', fontSize: 14 }}>
           ← Back to Dashboard
         </button>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+        <div className="prog-title-group" style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
           <span style={{ fontSize: 20 }}>📊</span>
           <h1 style={{ color: 'white', margin: 0, fontSize: 20, fontWeight: 600 }}>Progress Report</h1>
         </div>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-          <button onClick={shareProgress}
+        <div className="prog-actions" style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+          <button className="prog-share-btn" onClick={shareProgress}
             style={{
               background: 'rgba(76,175,80,0.12)', border: '1px solid rgba(76,175,80,0.3)',
               color: '#4caf50', padding: '6px 12px', borderRadius: 6,
@@ -442,16 +469,18 @@ export const ProgressPage: React.FC = () => {
             onMouseEnter={e => { e.currentTarget.style.background = 'rgba(76,175,80,0.2)' }}
             onMouseLeave={e => { e.currentTarget.style.background = 'rgba(76,175,80,0.12)' }}
           >
-            {shareMsg || '📋 Share Progress'}
+            <span className="prog-share-icon" style={{ display: 'none' }}>📋</span>
+            <span className="prog-share-label">{shareMsg || '📋 Share Progress'}</span>
           </button>
-          <button onClick={() => fetchAll(true)} disabled={refreshing}
+          <button className="prog-refresh-btn" onClick={() => fetchAll(true)} disabled={refreshing}
             style={{
               background: 'transparent', border: '1px solid #30363d',
               color: refreshing ? '#484f58' : '#8b949e',
               cursor: refreshing ? 'not-allowed' : 'pointer',
               fontSize: 12, padding: '6px 12px', borderRadius: 6,
             }}>
-            {refreshing ? '⟳ Refreshing…' : '⟳ Refresh'}
+            <span className="prog-refresh-full">{refreshing ? '⟳ Refreshing…' : '⟳ Refresh'}</span>
+            <span className="prog-refresh-short" style={{ display: 'none' }}>⟳</span>
           </button>
           {avatarUrl
             ? <img src={avatarUrl} alt="avatar" style={{ width: 34, height: 34, borderRadius: '50%', objectFit: 'cover', border: '2px solid #30363d' }} />
@@ -1147,6 +1176,7 @@ export const ProgressPage: React.FC = () => {
         )}
       </div>
     </div>
+    </>
   );
 };
 

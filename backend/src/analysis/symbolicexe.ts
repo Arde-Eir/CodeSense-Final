@@ -115,17 +115,24 @@ export class SymbolicExecutor {
         if (symbol.initialized) this.state.initialized.add(symbol.name);
         if (symbol.dimensions?.length) {
           this.state.variables.set(symbol.name, {
-            type: 'concrete', value: 0, arraySize: symbol.dimensions[0],
+            type: 'concrete', value: 0,
+            arraySize: symbol.dimensions[0],
+            arraySizes: symbol.dimensions,
+          });
+        } else if (symbol.type.endsWith('*')) {
+          // Global pointer: if uninitialized treat as null (common default)
+          this.state.variables.set(symbol.name, {
+            type: 'pointer', offset: 0, isNull: !symbol.initialized,
           });
         }
       } else {
-        // Pre-seed local arrays too so bounds checks work even before decl is visited
+        // Pre-seed local arrays so bounds checks work before decl is visited
         if (symbol.dimensions?.length) {
           this.state.variables.set(symbol.name, {
-  type: 'concrete', value: 0,
-  arraySize: symbol.dimensions[0],
-  arraySizes: symbol.dimensions,   // store ALL dims
-});
+            type: 'concrete', value: 0,
+            arraySize: symbol.dimensions[0],
+            arraySizes: symbol.dimensions,
+          });
         }
       }
     });
@@ -203,6 +210,7 @@ export class SymbolicExecutor {
   // ==========================================================================
   private visitProgram(node: any): SymbolicValue {
     (node.directives || []).forEach((d: ASTNode) => this.visit(d));
+    if (node.namespace) this.visit(node.namespace);
     (node.body || []).forEach((stmt: ASTNode) => this.visit(stmt));
     return { type: 'unknown' as const };
   }
@@ -286,6 +294,11 @@ export class SymbolicExecutor {
       const v = d?.value;
       if (typeof v === 'number') allDims.push(v);
     });
+  }
+  // Infer size from initializer list when dimensions are not explicit: int arr[] = {1,2,3}
+  if (allDims.length === 0 && (node.value as any)?.type === 'InitializerList') {
+    const listLen = ((node.value as any).values || []).length;
+    if (listLen > 0) allDims.push(listLen);
   }
 
   const finalVal: SymbolicValue = allDims.length > 0
@@ -569,9 +582,11 @@ export class SymbolicExecutor {
   private visitBinaryOp(node: BinaryOpNode): SymbolicValue {
 
     if (node.operator === '<<' || node.operator === '>>') {
-        this.visit(node.left);
-        this.visit(node.right);
-        return { type: 'unknown' as const };
+      const lv = this.visit(node.left);
+      const rv = this.visit(node.right);
+      const arraySize = (lv as any).arraySize ?? (rv as any).arraySize;
+      if (arraySize !== undefined) return { type: 'unknown', arraySize } as SymbolicValue;
+      return { type: 'unknown' as const };
     }
     const leftRaw  = this.visit(node.left);
     const rightRaw = this.visit(node.right);
@@ -640,6 +655,20 @@ export class SymbolicExecutor {
       }
     }
 
+    // Pointer arithmetic: ptr+n, ptr-n, n+ptr
+    if (node.operator === '+' || node.operator === '-') {
+      const leftIsPtr  = left.type === 'pointer' || left.type === 'nullptr';
+      const rightIsPtr = right.type === 'pointer' || right.type === 'nullptr';
+      if (leftIsPtr && right.type === 'concrete') {
+        const ptrName = typeof node.left === 'string' ? node.left : (node.left as any)?.name ?? 'ptr';
+        return this.applyPointerArithmetic(left, right.value, node.operator as '+' | '-', ptrName, (node as any).line || 0);
+      }
+      if (rightIsPtr && left.type === 'concrete' && node.operator === '+') {
+        const ptrName = typeof node.right === 'string' ? node.right : (node.right as any)?.name ?? 'ptr';
+        return this.applyPointerArithmetic(right, left.value, '+', ptrName, (node as any).line || 0);
+      }
+    }
+
     if (left.type === 'concrete' && right.type === 'concrete') {
       const res = this.evaluateConcrete(node.operator, left.value, right.value);
       if (res.type === 'concrete' && ['+', '-', '*'].includes(node.operator)) {
@@ -672,6 +701,35 @@ export class SymbolicExecutor {
     return this.visitUnaryOp(node);
   }
 
+  private applyPointerArithmetic(
+    ptr: SymbolicValue,
+    offset: number,
+    op: '+' | '-',
+    ptrName: string,
+    line: number,
+  ): SymbolicValue {
+    if (ptr.type === 'nullptr' || (ptr.type === 'pointer' && (ptr as any).isNull)) {
+      this.addSafetyCheck(line, 'pointer', 'UNSAFE',
+        `Pointer arithmetic on null pointer '${ptrName}' — undefined behavior.`);
+      return { type: 'pointer', offset: 0, isNull: true };
+    }
+    const base = ptr as Extract<SymbolicValue, { type: 'pointer' }>;
+    const newOffset = op === '+' ? (base.offset ?? 0) + offset : (base.offset ?? 0) - offset;
+    if (base.arraySize !== undefined) {
+      if (newOffset < 0) {
+        this.addSafetyCheck(line, 'bounds', 'UNSAFE',
+          `Pointer arithmetic on '${ptrName}': offset ${newOffset} is negative — out of bounds.`);
+      } else if (newOffset > base.arraySize) {
+        this.addSafetyCheck(line, 'bounds', 'UNSAFE',
+          `Pointer arithmetic on '${ptrName}': offset ${newOffset} exceeds array size ${base.arraySize} — out of bounds (valid: 0–${base.arraySize - 1}).`);
+      } else if (newOffset === base.arraySize) {
+        this.addSafetyCheck(line, 'bounds', 'WARNING',
+          `Pointer arithmetic on '${ptrName}': offset ${newOffset} is one-past-the-end — valid for comparison only, dereferencing is undefined behavior.`);
+      }
+    }
+    return { ...base, offset: newOffset };
+  }
+
   private visitUnaryOp(node: UnaryOpNode): SymbolicValue {
     const operandNode = node.operand as any;
     const name = typeof node.operand === 'string' ? node.operand : operandNode?.name;
@@ -701,10 +759,10 @@ export class SymbolicExecutor {
     }
 
     if (node.type === 'Dereference') {
-      if (!val || (val.type === 'pointer' && val.isNull)) {
+      if (!val || val.type === 'nullptr' || (val.type === 'pointer' && val.isNull)) {
         this.addSafetyCheck(
           (node as any).line || 0, 'deref', 'UNSAFE',
-          `Null pointer dereference: '${name}'`,
+          `Null pointer dereference: '${name}' is null`,
         );
       }
       if (name && this.state.freedPointers.has(name)) {
@@ -743,22 +801,22 @@ export class SymbolicExecutor {
   private visitArrayAccess(node: ArrayAccessNode): SymbolicValue {
     const arr = this.state.variables.get(node.name);
 
-    if (arr && arr.type === 'pointer') {
-    if (arr.isNull) {
-      this.addSafetyCheck(
-        (node as any).line || 0, 'bounds', 'UNSAFE',
-        `Null pointer '${node.name}' used as array — will cause segfault`
-      );
-      return { type: 'unknown' as const };
+    if (arr) {
+      if (arr.type === 'nullptr' || (arr.type === 'pointer' && arr.isNull)) {
+        this.addSafetyCheck(
+          (node as any).line || 0, 'bounds', 'UNSAFE',
+          `Null pointer '${node.name}' used as array — will cause segfault`,
+        );
+        return { type: 'unknown' as const };
+      }
+      if (arr.type === 'pointer' && arr.isFreed) {
+        this.addSafetyCheck(
+          (node as any).line || 0, 'bounds', 'UNSAFE',
+          `Use-after-free: '${node.name}' was deleted and then accessed`,
+        );
+        return { type: 'unknown' as const };
+      }
     }
-    if (arr.isFreed) {
-      this.addSafetyCheck(
-        (node as any).line || 0, 'bounds', 'UNSAFE',
-        `Use-after-free: '${node.name}' was deleted and then accessed`
-      );
-      return { type: 'unknown' as const };
-    }
-  }
   
     if (arr?.arraySize !== undefined) {
       node.indices.forEach((indexNode: ASTNode, dim: number) => {
@@ -1001,6 +1059,10 @@ export class SymbolicExecutor {
   // FIX 15: visitIdentifier — check initialized set for uninitialized access
   // ==========================================================================
   private visitIdentifier(node: any): SymbolicValue {
+    if (node.name === 'nullptr' || node.name === 'NULL') {
+      return { type: 'nullptr' };
+    }
+
     const val = this.state.variables.get(node.name);
 
     if (!val && !this.state.initialized.has(node.name)) {
@@ -1061,34 +1123,63 @@ export class SymbolicExecutor {
   // ==========================================================================
 
   private mergeStates(s1: SymbolicState, s2: SymbolicState): SymbolicState {
-    const merged = this.cloneState();
-    const allKeys = new Set([...s1.variables.keys(), ...s2.variables.keys()]);
+    // Start from a genuinely empty state — do NOT clone this.state, which may
+    // carry stale variables from a previous branch or iteration.
+    const merged: SymbolicState = {
+      variables: new Map(),
+      pathConditions: [],
+      initialized: new Set(),
+      allocatedPointers: new Map(),
+      freedPointers: new Set(),
+    };
 
+    const allKeys = new Set([...s1.variables.keys(), ...s2.variables.keys()]);
     allKeys.forEach(k => {
       const v1 = s1.variables.get(k);
       const v2 = s2.variables.get(k);
       if (JSON.stringify(v1) === JSON.stringify(v2)) {
         merged.variables.set(k, v1!);
       } else {
-        merged.variables.set(k, {
-          type: 'unknown',
-          arraySize: v1?.arraySize ?? v2?.arraySize,
-        } as SymbolicValue);
+        // When both sides are pointer types, preserve safety-critical flags
+        // conservatively (isNull/isFreed from either branch are possible).
+        const bothPtr = (v1?.type === 'pointer' || v1?.type === 'nullptr') &&
+                        (v2?.type === 'pointer' || v2?.type === 'nullptr');
+        if (bothPtr) {
+          merged.variables.set(k, {
+            type: 'pointer',
+            offset: 0,
+            isNull:  ((v1 as any)?.isNull  || v1?.type === 'nullptr') ||
+                     ((v2 as any)?.isNull  || v2?.type === 'nullptr'),
+            isFreed: (v1 as any)?.isFreed || (v2 as any)?.isFreed,
+            arraySize:  v1?.arraySize  ?? v2?.arraySize,
+            arraySizes: (v1 as any)?.arraySizes ?? (v2 as any)?.arraySizes,
+          } as SymbolicValue);
+        } else {
+          merged.variables.set(k, {
+            type: 'unknown',
+            arraySize:  v1?.arraySize  ?? v2?.arraySize,
+            arraySizes: (v1 as any)?.arraySizes ?? (v2 as any)?.arraySizes,
+          } as SymbolicValue);
+        }
+      }
+    });
+
+    // Union path conditions from both branches
+    s1.pathConditions.forEach(c => merged.pathConditions.push(c));
+    s2.pathConditions.forEach(c => {
+      if (!merged.pathConditions.some(e => JSON.stringify(e) === JSON.stringify(c))) {
+        merged.pathConditions.push(c);
       }
     });
 
     s1.allocatedPointers.forEach((info, ptr) => {
       const info2 = s2.allocatedPointers.get(ptr);
-      if (info2) {
-        merged.allocatedPointers.set(ptr, { ...info, freed: info.freed && info2.freed });
-      } else {
-        merged.allocatedPointers.set(ptr, { ...info });
-      }
+      merged.allocatedPointers.set(ptr, info2
+        ? { ...info, freed: info.freed && info2.freed }
+        : { ...info });
     });
     s2.allocatedPointers.forEach((info, ptr) => {
-      if (!merged.allocatedPointers.has(ptr)) {
-        merged.allocatedPointers.set(ptr, { ...info });
-      }
+      if (!merged.allocatedPointers.has(ptr)) merged.allocatedPointers.set(ptr, { ...info });
     });
 
     s1.freedPointers.forEach(p => merged.freedPointers.add(p));
@@ -1317,6 +1408,8 @@ export class SymbolicExecutor {
       case '<=': return { type: 'concrete', value: l <=  r ? 1 : 0 };
       case '>':  return { type: 'concrete', value: l >   r ? 1 : 0 };
       case '>=': return { type: 'concrete', value: l >=  r ? 1 : 0 };
+      case '&&': return { type: 'concrete', value: (l !== 0 && r !== 0) ? 1 : 0 };
+      case '||': return { type: 'concrete', value: (l !== 0 || r !== 0) ? 1 : 0 };
       default:   return { type: 'unknown' as const };
     }
   }

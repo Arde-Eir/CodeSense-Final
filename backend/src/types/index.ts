@@ -10,17 +10,17 @@
 
 export type ASTNode =
   | ProgramNode | FunctionDeclNode | VariableDeclNode | ParameterNode | FunctionPrototypeNode
-  | IntegerNode | FloatNode | CharNode | StringNode | IdentifierNode 
-  | BinaryOpNode | WhileLoopNode | DoWhileLoopNode | ForLoopNode 
+  | IntegerNode | FloatNode | CharNode | StringNode | IdentifierNode
+  | BinaryOpNode | WhileLoopNode | DoWhileLoopNode | ForLoopNode
   | IfStatementNode | SwitchStatementNode | ReturnStatementNode | AssignmentNode
   | ArrayAccessNode | InitializerListNode | FunctionCallNode
   | UnaryOpNode | GlobalAccessNode | LoopControlNode
   | BlockNode | ExpressionStatementNode | StreamStatementNode
-  | NewExpressionNode | DeleteStatementNode 
-  | PreprocessorNode | CastExpressionNode | SizeofExpressionNode 
+  | NewExpressionNode | DeleteStatementNode
+  | PreprocessorNode | CastExpressionNode | SizeofExpressionNode
   | ConditionalExpressionNode | LambdaExpressionNode
   | RangeBasedForNode | TryStatementNode | CatchClauseNode
-  | ThrowStatementNode;
+  | ThrowStatementNode | GotoStatementNode | LabelStatementNode;
 
 
 export interface FunctionPrototypeNode extends BaseNode {
@@ -159,8 +159,8 @@ export interface FunctionDeclNode extends BaseNode {
   type: 'FunctionDecl';
   returnType: string;
   name: string;
-  params: ParameterNode[]; // Fixed: Uses ParameterNode now
-  body: ASTNode[];
+  params: ParameterNode[];
+  body: ASTNode[] | null; // null for forward declarations / prototypes
 }
 
 export interface VariableDeclNode extends BaseNode {
@@ -179,6 +179,7 @@ export interface ParameterNode extends BaseNode {
   varType: string;
   name: string;
   defaultValue?: ASTNode;
+  dimensions?: ASTNode[]; // for array parameters like int arr[] or int arr[][3]
 }
 
 export interface ArrayAccessNode extends BaseNode {
@@ -239,6 +240,17 @@ export interface GlobalAccessNode extends BaseNode {
 export interface LoopControlNode extends BaseNode {
   type: 'LoopControl';
   value: 'break' | 'continue';
+}
+
+export interface GotoStatementNode extends BaseNode {
+  type: 'GotoStatement';
+  label: string;
+}
+
+export interface LabelStatementNode extends BaseNode {
+  type: 'LabelStatement';
+  label: string;
+  statement: ASTNode | null;
 }
 
 export interface BinaryOpNode extends BaseNode {

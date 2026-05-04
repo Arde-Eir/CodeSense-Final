@@ -78,7 +78,7 @@ const OrderingGameInner: React.FC<{ rawItems: OrderItem[]; onComplete: (score: n
   );
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', flex: 1, gap: 10 }}>
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
       <div style={{ background: 'rgba(163,113,247,0.08)', border: '1px solid rgba(163,113,247,0.25)', borderRadius: 8, padding: '10px 14px', fontSize: 13, color: '#8b949e', fontFamily: 'Inter,sans-serif' }}>
         🔢 Drag the steps into the correct order
       </div>

@@ -151,6 +151,8 @@ export const AdminPanel: React.FC = () => {
   const [replaceTarget,  setReplaceTarget]  = useState('')
   const [questSaving,    setQuestSaving]    = useState(false)
   const [questSubTab,    setQuestSubTab]    = useState<'create' | 'manage'>('create')
+  const [fixingPop,      setFixingPop]      = useState(false)
+  const [fixPopResult,   setFixPopResult]   = useState<string | null>(null)
   const qSet = (patch: Partial<QuestFormState>) => setQuestForm(p => ({ ...p, ...patch }))
 
   // ── Tabler CSS injection ──
@@ -438,6 +440,55 @@ export const AdminPanel: React.FC = () => {
   // ── Quest actions ──────────────────────────────────────────────────────────
   const resetQuestForm = () => { setQuestForm(defaultQF()); setReplaceTarget('') }
 
+  const fixPopLanguage = async () => {
+    if (!user) return
+    if (!window.confirm(
+      'Scan all campaign quests and replace balloon-pop phrasing ("Pop the item…", "Pop the…") ' +
+      'in Multiple Choice questions with MC-appropriate language. Continue?'
+    )) return
+    setFixingPop(true)
+    setFixPopResult(null)
+    try {
+      const { data, error } = await supabase
+        .from('quests')
+        .select('id, title, mc_questions')
+        .eq('mode', 'campaign')
+        .not('mc_questions', 'is', null)
+      if (error) throw error
+      if (!data?.length) { setFixPopResult('No quests with MC questions found.'); setFixingPop(false); return }
+
+      let fixedQuests = 0
+      let fixedQs = 0
+      for (const quest of data) {
+        if (!Array.isArray(quest.mc_questions) || quest.mc_questions.length === 0) continue
+        const patched = quest.mc_questions.map((q: any) => {
+          const orig: string = q.question ?? ''
+          const updated = orig
+            .replace(/^Pop the item(s)? that\b/gi, 'Which item$1')
+            .replace(/^Pop the item(s)?\s+/gi,     'Select the item$1 ')
+            .replace(/^Pop\s+/gi,                   'Select ')
+          if (updated !== orig) fixedQs++
+          return updated !== orig ? { ...q, question: updated } : q
+        })
+        if (JSON.stringify(patched) !== JSON.stringify(quest.mc_questions)) {
+          const { error: ue } = await supabase.from('quests').update({ mc_questions: patched }).eq('id', quest.id)
+          if (!ue) fixedQuests++
+        }
+      }
+      const msg = fixedQs > 0
+        ? `Fixed ${fixedQs} question(s) across ${fixedQuests} quest(s).`
+        : 'No balloon-pop language found in any MC questions.'
+      setFixPopResult(msg)
+      if (fixedQuests > 0) {
+        await writeAuditLog(user.id, 'quest_bulk_fix', undefined, { action: 'fix_pop_language', fixedQuests, fixedQs })
+        await fetchExistingQuests()
+      }
+    } catch (err: any) {
+      setFixPopResult(`Error: ${err.message}`)
+    }
+    setFixingPop(false)
+  }
+
   const saveQuest = async (replaceId?: string) => {
     if (!user || !questForm.title.trim()) { showToast('Title is required', 'error'); return }
     const phase = questForm.level === 1 ? 'beginner' : questForm.level === 2 ? 'intermediate' : 'advanced'
@@ -556,9 +607,14 @@ export const AdminPanel: React.FC = () => {
   }
 
   const loadQuestForEdit = (q: any) => {
+    // Use question_type as the authoritative signal; fall back to structural heuristic for
+    // legacy rows that pre-date the question_type column.
+    const isDrag    = q.question_type ? q.question_type === 'drag_drop'    : !!(q.game_items?.length && q.drop_zones?.length)
+    const isBalloon = q.question_type ? q.question_type === 'pop_balloon'  : !!(q.game_items?.length && !q.drop_zones?.length)
+
     // Reconstruct drag problems from flat game_items + drop_zones (grouped by problem_id)
     const dragProblems: QFormDragProblem[] = (() => {
-      if (!q.game_items?.length || !q.drop_zones?.length) return [newDragProblem()]
+      if (!isDrag || !q.game_items?.length || !q.drop_zones?.length) return [newDragProblem()]
       const problemMap = new Map<string, QFormDragProblem>()
       ;(q.game_items as any[]).forEach(g => {
         const pid = g.problem_id ?? 'default'
@@ -575,8 +631,7 @@ export const AdminPanel: React.FC = () => {
 
     // Reconstruct balloon problems from flat game_items (is_correct field, grouped by problem_id)
     const balloonProblems: QFormBalloonProblem[] = (() => {
-      // Balloon quests have game_items but NO drop_zones.
-      if (!q.game_items?.length || q.drop_zones?.length > 0) return [newBalloonProblem()]
+      if (!isBalloon || !q.game_items?.length) return [newBalloonProblem()]
       const problemMap = new Map<string, QFormBalloonProblem>()
       ;(q.game_items as any[]).forEach(g => {
         const pid = g.problem_id ?? 'default'
@@ -611,11 +666,11 @@ export const AdminPanel: React.FC = () => {
         body: s.body ?? '', code: s.code ?? '', language: s.language ?? 'c',
       })),
       objectives: q.objectives?.length ? q.objectives : [''],
-      act_mc: !!q.mc_questions?.length,
-      act_drag: !!(q.game_items?.length && q.drop_zones?.length),
-      act_balloon: !!(q.game_items?.length && !q.drop_zones?.length),
-      act_ordering: !!q.ordering_items?.length,
-      act_codefill: !!q.code_fill_items?.length,
+      act_mc:       q.question_type === 'multiple_choice' || !!q.mc_questions?.length,
+      act_drag:     isDrag,
+      act_balloon:  isBalloon,
+      act_ordering: q.question_type === 'ordering'        || !!q.ordering_items?.length,
+      act_codefill: q.question_type === 'code_fill'       || !!q.code_fill_items?.length,
       mc_questions: (q.mc_questions ?? []).map((m: any) => ({
         id: m.id ?? String(Math.random()), question: m.question ?? '',
         options: m.options ?? ['', '', '', ''], correct: m.correct ?? 0, explanation: m.explanation ?? '',
@@ -1601,6 +1656,37 @@ export const AdminPanel: React.FC = () => {
 
                   {/* Manage tab */}
                   {questSubTab === 'manage' && (
+                    <>
+                    {/* ── Data Tools ── */}
+                    <div className="card mb-3">
+                      <div className="card-header">
+                        <h3 className="card-title">🔧 Data Tools</h3>
+                        <span className="card-subtitle ms-2 text-muted" style={{ fontSize: '11px' }}>Bulk repairs for quest content</span>
+                      </div>
+                      <div className="card-body">
+                        <div className="d-flex align-items-center gap-3 flex-wrap">
+                          <div>
+                            <div style={{ fontSize: '12px', fontWeight: 600, marginBottom: 2 }}>Fix MC Question Language</div>
+                            <div className="text-muted" style={{ fontSize: '11px' }}>
+                              Replaces balloon-pop phrasing (<em>"Pop the item…"</em>) in Multiple Choice questions with proper MC language (<em>"Select…"</em> / <em>"Which item…"</em>).
+                            </div>
+                          </div>
+                          <button
+                            className="btn btn-sm btn-outline-warning ms-auto"
+                            disabled={fixingPop}
+                            onClick={fixPopLanguage}
+                          >
+                            {fixingPop ? 'Scanning…' : '⚙ Run Fix'}
+                          </button>
+                        </div>
+                        {fixPopResult && (
+                          <div className={`alert alert-${fixPopResult.startsWith('Error') ? 'danger' : 'success'} py-2 mt-2 mb-0`} style={{ fontSize: '12px' }}>
+                            {fixPopResult}
+                          </div>
+                        )}
+                      </div>
+                    </div>
+
                     <div className="card">
                       <div className="card-header">
                         <h3 className="card-title">All Campaign Quests</h3>
@@ -1640,6 +1726,7 @@ export const AdminPanel: React.FC = () => {
                         </table>
                       </div>
                     </div>
+                  </>
                   )}
                 </>
               )}

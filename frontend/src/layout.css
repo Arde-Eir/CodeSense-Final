@@ -525,3 +525,121 @@ html, body, #root {
   }
 }
 
+/* ── Mobile / Tablet responsive overrides ───────────────── */
+@media (max-width: 768px) {
+  /* App shell — allow full-page scroll instead of clipping */
+  .app-container {
+    height: auto;
+    min-height: 100vh;
+    overflow: visible;
+  }
+
+  /* Sandbox main layout — single column stack */
+  .main-layout {
+    grid-template-columns: 1fr;
+    overflow-y: auto;
+    height: auto;
+    padding: 10px;
+    gap: 10px;
+  }
+
+  /* Columns no longer need to clip their overflow */
+  .left-column,
+  .right-column {
+    overflow: visible;
+    min-height: 0;
+  }
+
+  /* Right column visualizer — give it a useful minimum height */
+  .right-column {
+    min-height: 400px;
+  }
+
+  /* Tabs — allow horizontal scroll on small screens */
+  .tab-headers {
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  /* Hide the drag resize handle on mobile — panels have fixed heights instead */
+  .sandbox-resize-handle { display: none !important; }
+
+  /* Sandbox header — collapse on mobile */
+  .app-header {
+    height: auto !important;
+    min-height: var(--header-h);
+    flex-wrap: wrap;
+    gap: 8px;
+    padding: 10px 14px !important;
+  }
+  /* Move the mode toggle from absolute-center to a full-width row on mobile */
+  .header-mode-toggle {
+    position: static !important;
+    transform: none !important;
+    order: 10;
+    width: 100%;
+    display: flex;
+    justify-content: center;
+  }
+  /* Shrink the brand text */
+  .brand-text { font-size: 13px !important; }
+  /* Collapse the right-side actions */
+  .header-actions { gap: 6px !important; flex-wrap: wrap; }
+
+  /* Editor section — explicit height so Monaco renders correctly (only when open) */
+  .editor-section.accordion-open {
+    height: 500px !important;
+    flex: none !important;
+    min-height: 0;
+  }
+
+  /* Analysis section — give it room on mobile (only when open) */
+  .tabs-section.accordion-open {
+    height: 420px !important;
+    flex: none !important;
+    min-height: 0;
+  }
+
+  /* Tab links — big enough to tap comfortably */
+  .tab-link {
+    padding: 12px 16px !important;
+    font-size: 13px !important;
+    min-height: 44px !important;
+    letter-spacing: 0 !important;
+  }
+
+  /* Tab scroll area — breathing room */
+  .tab-view-scroll {
+    padding: 16px !important;
+  }
+
+  /* Section title — readable on small screens */
+  .section-title {
+    font-size: 11px !important;
+    padding: 10px 14px !important;
+  }
+
+  /* Analyze button — bigger font and tap target */
+  .analyze-btn {
+    font-size: 14px !important;
+    padding: 15px !important;
+    letter-spacing: 0.8px !important;
+  }
+
+  /* Action bar padding */
+  .action-bar {
+    padding: 12px !important;
+  }
+
+  /* Exit button — tappable height */
+  .exit-btn {
+    min-height: 40px !important;
+    padding: 9px 16px !important;
+    font-size: 12px !important;
+  }
+
+  /* Sandbox header — hide badge and HUD to save space; keep EXIT */
+  .sandbox-free-badge { display: none !important; }
+  .sandbox-hud-wrap   { display: none !important; }
+}
+

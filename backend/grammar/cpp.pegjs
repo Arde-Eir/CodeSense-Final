@@ -185,6 +185,8 @@ Statement
   / DoWhileLoop
   / SwitchStatement
   / LoopControlStatement
+  / GotoStatement
+  / LabelStatement
   / DeleteStatement
   / TryStatement
   / ThrowStatement
@@ -220,6 +222,8 @@ CaseStatement
   = VariableDeclaration
   / StreamStatement
   / LoopControlStatement
+  / GotoStatement
+  / LabelStatement
   / IfStatement
   / WhileLoop
   / RangeBasedFor
@@ -273,6 +277,18 @@ ThrowStatement
 LoopControlStatement
   = ctrl:("break" / "continue") _ ";" _ {
       return { type: 'LoopControl', value: ctrl, ...loc() };
+    }
+
+GotoStatement
+  = "goto" __ label:$([a-zA-Z_][a-zA-Z0-9_]*) _ ";" _ {
+      return { type: 'GotoStatement', label, ...loc() };
+    }
+
+// LabelStatement: `myLabel:` optionally followed by a statement.
+// The `!":"` lookahead prevents matching `::` (scope resolution).
+LabelStatement
+  = label:$([a-zA-Z_][a-zA-Z0-9_]*) _ ":" !":" _ stmt:Statement? {
+      return { type: 'LabelStatement', label, statement: stmt || null, ...loc() };
     }
 
 // ============================================================================
@@ -635,11 +651,14 @@ Integer
     }
 
 Float
-  = value:$([0-9]* "." [0-9]+) suffix:[fFlL]? {
-      return { type: 'Float', value: parseFloat(value), ...loc() };
+  = value:$([0-9]* "." [0-9]+) exp:$([eE][+-]?[0-9]+)? suffix:[fFlL]? {
+      return { type: 'Float', value: parseFloat(value + (exp || '')), suffix: suffix || null, ...loc() };
     }
-  / value:$([0-9]+ "." [0-9]*) &[fFlL] suffix:[fFlL] {
-      return { type: 'Float', value: parseFloat(value), ...loc() };
+  / value:$([0-9]+ "." [0-9]*) &[fFlLe E] exp:$([eE][+-]?[0-9]+)? suffix:[fFlL]? {
+      return { type: 'Float', value: parseFloat(value + (exp || '')), suffix: suffix || null, ...loc() };
+    }
+  / value:$([0-9]+) exp:$([eE][+-]?[0-9]+) suffix:[fFlL]? {
+      return { type: 'Float', value: parseFloat(value + exp), suffix: suffix || null, ...loc() };
     }
 
 // FIX: Char literal handles all standard escape sequences
@@ -674,15 +693,19 @@ IdentChar = [a-zA-Z0-9_]
 BaseType
   = "long" __ "long"                      !IdentChar { return "long long"; }
   / "long" __ "double"                    !IdentChar { return "long double"; }
-  / "unsigned" __ "int"                   !IdentChar { return "unsigned int"; }
   / "unsigned" __ "long" __ "long"        !IdentChar { return "unsigned long long"; }
+  / "unsigned" __ "long"                  !IdentChar { return "unsigned long"; }
+  / "unsigned" __ "int"                   !IdentChar { return "unsigned int"; }
+  / "unsigned" __ "short"                 !IdentChar { return "unsigned short"; }
+  / "unsigned" __ "char"                  !IdentChar { return "unsigned char"; }
   / name:("int" / "float" / "double" / "char" / "bool" / "void" / "string"
-     / "auto" / "typename" / "class" / "struct" / "enum" / "size_t") !IdentChar { return name; }
+     / "auto" / "typename" / "class" / "struct" / "enum"
+     / "long" / "short" / "size_t" / "ptrdiff_t") !IdentChar { return name; }
 
 TypeModifier
-  = name:("const" / "static" / "extern" / "volatile" / "unsigned" / "signed"
-     / "inline" / "virtual" / "public" / "private" / "protected"
-     / "override" / "final" / "mutable" / "explicit") !IdentChar { return name; }
+  = name:("constexpr" / "const" / "static" / "extern" / "volatile"
+     / "unsigned" / "signed" / "inline" / "virtual" / "public" / "private"
+     / "protected" / "override" / "final" / "mutable" / "explicit") !IdentChar { return name; }
 
 // ============================================================================
 // Reserved Keywords — kept in sync with the Lexer keyword list

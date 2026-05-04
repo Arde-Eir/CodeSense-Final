@@ -19,7 +19,8 @@ export type ASTNode =
   | NewExpressionNode | DeleteStatementNode
   | PreprocessorNode | CastExpressionNode | SizeofExpressionNode
   | ConditionalExpressionNode | LambdaExpressionNode
-  | TryStatementNode | CatchClauseNode | ThrowStatementNode;
+  | TryStatementNode | CatchClauseNode | ThrowStatementNode
+  | GotoStatementNode | LabelStatementNode;
 
 export interface BaseNode {
   type: string;
@@ -137,8 +138,8 @@ export interface FunctionDeclNode extends BaseNode {
   type: 'FunctionDecl';
   returnType: string;
   name: string;
-  params: ParameterNode[]; // Fixed: Uses ParameterNode now
-  body: ASTNode[];
+  params: ParameterNode[];
+  body: ASTNode[] | null; // null for forward declarations / prototypes
 }
 
 export interface VariableDeclNode extends BaseNode {
@@ -157,6 +158,7 @@ export interface ParameterNode extends BaseNode {
   varType: string;
   name: string;
   defaultValue?: ASTNode;
+  dimensions?: ASTNode[]; // for array parameters like int arr[] or int arr[][3]
 }
 
 export interface ArrayAccessNode extends BaseNode {
@@ -285,12 +287,13 @@ export interface ExpressionStatementNode extends BaseNode {
 
 export interface StreamStatementNode extends BaseNode {
   type: 'CoutStatement' | 'CinStatement';
-  // UPDATED: Support for chaining multiple items
-  values?: ASTNode[];  // For cout: array of expressions (cout << a << b << c)
-  targets?: (string | ASTNode)[]; // For cin: array of identifiers or ArrayAccess nodes (cin >> x >> arr[i])
-  // DEPRECATED (kept for backward compatibility)
-  value?: ASTNode; 
-  target?: string; 
+  // Grammar emits a left-associative BinaryOp tree via reduce, not a flat array.
+  // cout << a << b  →  { type:'BinaryOp', op:'<<', left:{op:'<<',left:cout,right:a}, right:b }
+  values?: ASTNode;   // For CoutStatement: BinaryOp tree of << chained expressions
+  targets?: ASTNode;  // For CinStatement:  BinaryOp tree of >> chained targets
+  // Kept for backward-compatibility with any legacy callers
+  value?: ASTNode;
+  target?: string;
 }
 
 // ============================================================================
@@ -675,4 +678,15 @@ export interface CatchClauseNode extends BaseNode {
 export interface ThrowStatementNode extends BaseNode {
   type: 'ThrowStatement';
   value?: ASTNode;
+}
+
+export interface GotoStatementNode extends BaseNode {
+  type: 'GotoStatement';
+  label: string;
+}
+
+export interface LabelStatementNode extends BaseNode {
+  type: 'LabelStatement';
+  label: string;
+  statement: ASTNode | null;
 }

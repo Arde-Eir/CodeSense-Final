@@ -5,65 +5,67 @@ interface TokenChartProps {
   tokens: Token[];
 }
 
-export const TokenChart: React.FC<TokenChartProps> = ({ tokens }) => {
-  // Aggregate counts of each token type
-  const stats = useMemo(() => {
-    const counts: Record<string, number> = {
-      Keyword: 0,
-      Identifier: 0,
-      Operator: 0,
-      Literal: 0,
-      Separator: 0
-    };
+const CATEGORIES: Array<{ label: string; match: (type: string) => boolean; color: string }> = [
+  { label: 'Keywords',    match: t => t.includes('KEYWORD'),                                            color: '#ff7b72' },
+  { label: 'Identifiers', match: t => t === 'IDENTIFIER',                                               color: '#d2a8ff' },
+  { label: 'Literals',    match: t => ['NUMBER','STRING','BOOLEAN','CHAR'].some(k => t.includes(k)) || t.includes('LITERAL'), color: '#a5d6ff' },
+  { label: 'Operators',   match: t => t.includes('OPERATOR'),                                           color: '#7ee787' },
+  { label: 'Separators',  match: t => ['PUNCTUATION','SEPARATOR','BRACKET'].some(k => t.includes(k)),   color: '#79c0ff' },
+];
 
+export const TokenChart: React.FC<TokenChartProps> = ({ tokens }) => {
+  const stats = useMemo(() => {
+    const counts = Object.fromEntries(CATEGORIES.map(c => [c.label, 0]));
     tokens.forEach(t => {
-      if (counts[t.type] !== undefined) {
-        counts[t.type]++;
+      const upper = (t.type ?? '').toUpperCase();
+      for (const cat of CATEGORIES) {
+        if (cat.match(upper)) { counts[cat.label]++; break; }
       }
     });
-
     return counts;
   }, [tokens]);
 
   const maxCount = Math.max(...Object.values(stats), 1);
+  const total = tokens.length;
 
   return (
-    <div className="token-stats" style={{ marginTop: '20px', padding: '15px', background: '#252526', borderRadius: '8px' }}>
-      <h3 style={{ fontSize: '0.9rem', marginBottom: '15px', color: '#aaa', textTransform: 'uppercase' }}>
-        Lexical Distribution
-      </h3>
-      
-      <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
-        {Object.entries(stats).map(([type, count]) => (
-          <div key={type} style={{ width: '100%' }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.8rem', marginBottom: '4px' }}>
-              <span>{type}</span>
-              <span style={{ color: '#007acc', fontWeight: 'bold' }}>{count}</span>
+    <div style={{ marginTop: '16px', padding: '16px', background: '#0d1117', borderRadius: '10px', border: '1px solid #21262d' }}>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '14px' }}>
+        <h3 style={{ margin: 0, fontSize: '11px', color: '#484f58', textTransform: 'uppercase', letterSpacing: '1px', fontFamily: 'IBM Plex Mono, monospace', fontWeight: 700 }}>
+          Lexical Distribution
+        </h3>
+        <span style={{ fontSize: '10px', color: '#2d333b', fontFamily: 'IBM Plex Mono, monospace' }}>
+          {total} token{total !== 1 ? 's' : ''}
+        </span>
+      </div>
+
+      <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+        {CATEGORIES.map(({ label, color }) => {
+          const count = stats[label];
+          const pct = Math.round((count / maxCount) * 100);
+          const share = total > 0 ? Math.round((count / total) * 100) : 0;
+          return (
+            <div key={label}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '4px' }}>
+                <span style={{ fontSize: '11px', color: count > 0 ? '#c9d1d9' : '#484f58', fontFamily: 'IBM Plex Mono, monospace' }}>{label}</span>
+                <span style={{ fontSize: '10px', color, fontWeight: 700, fontFamily: 'IBM Plex Mono, monospace' }}>
+                  {count > 0 ? `${count} (${share}%)` : '—'}
+                </span>
+              </div>
+              <div style={{ height: '6px', background: '#21262d', borderRadius: '3px', overflow: 'hidden' }}>
+                <div style={{
+                  height: '100%',
+                  width: `${pct}%`,
+                  background: count > 0 ? color : 'transparent',
+                  borderRadius: '3px',
+                  transition: 'width 0.5s ease-out',
+                  opacity: count > 0 ? 0.85 : 0,
+                }} />
+              </div>
             </div>
-            {/* Simple Progress Bar */}
-            <div style={{ height: '6px', background: '#444', borderRadius: '3px', overflow: 'hidden' }}>
-              <div style={{ 
-                height: '100%', 
-                width: `${(count / maxCount) * 100}%`, 
-                background: getTokenTypeColor(type),
-                transition: 'width 0.5s ease-out'
-              }} />
-            </div>
-          </div>
-        ))}
+          );
+        })}
       </div>
     </div>
   );
-};
-
-// Helper for consistent coloring across the UI
-const getTokenTypeColor = (type: string) => {
-  switch (type) {
-    case 'Keyword': return '#569cd6';
-    case 'Identifier': return '#9cdcfe';
-    case 'Operator': return '#d4d4d4';
-    case 'Literal': return '#b5cea8';
-    case 'Separator': return '#cccccc';
-    default: return '#808080';
-  }
 };

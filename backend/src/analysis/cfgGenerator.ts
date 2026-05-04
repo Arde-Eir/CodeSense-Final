@@ -194,16 +194,54 @@ export class CFGGenerator {
   }
 
   private calculateCoordinates(layers: ControlFlowNode[][]): void {
-    const layerHeight  = 100;
-    const nodeSpacing  = 150;
-    const canvasWidth  = 900;
-    layers.forEach((layer, layerIndex) => {
-      const layerWidth = layer.length * nodeSpacing;
-      const startX     = (canvasWidth - layerWidth) / 2;
-      layer.forEach((node, index) => {
-        node.y = 50 + layerIndex * layerHeight;
-        node.x = startX + index * nodeSpacing;
+    // Per-type heights mirror the ReactFlow NODE_SIZES defined in FlowGraph.tsx.
+    const NODE_H: Record<string, number> = {
+      start: 50, end: 50,       // terminator pill
+      decision: 140,             // diamond
+      junction: 36,              // small junction diamond
+      connector: 60,             // circle
+      off_page_connector: 70,
+      output: 70, input: 75,
+      predefined: 90,
+      process: 90,
+    };
+    const NODE_W: Record<string, number> = {
+      start: 160, end: 160,
+      decision: 140,
+      junction: 36,
+      connector: 60,
+      off_page_connector: 70,
+      output: 185, input: 185,
+      predefined: 180,
+      process: 180,
+    };
+
+    const V_GAP = 80; // minimum vertical breathing room between layers
+    const H_GAP = 60; // minimum horizontal breathing room between siblings
+
+    // Compute per-layer widths and the tallest node in each layer.
+    const layerWidths = layers.map(layer =>
+      layer.reduce((sum, n) => sum + (NODE_W[n.type] ?? 180) + H_GAP, -H_GAP),
+    );
+    const layerMaxH = layers.map(layer =>
+      Math.max(...layer.map(n => NODE_H[n.type] ?? 90)),
+    );
+
+    // All layers are centred on the same axis (the widest layer defines the canvas).
+    const canvasWidth = Math.max(...layerWidths) + 160; // 80 px margin each side
+
+    let y = 80;
+    layers.forEach((layer, li) => {
+      const layerWidth = layerWidths[li];
+      const startX = (canvasWidth - layerWidth) / 2;
+      let x = startX;
+      layer.forEach(node => {
+        const w = NODE_W[node.type] ?? 180;
+        node.x = x;
+        node.y = y;
+        x += w + H_GAP;
       });
+      y += layerMaxH[li] + V_GAP;
     });
   }
 
@@ -232,8 +270,7 @@ export class CFGGenerator {
     let tutorExplanation = '';
     if (astNode) {
       try {
-        const lines = this.mentor.translate(astNode);
-        tutorExplanation = lines.join(' ').replace(/\*\*/g, '');
+        tutorExplanation = this.mentor.translateBrief(astNode);
       } catch (_) {
         // best-effort — never crash the CFG for a translation error
       }
@@ -335,30 +372,36 @@ export class CFGGenerator {
     exit: ControlFlowNode,
   ): ControlFlowNode {
     const switchNode = this.createNode(
-      'decision', 'Switch', this.nodeToString(node.condition), (node as any).line, node,
+      'decision', `Switch (${this.nodeToString(node.condition)})`,
+      this.nodeToString(node.condition), (node as any).line, node,
     );
     this.connect(current, switchNode);
 
     const merge = this.createNode('junction', 'End Switch');
-    let prevDecision = switchNode;
 
-    (node.cases || []).forEach((caseNode: any, i: number) => {
+    // All cases branch in parallel from the switch decision node.
+    (node.cases || []).forEach((caseNode: any) => {
       const caseLabel = caseNode.value
         ? `Case ${this.nodeToString(caseNode.value)}`
         : 'Default';
-      const caseDecision = this.createNode('decision', caseLabel);
-      this.connect(prevDecision, caseDecision, i === 0 ? undefined : 'else');
+      const caseStart = this.createNode('process', caseLabel);
+      this.connect(switchNode, caseStart, caseLabel);
 
-      let casePath: ControlFlowNode = caseDecision;
-      (caseNode.statements || []).forEach((stmt: ASTNode) => {
+      let casePath: ControlFlowNode = caseStart;
+      let caseTerminated = false;
+      for (const stmt of (caseNode.statements || []) as ASTNode[]) {
         casePath = this.visit(stmt, casePath, merge);
-      });
-      this.connect(casePath, merge, 'break');
-      prevDecision = caseDecision;
+        if (this.isTerminator(stmt) || (stmt as any).type === 'LoopControl') {
+          caseTerminated = true;
+          break;
+        }
+      }
+      // Only add fallthrough edge when the case didn't end with break/return
+      if (!caseTerminated) this.connect(casePath, merge, 'fallthrough');
     });
 
-    // Last case's "no match" edge goes to merge (default fallthrough)
-    this.connect(prevDecision, merge, 'else');
+    // If no cases matched (or no default), flow continues past the switch
+    this.connect(switchNode, merge, 'no match');
     return merge;
   }
 
@@ -373,14 +416,17 @@ export class CFGGenerator {
     );
     this.connect(current, decision);
 
-    let bodyNode = decision;
-    (node.body || []).forEach(stmt => {
-      bodyNode = this.visit(stmt, bodyNode, decision);
-    });
-    this.connect(bodyNode, decision, 'Loop');
-
     const afterLoop = this.createNode('process', 'Exit Loop');
     this.connect(decision, afterLoop, 'False');
+
+    let bodyNode = decision;
+    let bodyTerminated = false;
+    for (const stmt of (node.body || [])) {
+      bodyNode = this.visit(stmt, bodyNode, afterLoop);
+      if (this.isTerminator(stmt)) { bodyTerminated = true; break; }
+    }
+    if (!bodyTerminated) this.connect(bodyNode, decision, 'Loop');
+
     return afterLoop;
   }
 
@@ -431,21 +477,26 @@ export class CFGGenerator {
     );
     this.connect(lastNode, decision);
 
-    let bodyNode = decision;
-    (node.body || []).forEach(stmt => {
-      bodyNode = this.visit(stmt, bodyNode, decision);
-    });
-
-    if (node.update) {
-      const updateNode = this.createNode('process', 'Update', this.nodeToString(node.update));
-      this.connect(bodyNode, updateNode);
-      this.connect(updateNode, decision, 'Loop');
-    } else {
-      this.connect(bodyNode, decision, 'Loop');
-    }
-
     const afterLoop = this.createNode('process', 'Exit Loop');
     this.connect(decision, afterLoop, 'False');
+
+    let bodyNode = decision;
+    let bodyTerminated = false;
+    for (const stmt of (node.body || [])) {
+      bodyNode = this.visit(stmt, bodyNode, afterLoop);
+      if (this.isTerminator(stmt)) { bodyTerminated = true; break; }
+    }
+
+    if (!bodyTerminated) {
+      if (node.update) {
+        const updateNode = this.createNode('process', 'Update', this.nodeToString(node.update));
+        this.connect(bodyNode, updateNode);
+        this.connect(updateNode, decision, 'Loop');
+      } else {
+        this.connect(bodyNode, decision, 'Loop');
+      }
+    }
+
     return afterLoop;
   }
 
@@ -500,31 +551,19 @@ export class CFGGenerator {
 
   // ── I/O ───────────────────────────────────────────────────────────────────
   private visitCoutStatement(node: any, current: ControlFlowNode): ControlFlowNode {
-    // Reconstruct the actual cout chain so flowchart → code preserves it.
-    // Prefer `values` (chained cout << a << b), fall back to legacy `value`.
-    const items: any[] = Array.isArray(node.values) && node.values.length
-      ? node.values
-      : node.value !== undefined && node.value !== null
-        ? [node.value]
-        : [];
-    const code = items.length
-      ? `cout << ${items.map(v => this.nodeToString(v)).join(' << ')}`
-      : 'cout << ""';
+    // Grammar emits `values` as a left-associative BinaryOp tree (via CoutChain reduce),
+    // so nodeToString handles it correctly as "a << b << c".
+    const chain = this.nodeToString(node.values ?? node.value);
+    const code = chain ? `cout << ${chain}` : 'cout << ""';
     const step = this.createNode('output', 'Output (cout)', code, node.line, node);
     this.connect(current, step);
     return step;
   }
 
   private visitCinStatement(node: any, current: ControlFlowNode): ControlFlowNode {
-    // Reconstruct the actual cin chain. Prefer `targets`, fall back to `target`.
-    const items: any[] = Array.isArray(node.targets) && node.targets.length
-      ? node.targets
-      : node.target !== undefined && node.target !== null
-        ? [node.target]
-        : [];
-    const code = items.length
-      ? `cin >> ${items.map(t => this.nodeToString(t)).join(' >> ')}`
-      : 'cin >> variable';
+    // Grammar emits `targets` as a left-associative BinaryOp tree (via CinChain reduce).
+    const chain = this.nodeToString(node.targets ?? node.target);
+    const code = chain ? `cin >> ${chain}` : 'cin >> variable';
     const step = this.createNode('input', 'Input (cin)', code, node.line, node);
     this.connect(current, step);
     return step;
@@ -652,13 +691,17 @@ export class CFGGenerator {
       node,
     );
     this.connect(current, loopNode);
-    let bodyNode = loopNode;
-    (node.body || []).forEach((stmt: ASTNode) => {
-      bodyNode = this.visit(stmt, bodyNode, loopNode);
-    });
-    this.connect(bodyNode, loopNode, 'Next');
     const afterLoop = this.createNode('process', 'Exit Range-For');
     this.connect(loopNode, afterLoop, 'Done');
+
+    let bodyNode = loopNode;
+    let bodyTerminated = false;
+    for (const stmt of (node.body || []) as ASTNode[]) {
+      bodyNode = this.visit(stmt, bodyNode, afterLoop);
+      if (this.isTerminator(stmt)) { bodyTerminated = true; break; }
+    }
+    if (!bodyTerminated) this.connect(bodyNode, loopNode, 'Next');
+
     return afterLoop;
   }
 
@@ -705,6 +748,19 @@ export class CFGGenerator {
     this.connect(current, throwNode);
     this.connect(throwNode, exit, 'throw');
     return throwNode;
+  }
+
+  // ── Goto / Label ─────────────────────────────────────────────────────────
+  private visitGotoStatement(node: any, current: ControlFlowNode): ControlFlowNode {
+    const step = this.createNode('connector', `goto ${node.label}`, `goto ${node.label}`, node.line, node);
+    this.connect(current, step);
+    return step;
+  }
+
+  private visitLabelStatement(node: any, current: ControlFlowNode, exit: ControlFlowNode): ControlFlowNode {
+    const step = this.createNode('process', `Label: ${node.label}`, `${node.label}:`, node.line, node);
+    this.connect(current, step);
+    return node.statement ? this.visit(node.statement, step, exit) : step;
   }
 
   // ── CP2: Dynamic Memory ───────────────────────────────────────────────────

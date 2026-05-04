@@ -120,6 +120,9 @@ export const ValidationPanel: React.FC<{
     >
       {/* Header */}
       <div
+        role="button"
+        tabIndex={0}
+        aria-expanded={expanded}
         style={{
           display: 'flex', alignItems: 'center', gap: 7,
           padding: '8px 10px',
@@ -128,6 +131,7 @@ export const ValidationPanel: React.FC<{
           cursor: 'pointer', userSelect: 'none',
         }}
         onClick={() => setExpanded(v => !v)}
+        onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setExpanded(v => !v); } }}
         title={expanded ? 'Collapse validation results' : 'Expand validation results'}
       >
         <span style={{ fontSize: 11, color: headerColor, flexShrink: 0 }}>

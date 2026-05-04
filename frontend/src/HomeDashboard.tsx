@@ -201,6 +201,73 @@ const GLOBAL_STYLES = `
     transform: scale(1.1);
   }
   .cs-modal-close { transition: background 0.15s ease, transform 0.15s ease; }
+
+  /* ── Mobile responsive ── */
+  @media (max-width: 768px) {
+    .cs-home-header {
+      padding: 12px 16px !important;
+      margin: 10px 0 16px !important;
+      gap: 10px !important;
+      flex-wrap: wrap !important;
+    }
+    .cs-home-search {
+      width: 100% !important;
+      order: 3;
+    }
+    .cs-home-grid {
+      grid-template-columns: 1fr !important;
+      gap: 16px !important;
+      width: 100% !important;
+      padding: 0 14px !important;
+      box-sizing: border-box !important;
+    }
+    .cs-home-qa-grid {
+      grid-template-columns: 1fr !important;
+      gap: 16px !important;
+    }
+    .cs-home-hero {
+      min-height: 0 !important;
+      padding: 22px 18px !important;
+    }
+    .hero-name {
+      font-size: 26px !important;
+    }
+    .hero-quote {
+      font-size: 14px !important;
+      margin: 14px auto 16px !important;
+      max-width: 100% !important;
+    }
+    .hero-stat-chip {
+      font-size: 13px !important;
+      padding: 8px 14px !important;
+    }
+    .hero-rank-badge {
+      font-size: 13px !important;
+      padding: 5px 14px !important;
+    }
+    .mc-card {
+      padding: 20px 18px !important;
+    }
+    .mc-cta {
+      width: 100% !important;
+      justify-content: center !important;
+      font-size: 14px !important;
+      padding: 14px 20px !important;
+      min-height: 44px !important;
+      margin-top: 4px !important;
+    }
+    .mc-chip {
+      font-size: 12px !important;
+      padding: 5px 10px !important;
+    }
+    .cs-home-modal {
+      width: 95vw !important;
+      max-width: 95vw !important;
+      margin: 10px !important;
+      max-height: 85vh !important;
+      overflow-y: auto !important;
+    }
+  }
 `
 
 /* ── Announcement types ── */
@@ -221,8 +288,24 @@ const PRIORITY_CONFIG: Record<Announcement['priority'], { color: string; bg: str
   critical: { color: '#f85149', bg: 'rgba(248,81,73,0.08)',   border: 'rgba(248,81,73,0.25)',   icon: '🚨',  label: 'Critical' },
 }
 
-const NOTIF_SEEN_KEY = 'cs-seen-notifs-v2'
+const NOTIF_SEEN_KEY      = 'cs-seen-notifs-v2'
 const NOTIF_DISMISSED_KEY = 'cs-dismissed-notifs-v1'
+const MILESTONE_TS_KEY    = 'cs-milestone-ts-v1'
+
+/** Return the ISO timestamp for when this milestone was first observed.
+ *  Stable across refreshes — written once to localStorage. */
+function getMilestoneTimestamp(id: string): string {
+  try {
+    const stored: Record<string, string> = JSON.parse(localStorage.getItem(MILESTONE_TS_KEY) ?? '{}')
+    if (stored[id]) return stored[id]
+    const now = new Date().toISOString()
+    stored[id] = now
+    localStorage.setItem(MILESTONE_TS_KEY, JSON.stringify(stored))
+    return now
+  } catch {
+    return new Date().toISOString()
+  }
+}
 
 type NotifKind = 'announcement' | 'quest' | 'achievement' | 'rank' | 'admin'
 
@@ -282,6 +365,8 @@ const NotificationBell: React.FC<{ userId: string | undefined; onViewAllAnnounce
   const [seen, setSeen] = useState<string[]>(() => getSeenIds())
   const [dismissed, setDismissed] = useState<string[]>(() => getDismissedIds())
   const bellRef = useRef<HTMLDivElement>(null)
+  const onViewAllRef = useRef(onViewAllAnnouncements)
+  useEffect(() => { onViewAllRef.current = onViewAllAnnouncements }, [onViewAllAnnouncements])
   const [activeFilter, setActiveFilter] = useState<'all' | NotifKind>('all')
 
   const refresh = useCallback(async () => {
@@ -301,7 +386,7 @@ const NotificationBell: React.FC<{ userId: string | undefined; onViewAllAnnounce
           icon: cfg.icon, color: cfg.color,
           title: a.ispinned ? `📌 ${a.title}` : a.title,
           body: a.body, timestamp: a.createdat,
-          onClick: onViewAllAnnouncements,
+          onClick: () => onViewAllRef.current(),
         })
       }
     }
@@ -356,14 +441,13 @@ const NotificationBell: React.FC<{ userId: string | undefined; onViewAllAnnounce
           sandboxRuns: profile.sandbox_runs ?? 0,
           quests: questCount ?? 0,
         }
-        const now = new Date().toISOString()
         for (const m of [...XP_MILESTONES, ...RUN_MILESTONES, ...QUEST_MILESTONES]) {
           if (!m.check(stats)) continue
           out.push({
             id: m.id, kind: m.id.startsWith('rank:') ? 'rank' : 'achievement',
             icon: m.icon, color: m.color,
             title: m.title, body: m.body,
-            timestamp: now,
+            timestamp: getMilestoneTimestamp(m.id),
             onClick: () => navigate('/profile'),
           })
         }
@@ -374,7 +458,7 @@ const NotificationBell: React.FC<{ userId: string | undefined; onViewAllAnnounce
     const visible = out.filter(n => !dismissedSet.has(n.id))
     visible.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime())
     setItems(visible.slice(0, 25))
-  }, [userId, navigate, onViewAllAnnouncements])
+  }, [userId, navigate])
 
   useEffect(() => {
     refresh()
@@ -394,6 +478,17 @@ const NotificationBell: React.FC<{ userId: string | undefined; onViewAllAnnounce
     return () => document.removeEventListener('mousedown', onClick)
   }, [])
 
+  // Auto-mark all visible items as seen when the dropdown opens
+  useEffect(() => {
+    if (!open) return
+    setSeen(prev => {
+      const merged = Array.from(new Set([...prev, ...items.map(i => i.id)]))
+      if (merged.length === prev.length) return prev
+      setSeenIds(merged)
+      return merged
+    })
+  }, [open]) // eslint-disable-line react-hooks/exhaustive-deps
+
   const filtered = activeFilter === 'all' ? items : items.filter(i => i.kind === activeFilter)
   const unread = items.filter(i => !seen.includes(i.id))
   const unreadCount = Math.min(unread.length, 99)
@@ -411,6 +506,12 @@ const NotificationBell: React.FC<{ userId: string | undefined; onViewAllAnnounce
     const mergedDismissed = Array.from(new Set([...dismissed, ...readIds]))
     setDismissed(mergedDismissed); setDismissedIds(mergedDismissed)
     setItems(prev => prev.filter(i => !readIds.includes(i.id)))
+  }
+
+  const dismissItem = (id: string) => {
+    const mergedDismissed = Array.from(new Set([...dismissed, id]))
+    setDismissed(mergedDismissed); setDismissedIds(mergedDismissed)
+    setItems(prev => prev.filter(i => i.id !== id))
   }
 
   const readCount = items.filter(i => seen.includes(i.id)).length
@@ -516,42 +617,60 @@ const NotificationBell: React.FC<{ userId: string | undefined; onViewAllAnnounce
               filtered.map(n => {
                 const isUnread = !seen.includes(n.id)
                 return (
-                  <button
+                  <div
                     key={n.id}
-                    onClick={() => { setOpen(false); n.onClick?.() }}
                     className="cs-menu-item"
                     style={{
-                      width: '100%', background: isUnread ? `${n.color}0A` : 'transparent',
-                      border: 'none', borderBottom: '1px solid #21262d',
-                      padding: '12px 16px', cursor: 'pointer', textAlign: 'left',
-                      display: 'flex', gap: '10px', alignItems: 'flex-start',
+                      background: isUnread ? `${n.color}0A` : 'transparent',
+                      borderBottom: '1px solid #21262d',
                       borderLeft: `3px solid ${isUnread ? n.color : 'transparent'}`,
+                      display: 'flex', gap: '10px', alignItems: 'flex-start',
+                      padding: '12px 16px',
                     }}
                   >
-                    <span style={{ fontSize: '18px', flexShrink: 0, marginTop: '1px' }}>{n.icon}</span>
-                    <div style={{ flex: 1, minWidth: 0 }}>
-                      <div style={{ color: '#e6edf3', fontSize: '13px', fontWeight: isUnread ? '700' : '500', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                        {n.title}
+                    <button
+                      onClick={() => { setOpen(false); n.onClick?.() }}
+                      style={{
+                        flex: 1, minWidth: 0, background: 'transparent', border: 'none',
+                        padding: 0, cursor: 'pointer', textAlign: 'left',
+                        display: 'flex', gap: '10px', alignItems: 'flex-start',
+                      }}
+                    >
+                      <span style={{ fontSize: '18px', flexShrink: 0, marginTop: '1px' }}>{n.icon}</span>
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <div style={{ color: '#e6edf3', fontSize: '13px', fontWeight: isUnread ? '700' : '500', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                          {n.title}
+                        </div>
+                        <div style={{ color: '#8b949e', fontSize: '11px', lineHeight: 1.4, overflow: 'hidden', textOverflow: 'ellipsis', display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', marginTop: 2 }}>
+                          {n.body}
+                        </div>
+                        <div style={{ color: n.color, fontSize: '10px', marginTop: '4px', fontWeight: 600, letterSpacing: 0.3 }}>
+                          {n.kind.toUpperCase()} · {timeAgo(n.timestamp)}
+                        </div>
                       </div>
-                      <div style={{ color: '#8b949e', fontSize: '11px', lineHeight: 1.4, overflow: 'hidden', textOverflow: 'ellipsis', display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', marginTop: 2 }}>
-                        {n.body}
-                      </div>
-                      <div style={{ color: n.color, fontSize: '10px', marginTop: '4px', fontWeight: 600, letterSpacing: 0.3 }}>
-                        {n.kind.toUpperCase()} · {timeAgo(n.timestamp)}
-                      </div>
-                    </div>
-                  </button>
+                    </button>
+                    <button
+                      onClick={e => { e.stopPropagation(); dismissItem(n.id) }}
+                      title="Dismiss"
+                      style={{
+                        background: 'transparent', border: 'none', color: '#484f58',
+                        fontSize: '14px', cursor: 'pointer', padding: '2px 4px',
+                        flexShrink: 0, lineHeight: 1, alignSelf: 'center',
+                      }}
+                    >×</button>
+                  </div>
                 )
               })
             )}
           </div>
 
           <button
-            onClick={() => { setOpen(false); onViewAllAnnouncements() }}
+            onClick={() => { setOpen(false); onViewAllRef.current() }}
             style={{
-              borderTop: '1px solid #21262d', background: 'transparent', border: 'none',
-              color: '#58a6ff', padding: '12px', fontSize: '12px', fontWeight: '600',
-              cursor: 'pointer', textAlign: 'center',
+              border: 'none', borderTop: '1px solid #21262d',
+              background: 'transparent', color: '#58a6ff',
+              padding: '12px', fontSize: '12px', fontWeight: '600',
+              cursor: 'pointer', textAlign: 'center', width: '100%',
             }}
           >
             View full announcement history →
@@ -629,6 +748,7 @@ const AnnouncementsModal: React.FC<{ onClose: () => void }> = ({ onClose }) => {
       }}
     >
       <div
+        className="cs-home-modal"
         style={{
           width: '100%', maxWidth: '560px', margin: '20px',
           background: '#0d1117',
@@ -875,6 +995,7 @@ const AnimatedHero: React.FC<HeroProps> = ({
       ref={heroRef}
       onMouseMove={onMouseMove}
       onMouseLeave={onMouseLeave}
+      className="cs-home-hero"
       style={{
         position: 'relative', overflow: 'hidden',
         borderRadius: 16, padding: '36px 32px',
@@ -1258,7 +1379,7 @@ export const HomeDashboard: React.FC = () => {
       )}
 
       {/* ── HEADER — no backdropFilter so it doesn't create a stacking context ── */}
-      <header style={{
+      <header className="cs-home-header" style={{
         display: 'flex', justifyContent: 'space-between', alignItems: 'center',
         padding: '16px 32px',
         background: 'rgba(22,27,34,0.95)',
@@ -1277,7 +1398,7 @@ export const HomeDashboard: React.FC = () => {
         <div style={{ flex: 1 }} />
 
         {/* Search */}
-        <div ref={searchRef} style={{ position: 'relative', width: '200px' }}>
+        <div ref={searchRef} className="cs-home-search" style={{ position: 'relative', width: '200px' }}>
           <div className="cs-search-bar" style={{ display: 'flex', alignItems: 'center', gap: '8px', background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(48,54,61,0.8)', borderRadius: '10px', padding: '8px 12px' }}>
             <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#484f58" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0 }}>
               <circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/>
@@ -1435,7 +1556,8 @@ export const HomeDashboard: React.FC = () => {
                   { icon: '📢', tint: '#ffa726', label: 'System Announcements',  action: () => { setProfileMenuOpen(false); setAnnouncementsOpen(true) } },
                   ...(!isGuest ? [{ icon: '📊', tint: '#3fb950', label: 'Progress Report', action: () => { navigate('/progress');  setProfileMenuOpen(false) } }] : []),
                   { icon: '🎓', tint: '#a371f7', label: 'Tutorials',              action: () => { navigate('/tutorials'); setProfileMenuOpen(false) } },
-                  { icon: '📘', tint: '#26c6da', label: 'User Manual',            action: () => { navigate('/manual');    setProfileMenuOpen(false) } },
+                  { icon: '📘', tint: '#26c6da', label: 'User Manual',            action: () => { navigate('/manual');       setProfileMenuOpen(false) } },
+                  { icon: '📋', tint: '#8b949e', label: 'Patch Notes',            action: () => { navigate('/patch-notes'); setProfileMenuOpen(false) } },
                   ...(!isGuest ? [{ icon: '🗺️', tint: '#e3b341', label: 'Replay Welcome Tour', action: () => { setProfileMenuOpen(false); window.dispatchEvent(new CustomEvent('cs-replay-tour')) } }] : []),
                   ...(isAdmin ? [{ icon: '🛡️', tint: '#f85149', label: 'Admin Panel', action: () => { navigate('/admin'); setProfileMenuOpen(false) } }] : []),
                 ].map((item: any) => (
@@ -1485,7 +1607,7 @@ export const HomeDashboard: React.FC = () => {
       )}
 
       {/* ── MAIN GRID ── */}
-      <div style={{ width: '95%', maxWidth: '1280px', display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '24px', margin: '0 auto', boxSizing: 'border-box', alignItems: 'stretch' }}>
+      <div className="cs-home-grid" style={{ width: '95%', maxWidth: '1280px', display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '24px', margin: '0 auto', boxSizing: 'border-box', alignItems: 'stretch' }}>
 
         {/* LEFT COLUMN */}
         <div style={{ display: 'flex', flexDirection: 'column', gap: '24px', minWidth: 0, height: '100%' }}>
@@ -1516,7 +1638,7 @@ export const HomeDashboard: React.FC = () => {
             .mc-cta:disabled { opacity:0.5; cursor:not-allowed; }
           `}</style>
 
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '20px' }}>
+          <div className="cs-home-qa-grid" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '20px' }}>
             {/* ── SANDBOX ── */}
             <div
               className="mc-card"

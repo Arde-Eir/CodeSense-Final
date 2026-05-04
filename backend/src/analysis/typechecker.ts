@@ -41,7 +41,9 @@ import {
 // ---------------------------------------------------------------------------
 interface ExtendedSymbolInfo extends SymbolInfo {
   isConst?: boolean;
-  paramCount?: number; // for function prototype/decl mismatch detection
+  paramCount?: number;
+  minParamCount?: number; // params without default values (minimum required)
+  paramTypes?: string[];  // declared type of each param, for call-site checking
 }
 
 export class TypeChecker {
@@ -80,8 +82,11 @@ export class TypeChecker {
     this.returnDepth = 0;
     this.loopDepth = 0;
     this.switchDepth = 0;
+    this.gotoTargets.clear();
+    this.definedLabels.clear();
 
     this.initializeStandardLibrary();
+    this.preScanFunctions(ast);
     this.visit(ast);
     this.performDeadCodeAnalysis();
 
@@ -197,6 +202,39 @@ export class TypeChecker {
   }
 
   // =========================================================================
+  // Pre-scan: register all top-level function declarations before the main
+  // pass so that functions defined BELOW their call site (no forward
+  // prototype) are still found at the call site without an error.
+  // =========================================================================
+  private preScanFunctions(ast: ASTNode): void {
+    const prog = ast as any;
+    const scanBody = (nodes: any[]) => {
+      for (const node of nodes) {
+        if (node?.type !== 'FunctionDecl') continue;
+        const func = node as FunctionDeclNode;
+        const key = `global::${func.name}`;
+        if (this.symbolTable[key]) continue; // already registered by stdlib
+        const entry: ExtendedSymbolInfo = {
+          name: func.name,
+          type: func.returnType,
+          line: func.line || 0,
+          scope: 'global',
+          initialized: true,
+          isDefined: false, // full pass sets this to true
+          kind: 'function',
+          paramCount:    func.params.length,
+          minParamCount: func.params.filter((p: ParameterNode) => !p.defaultValue).length,
+          paramTypes:    func.params.map((p: ParameterNode) => p.varType),
+        };
+        this.symbolTable[key] = entry as SymbolInfo;
+      }
+    };
+    if (Array.isArray(prog.body)) scanBody(prog.body);
+    // also scan inside namespace blocks (e.g. namespace { ... })
+    if (prog.namespace && Array.isArray(prog.namespace.body)) scanBody(prog.namespace.body);
+  }
+
+  // =========================================================================
   // Visitor dispatch
   // =========================================================================
   private visit(node: ASTNode | null | string | undefined): string | null {
@@ -306,7 +344,11 @@ export class TypeChecker {
     } else {
       this.addSymbol(func.name, func.returnType, func.line || 0, true, undefined, true, 'function');
       const newEntry = this.symbolTable[key] as ExtendedSymbolInfo;
-      if (newEntry) newEntry.paramCount = func.params.length;
+      if (newEntry) {
+        newEntry.paramCount    = func.params.length;
+        newEntry.minParamCount = func.params.filter((p: ParameterNode) => !p.defaultValue).length;
+        newEntry.paramTypes    = func.params.map((p: ParameterNode) => p.varType);
+      }
     }
 
     this.currentFunction = { name: func.name, returnType: func.returnType };
@@ -354,7 +396,7 @@ export class TypeChecker {
       });
     }
 
-    // Strict return enforcement — now uses multi-path allPathsReturn()
+    // Return enforcement — main and non-void functions are checked separately
     if (func.name === 'main') {
       if (executableMainStatements === 0) {
         this.addError(
@@ -369,23 +411,17 @@ export class TypeChecker {
       if (!this.functionHasTopLevelReturn && !this.allPathsReturn(func.body || [])) {
         this.addError(node, "Strict Error: 'main' must explicitly 'return 0;'", 'error');
       }
-    } if (!this.functionHasTopLevelReturn && !this.allPathsReturn(func.body || [])) {
-        this.addError(
-          node,
-          "Style Hint: While 'main' implicitly returns 0, explicitly writing 'return 0;' is better practice.", 
-          'warning'
-        );
-      }else if (func.returnType !== 'void') {
-      // Normal functions MUST return a value if they aren't void
+    } else if (func.returnType !== 'void') {
       if (!this.functionHasTopLevelReturn && !this.allPathsReturn(func.body || [])) {
         this.addError(
           node,
           `Semantic Error: Not all paths in function '${func.name}' return a value (expects '${func.returnType}').`,
-          'error'
+          'error',
         );
       }
     }
 
+    this.resolveGotoTargets();
     this.exitScope();
     this.currentFunction = null;
     this.functionHasTopLevelReturn = false;
@@ -398,9 +434,9 @@ export class TypeChecker {
   // =========================================================================
   private visitVariableDecl(node: ASTNode): string | null {
     const varNode = node as VariableDeclNode;
-    const isConst =
-      Array.isArray((varNode as any).modifiers) &&
-      (varNode as any).modifiers.includes('const');
+    const mods: string[] = Array.isArray((varNode as any).modifiers) ? (varNode as any).modifiers : [];
+    const isConst     = mods.includes('const') || mods.includes('constexpr');
+    const isConstExpr = mods.includes('constexpr');
 
     let arrayDimensions: number[] | undefined;
     if (varNode.dimensions && varNode.dimensions.length > 0) {
@@ -410,6 +446,25 @@ export class TypeChecker {
     }
 
     const initialized = varNode.value !== null && varNode.value !== undefined;
+
+    // constexpr must always be initialized
+    if (isConstExpr && !initialized) {
+      this.addError(node, `'constexpr' variable '${varNode.name}' must be initialized at declaration.`, 'error');
+    }
+
+    // ── auto type inference ─────────────────────────────────────────────────
+    if (varNode.varType === 'auto') {
+      if (!initialized) {
+        this.addError(node, `'auto' variable '${varNode.name}' must have an initializer for type inference.`, 'error');
+        this.addSymbol(varNode.name, 'auto', varNode.line || 0, false, arrayDimensions, true, 'variable', isConst);
+        return 'auto';
+      }
+      const inferredType = this.visit(varNode.value) || 'auto';
+      this.addSymbol(varNode.name, inferredType, varNode.line || 0, true, arrayDimensions, true, 'variable', isConst);
+      this.markWrite(varNode.name, varNode.line || 0);
+      return inferredType;
+    }
+
     this.addSymbol(
       varNode.name, varNode.varType, varNode.line || 0,
       initialized, arrayDimensions, true, 'variable', isConst,
@@ -420,15 +475,12 @@ export class TypeChecker {
       this.markWrite(varNode.name, varNode.line || 0);
 
       // ── REFERENCE DECLARATIONS are always type-compatible ──────────────
-      // If the declared type is a reference (e.g. int &, const int &, int&&),
-      // the initializer just needs to be the same base type — no mismatch.
       const normalizedDeclType = varNode.varType.replace(/\s+/g, '');
       const isReferenceDecl = normalizedDeclType.includes('&');
 
       if (!isReferenceDecl && valueType && !this.isTypeCompatible(varNode.varType, valueType, varNode.value)) {
         this.addError(node, `Type mismatch: cannot assign '${valueType}' to '${varNode.varType}'`);
       } else if (isReferenceDecl && valueType) {
-        // Still validate base type compatibility for references
         const baseTarget = normalizedDeclType.replace(/&+$/, '').replace(/^const/, '').replace(/\s+/g, '');
         const baseSource = valueType.replace(/&+$/, '').replace(/^const/, '').replace(/\s+/g, '');
         const numWeight: Record<string, number> = {
@@ -752,6 +804,85 @@ export class TypeChecker {
     return null;
   }
 
+  // =========================================================================
+  // Goto / Labels
+  // =========================================================================
+  private gotoTargets:   Set<string> = new Set();
+  private definedLabels: Set<string> = new Set();
+
+  private visitGotoStatement(node: any): string | null {
+    if (!this.currentFunction) {
+      this.addError(node, `'goto' is only valid inside a function.`, 'error');
+      return null;
+    }
+    if (node.label) this.gotoTargets.add(node.label);
+    return null;
+  }
+
+  private visitLabelStatement(node: any): string | null {
+    if (this.definedLabels.has(node.name)) {
+      this.addError(node, `Duplicate label '${node.name}' in the same function.`, 'error');
+    } else {
+      this.definedLabels.add(node.name);
+    }
+    if (node.statement) this.visit(node.statement);
+    return null;
+  }
+
+  private resolveGotoTargets(): void {
+    this.gotoTargets.forEach(target => {
+      if (!this.definedLabels.has(target)) {
+        this.errors.push({
+          type: 'semantic', severity: 'error',
+          message: `Undefined goto target: label '${target}' does not exist in this function.`,
+          line: 0, column: 0,
+        });
+      }
+    });
+    this.gotoTargets.clear();
+    this.definedLabels.clear();
+  }
+
+  // =========================================================================
+  // Member access  (.field  /  ->field)
+  // Member type cannot be resolved without a class schema, so we return
+  // 'unknown' which is compatible with everything in isTypeCompatible.
+  // =========================================================================
+  private visitMemberAccess(node: any): string | null {
+    this.visit(node.object ?? node.left ?? node.target);
+    return 'unknown';
+  }
+  private visitArrowAccess(node: any): string | null {
+    const obj = node.object ?? node.left ?? node.target;
+    const sym = obj?.name ? this.lookupSymbol(obj.name) : null;
+    if (sym && !sym.type.endsWith('*') && sym.type !== 'unknown') {
+      this.addError(node, `'${obj.name}' is not a pointer; use '.' instead of '->'`, 'warning');
+    }
+    this.visit(obj);
+    return 'unknown';
+  }
+  // Handles obj.method(args) and ptr->method(args)
+  private visitMethodCall(node: any): string | null {
+    this.visit(node.object ?? node.target);
+    (node.arguments || []).forEach((arg: ASTNode) => this.visit(arg));
+    return 'unknown';
+  }
+  // Some parsers emit MemberCallExpression for chained calls
+  private visitMemberCallExpression(node: any): string | null { return this.visitMethodCall(node); }
+  private visitChainedCall(node: any):           string | null { return this.visitMethodCall(node); }
+
+  // =========================================================================
+  // Comma operator — (expr1, expr2, ...) — left side for side effects,
+  // right-most (or last) type is the result type.
+  // =========================================================================
+  private visitCommaExpression(node: any): string | null {
+    let lastType: string | null = null;
+    (node.expressions || node.operands || []).forEach((e: ASTNode) => { lastType = this.visit(e); });
+    return lastType;
+  }
+  private visitCommaOp(node: any):         string | null { return this.visitCommaExpression(node); }
+  private visitSequenceExpression(node: any): string | null { return this.visitCommaExpression(node); }
+
   private visitGlobalAccess(node: ASTNode): string | null {
     const g = node as GlobalAccessNode;
     const symbol = this.symbolTable[`global::${g.name}`];
@@ -781,13 +912,56 @@ export class TypeChecker {
     );
   }
 
-    if (call.arguments) {
-      call.arguments.forEach((arg: ASTNode) => this.visit(arg));
-    }
+    const argTypes: (string | null)[] = (call.arguments || []).map((arg: ASTNode) => this.visit(arg));
 
     const symbol = this.lookupSymbol(call.name);
     if (symbol) {
       this.validateHeaderForSymbol(call.name, node);
+
+      const ext = symbol as ExtendedSymbolInfo;
+      if (ext.paramCount !== undefined && symbol.kind === 'function') {
+        const provided = call.arguments?.length || 0;
+        const min = ext.minParamCount ?? ext.paramCount;
+        const max = ext.paramCount;
+        if (provided < min) {
+          this.addError(node,
+            `Too few arguments to '${call.name}': expected ${min === max ? max : `${min}–${max}`}, got ${provided}.`, 'error');
+        } else if (provided > max) {
+          this.addError(node,
+            `Too many arguments to '${call.name}': expected ${max}, got ${provided}.`, 'error');
+        }
+
+        // Per-argument pass-by-reference and pass-by-pointer checks
+        (ext.paramTypes || []).forEach((paramType: string, i: number) => {
+          const arg = (call.arguments || [])[i] as any;
+          if (!arg) return;
+          const argType = argTypes[i];
+          const normParam = paramType.replace(/\s+/g, '');
+
+          // Pass-by-non-const-reference: arg must be an lvalue
+          const isNonConstRef = normParam.includes('&') && !normParam.startsWith('const');
+          if (isNonConstRef) {
+            const isLvalue = typeof arg === 'string' ||
+              arg.type === 'Identifier' ||
+              arg.type === 'ArrayAccess' ||
+              arg.type === 'Dereference';
+            if (!isLvalue) {
+              this.addError(arg,
+                `Argument ${i + 1} to '${call.name}': cannot bind a temporary or literal to non-const reference parameter '${paramType}'.`, 'error');
+            }
+          }
+
+          // Pass-by-pointer: arg must already be a pointer or address-of expression
+          const isPtrParam = normParam.endsWith('*') && !normParam.includes('&');
+          if (isPtrParam && argType && !argType.endsWith('*') && argType !== 'nullptr_t') {
+            if (arg.type !== 'AddressOf') {
+              this.addError(arg,
+                `Argument ${i + 1} to '${call.name}': expected pointer '${paramType}' but got '${argType}' — did you mean '&${typeof arg === 'string' ? arg : arg.name ?? 'var'}'?`, 'error');
+            }
+          }
+        });
+      }
+
       return symbol.type;
     }
 
@@ -988,6 +1162,42 @@ export class TypeChecker {
       );
       return 'string';
     }
+
+    // ── Pointer arithmetic ────────────────────────────────────────────────
+    const leftIsPtr  = leftType.endsWith('*');
+    const rightIsPtr = rightType.endsWith('*');
+    if (leftIsPtr || rightIsPtr) {
+      if (['*', '/', '%'].includes(bin.operator)) {
+        this.addError(node,
+          `Invalid pointer arithmetic: '${bin.operator}' cannot be applied to pointer — only '+' and '-' are valid.`,
+          'error');
+        return null;
+      }
+      if (bin.operator === '+') {
+        if (leftIsPtr && rightIsPtr) {
+          this.addError(node, `Cannot add two pointer types '${leftType}' and '${rightType}'.`, 'error');
+          return null;
+        }
+        if (leftIsPtr  && this.isNumericType(rightType)) return leftType;
+        if (rightIsPtr && this.isNumericType(leftType))  return rightType;
+        this.addError(node, `Cannot add '${leftType}' and '${rightType}'.`, 'error');
+        return null;
+      }
+      if (bin.operator === '-') {
+        if (leftIsPtr && rightIsPtr) {
+          if (leftType !== rightType) {
+            this.addError(node,
+              `Cannot subtract incompatible pointer types '${leftType}' and '${rightType}'.`, 'error');
+          }
+          return 'ptrdiff_t';
+        }
+        if (leftIsPtr && this.isNumericType(rightType)) return leftType;
+        this.addError(node,
+          `Cannot subtract pointer '${rightType}' from non-pointer '${leftType}'.`, 'error');
+        return null;
+      }
+    }
+
     if (!this.isNumericType(leftType) || !this.isNumericType(rightType)) {
       this.addError(
         node,
@@ -1144,7 +1354,11 @@ if (['&', '|', '^', '<<', '>>'].includes(bin.operator)) {
   // Literals
   // =========================================================================
   private visitInteger(_node: any): string { return 'int'; }
-  private visitFloat(_node: any):   string { return 'float'; }
+  private visitFloat(node: any): string {
+    // In C++: 3.14 is double, 3.14f / 3.14F is float
+    const raw = String(node.raw ?? node.suffix ?? node.value ?? '');
+    return (raw.endsWith('f') || raw.endsWith('F')) ? 'float' : 'double';
+  }
   private visitChar(_node: any):    string { return 'char'; }
   private visitString(_node: any):  string { return 'string'; }
 
@@ -1184,6 +1398,9 @@ if (['&', '|', '^', '<<', '>>'].includes(bin.operator)) {
       if (typeof target === 'string') {
         const symbol = this.lookupSymbol(target);
         if (symbol) {
+          if ((symbol as ExtendedSymbolInfo).isConst) {
+            this.addError(node, `Cannot read into const variable '${target}'`, 'error');
+          }
           symbol.initialized = true;
           this.markWrite(target, cin.line || 0);
           this.markRead(target);
@@ -1211,14 +1428,14 @@ if (['&', '|', '^', '<<', '>>'].includes(bin.operator)) {
   }
 
   private visitCoutStatement(node: any): string | null {
-  // REMOVE: (node.values || []).forEach(...)
-  
-  // FIX: Visit the root of the BinaryOp tree directly
-  if (node.values) {
-    this.visit(node.values);
+    // Parser may emit values as a BinaryOp tree (chained <<) or as an array
+    if (Array.isArray(node.values)) {
+      node.values.forEach((v: ASTNode) => this.visit(v));
+    } else if (node.values) {
+      this.visit(node.values);
+    }
+    return 'ostream';
   }
-  return 'ostream';
-}
 
   // =========================================================================
   // Preprocessor node visitors
@@ -1571,7 +1788,6 @@ if (['&', '|', '^', '<<', '>>'].includes(bin.operator)) {
   // Type compatibility & promotion helpers
   // =========================================================================
 private isTypeCompatible(target: string, source: string, sourceNode?: any): boolean {
-   console.log('[isTypeCompatible] target:', JSON.stringify(target), 'source:', JSON.stringify(source));
   // Step 1: Strip ALL whitespace, then normalize references and const
   const stripRef = (t: string) =>
     t.replace(/\s+/g, '')       // remove all spaces first: "int &" → "int&"
@@ -1632,7 +1848,7 @@ private isTypeCompatible(target: string, source: string, sourceNode?: any): bool
       .trim();
     return ['int', 'float', 'double', 'char', 'long', 'short',
             'long long', 'unsigned int', 'unsigned long', 'unsigned long long',
-            'size_t'].includes(base);
+            'size_t', 'ptrdiff_t'].includes(base);
   }
 
   private isIntegralType(type: string): boolean {
@@ -1641,7 +1857,7 @@ private isTypeCompatible(target: string, source: string, sourceNode?: any): bool
       .replace(/[*&\s]+$/g, '')
       .replace(/^(const|static|volatile|unsigned|signed|mutable|extern|inline)\s+/g, '')
       .trim();
-    return ['int', 'char', 'long', 'short', 'bool', 'long long', 'size_t'].includes(base);
+    return ['int', 'char', 'long', 'short', 'bool', 'long long', 'size_t', 'ptrdiff_t'].includes(base);
   }
 
   private isComparable(left: string, right: string): boolean {

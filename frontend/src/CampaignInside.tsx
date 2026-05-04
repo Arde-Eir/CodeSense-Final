@@ -451,17 +451,17 @@ export const CampaignInside: React.FC = () => {
 
       <div className="ci-root">
         {/* Header */}
-        <header style={{ height: 56, background: 'rgba(13,17,23,0.97)', borderBottom: '1px solid rgba(255,255,255,0.05)', display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '0 28px', position: 'sticky', top: 0, zIndex: 100, backdropFilter: 'blur(14px)' }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-            <span style={{ fontSize: 17 }}>🗺️</span>
-            <span style={{ fontFamily: "'JetBrains Mono', monospace", fontWeight: 700, fontSize: 13 }}>CodeSense Journey</span>
-            <span style={{ color: '#21262d' }}>›</span>
-            <span style={{ fontSize: 10, color: accent, fontFamily: "'JetBrains Mono', monospace", background: `${accent}11`, border: `1px solid ${accent}2e`, padding: '2px 9px', borderRadius: 5 }}>
+        <header className="ci-header" style={{ height: 56, background: 'rgba(13,17,23,0.97)', borderBottom: '1px solid rgba(255,255,255,0.05)', display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '0 28px', position: 'sticky', top: 0, zIndex: 100, backdropFilter: 'blur(14px)' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10, minWidth: 0 }}>
+            <span className="ci-header-logo" style={{ fontSize: 17, flexShrink: 0 }}>🗺️</span>
+            <span className="ci-header-brand" style={{ fontFamily: "'JetBrains Mono', monospace", fontWeight: 700, fontSize: 13, flexShrink: 0 }}>CodeSense Journey</span>
+            <span className="ci-header-sep" style={{ color: '#21262d', flexShrink: 0 }}>›</span>
+            <span style={{ fontSize: 10, color: accent, fontFamily: "'JetBrains Mono', monospace", background: `${accent}11`, border: `1px solid ${accent}2e`, padding: '2px 9px', borderRadius: 5, flexShrink: 0 }}>
               Level {levelNumber} · {phase[0].toUpperCase() + phase.slice(1)}
             </span>
           </div>
-          <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 6, background: 'rgba(227,179,65,0.09)', border: '1px solid rgba(227,179,65,0.22)', borderRadius: 7, padding: '5px 12px' }}>
+          <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexShrink: 0 }}>
+            <div className="ci-xp-pill" style={{ display: 'flex', alignItems: 'center', gap: 6, background: 'rgba(227,179,65,0.09)', border: '1px solid rgba(227,179,65,0.22)', borderRadius: 7, padding: '5px 12px' }}>
               <span style={{ fontSize: 11 }}>⚡</span>
               <span style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 11, color: '#e3b341', fontWeight: 700 }}>{userXP.toLocaleString()} XP</span>
             </div>
@@ -483,7 +483,7 @@ export const CampaignInside: React.FC = () => {
           )}
 
           {/* Hero */}
-          <div style={{ position: 'relative', borderRadius: 16, overflow: 'hidden', height: 162, marginBottom: 26, background: levelInfo.banner_url ? `url(${levelInfo.banner_url}) center/cover no-repeat` : `linear-gradient(135deg,${accent}18 0%, #101d28 55%, #0d1117 100%)`, border: '1px solid rgba(255,255,255,0.07)', boxShadow: '0 12px 48px rgba(0,0,0,.55)', animation: 'heroIn 0.5s ease' }}>
+          <div className="ci-hero" style={{ position: 'relative', borderRadius: 16, overflow: 'hidden', height: 162, marginBottom: 26, background: levelInfo.banner_url ? `url(${levelInfo.banner_url}) center/cover no-repeat` : `linear-gradient(135deg,${accent}18 0%, #101d28 55%, #0d1117 100%)`, border: '1px solid rgba(255,255,255,0.07)', boxShadow: '0 12px 48px rgba(0,0,0,.55)', animation: 'heroIn 0.5s ease' }}>
             <div style={{ position: 'absolute', inset: 0, opacity: 0.055, backgroundImage: `linear-gradient(${accent}99 1px,transparent 1px),linear-gradient(90deg,${accent}99 1px,transparent 1px)`, backgroundSize: '38px 38px' }} />
             <div style={{ position: 'absolute', left: 0, right: 0, height: '30%', opacity: 0.08, background: `linear-gradient(transparent,${accent}80,transparent)`, animation: 'scan 5s ease-in-out infinite', pointerEvents: 'none' }} />
             <div style={{ position: 'absolute', inset: 0, background: 'linear-gradient(90deg,rgba(8,12,17,.88) 0%,rgba(8,12,17,.35) 55%,transparent 100%)' }} />
@@ -541,7 +541,7 @@ export const CampaignInside: React.FC = () => {
           </div>
 
           {/* 2-col layout */}
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 252px', gap: 18, alignItems: 'start' }}>
+          <div className="ci-two-col" style={{ display: 'grid', gridTemplateColumns: '1fr 252px', gap: 18, alignItems: 'start' }}>
             {/* Quest list */}
             <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
@@ -616,6 +616,44 @@ const STYLE_CSS = `
   ::-webkit-scrollbar { width: 5px; }
   ::-webkit-scrollbar-track { background: transparent; }
   ::-webkit-scrollbar-thumb { background: #21262d; border-radius: 3px; }
+
+  @media (max-width: 768px) {
+    /* Header — collapse to compact single row */
+    .ci-header {
+      height: auto !important;
+      padding: 10px 14px !important;
+      flex-wrap: wrap !important;
+      gap: 8px !important;
+    }
+    /* Hide "CodeSense Journey ›" — keep level badge and back button */
+    .ci-header-brand, .ci-header-sep { display: none !important; }
+    /* XP pill compact */
+    .ci-xp-pill { padding: 5px 10px !important; }
+    .ci-xp-pill span:last-child { font-size: 12px !important; }
+
+    /* Main content breathing room */
+    .ci-root main {
+      padding: 14px 12px 48px !important;
+    }
+
+    /* Hero banner shorter on mobile */
+    .ci-hero {
+      height: 110px !important;
+      margin-bottom: 14px !important;
+    }
+    .ci-hero h1 { font-size: clamp(16px, 4vw, 22px) !important; }
+
+    /* Quest list + sidebar stack vertically */
+    .ci-two-col {
+      grid-template-columns: 1fr !important;
+      gap: 14px !important;
+    }
+
+    /* Quest card — comfortable tap target, no side overflow */
+    .ci-root .ci-two-col > div:first-child > div {
+      margin-bottom: 10px !important;
+    }
+  }
 `;
 
 export default CampaignInside;

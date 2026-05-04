@@ -25,7 +25,7 @@ const Field: React.FC<{ label: string; error?: string; children: React.ReactNode
 const getInputStyle = (hasError: boolean): React.CSSProperties => ({
   width: '100%', padding: '11px 14px', background: '#0d1117',
   border: `1px solid ${hasError ? '#f85149' : '#30363d'}`, borderRadius: 8,
-  color: '#e6edf3', fontSize: 14, outline: 'none', boxSizing: 'border-box',
+  color: '#e6edf3', fontSize: 16, outline: 'none', boxSizing: 'border-box',
   fontFamily: 'inherit', transition: 'border-color 0.2s, box-shadow 0.2s',
   WebkitTextFillColor: '#e6edf3',
 });
@@ -431,6 +431,9 @@ const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
           from { opacity: 0; transform: translateY(16px); }
           to   { opacity: 1; transform: translateY(0); }
         }
+        @media (max-width: 480px) {
+          .signup-card { padding: 28px 20px !important; margin: 20px auto !important; }
+        }
       `}</style>
 
       <div style={{
@@ -440,7 +443,7 @@ const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
         fontFamily: "'IBM Plex Sans', -apple-system, sans-serif",
         WebkitOverflowScrolling: 'touch',
       }}>
-        <div style={{
+        <div className="signup-card" style={{
           background: 'linear-gradient(160deg, rgba(22,27,34,0.97) 0%, rgba(13,17,23,0.97) 100%)',
           borderRadius: 16, padding: '36px 40px',
           width: 'calc(100% - 32px)', maxWidth: 500,

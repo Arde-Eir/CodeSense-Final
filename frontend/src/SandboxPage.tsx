@@ -228,12 +228,13 @@ interface AccordionPanelProps {
   height?: number;
   accentColor?: string;
   badge?: React.ReactNode;
+  className?: string;
 }
 
 const HEADER_H = 46;
 
 const AccordionPanel: React.FC<AccordionPanelProps> = ({
-  label, icon, isOpen, onToggle, children, height, accentColor = '#3fb950', badge
+  label, icon, isOpen, onToggle, children, height, accentColor = '#3fb950', badge, className
 }) => {
   const outerStyle: React.CSSProperties = isOpen
     ? height != null
@@ -241,8 +242,10 @@ const AccordionPanel: React.FC<AccordionPanelProps> = ({
       : { flex: '1 1 0', minHeight: 120, overflow: 'hidden' }
     : { flexShrink: 0 };
 
+  const cls = [className, isOpen ? 'accordion-open' : 'accordion-closed'].filter(Boolean).join(' ');
+
   return (
-    <div style={{
+    <div className={cls} style={{
       display: 'flex',
       flexDirection: 'column',
       background: '#0d1117',
@@ -323,10 +326,11 @@ const ResizeHandle: React.FC<{ onDrag: (dy: number) => void; disabled?: boolean 
     window.addEventListener('mouseup', onUp);
   }, [onDrag, disabled]);
 
-  if (disabled) return <div style={{ height: '8px' }} />;
+  if (disabled) return <div className="sandbox-resize-handle" style={{ height: '8px' }} />;
 
   return (
     <div
+      className="sandbox-resize-handle"
       onMouseDown={onMouseDown}
       onMouseEnter={() => setHovered(true)}
       onMouseLeave={() => setHovered(false)}
@@ -426,13 +430,17 @@ int main() {
   };
 
   const handleDrag = useCallback((dy: number) => {
+    if (window.innerWidth <= 768) return; // drag resize disabled on mobile
     const container = containerRef.current;
     if (!container) return;
-    const available = container.clientHeight - 24 - (HEADER_H * 2) - 16;
+    // available = total space both panels can occupy (padding 24px + handle 16px subtracted).
+    // Panel heights are OUTER heights (header included), so headers must NOT be subtracted again.
+    const available = container.clientHeight - 24 - 16;
+    const minPanel = HEADER_H + 60; // header + a small content area
 
     setEditorHeight(prev => {
-      const current = prev ?? Math.round(available * 0.35);
-      const next = Math.max(80, Math.min(available - 120, current + dy));
+      const current = prev ?? Math.round(available * 0.5);
+      const next = Math.max(minPanel, Math.min(available - minPanel, current + dy));
       setTabsHeight(available - next);
       return next;
     });
@@ -481,7 +489,16 @@ int main() {
     setAnalysisRunKey(prev => prev + 1);
     setIsAnalyzing(true);
     // Open the Analysis panel immediately so results appear as soon as they arrive.
-    setOpenPanels(prev => ({ ...prev, tabs: true }));
+    setOpenPanels(prev => {
+      const editorAlreadyOpen = prev.editor;
+      if (editorAlreadyOpen && containerRef.current && window.innerWidth > 768) {
+        const available = containerRef.current.clientHeight - 24 - 16;
+        const newTabsHeight = Math.max(HEADER_H + 120, Math.round(available * 0.42));
+        setTabsHeight(newTabsHeight);
+        setEditorHeight(available - newTabsHeight);
+      }
+      return { ...prev, tabs: true };
+    });
 
     let data: AnalysisResult | null = null;
     try {
@@ -542,17 +559,17 @@ int main() {
     <div className="app-container">
       {/* ── Header ─────────────────────────────────────────────────────── */}
       <header className="app-header">
-        <div className="header-brand" onClick={() => navigate('/home')} title="Return to Dashboard">
+        <div className="header-brand" role="button" tabIndex={0} onClick={() => navigate('/home')} onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); navigate('/home'); } }} title="Return to Dashboard" aria-label="CodeSense — return to dashboard">
           <span className="brand-icon">📦</span>
           <span className="brand-text">CodeSense</span>
         </div>
 
-        <div style={{ position: 'absolute', left: '50%', transform: 'translateX(-50%)' }}>
+        <div className="header-mode-toggle" style={{ position: 'absolute', left: '50%', transform: 'translateX(-50%)' }}>
           <ModeToggle mode={mode} onChange={setMode} />
         </div>
 
         <div className="header-actions">
-          <div style={{
+          <div className="sandbox-free-badge" style={{
             display: 'flex', alignItems: 'center', gap: '5px',
             padding: '4px 10px', borderRadius: '6px',
             background: 'rgba(88,166,255,0.08)', border: '1px solid rgba(88,166,255,0.2)',
@@ -561,7 +578,9 @@ int main() {
           }}>
             🔬 FREE SANDBOX — No XP
           </div>
-          <PlayerHUD user={user} isGuest={isGuest} liveStats={liveStats} runFlash={runFlash} />
+          <div className="sandbox-hud-wrap">
+            <PlayerHUD user={user} isGuest={isGuest} liveStats={liveStats} runFlash={runFlash} />
+          </div>
           <button className="exit-btn" onClick={() => navigate('/home')}>EXIT ⎋</button>
         </div>
       </header>
@@ -584,12 +603,13 @@ int main() {
             }}
           >
             <AccordionPanel
+              className="editor-section"
               label="Source Code"
               icon="📝"
               isOpen={openPanels.editor}
               onToggle={() => togglePanel('editor')}
               accentColor="#3fb950"
-              height={bothOpen && editorHeight != null ? editorHeight : undefined}
+              height={bothOpen && editorHeight != null && window.innerWidth > 768 ? editorHeight : undefined}
               badge={
                 <span style={{
                   fontSize: '9px',
@@ -629,7 +649,7 @@ int main() {
                 </div>
                 <div className="action-bar" style={{ marginTop: '10px', flexShrink: 0 }}>
                   <button onClick={handleAnalyze} disabled={isAnalyzing} className="analyze-btn">
-                    {isAnalyzing ? '⟳  Analyzing…' : 'ANALYZE CODE'}
+                    {isAnalyzing ? '⟳ Analyzing…' : 'ANALYZE CODE'}
                   </button>
                 </div>
               </div>
@@ -638,12 +658,13 @@ int main() {
             <ResizeHandle onDrag={handleDrag} disabled={!bothOpen} />
 
             <AccordionPanel
+              className="tabs-section"
               label="Analysis"
               icon="🔬"
               isOpen={openPanels.tabs}
               onToggle={() => togglePanel('tabs')}
               accentColor="#58a6ff"
-              height={bothOpen && tabsHeight != null ? tabsHeight : undefined}
+              height={bothOpen && tabsHeight != null && window.innerWidth > 768 ? tabsHeight : undefined}
               badge={
                 result && (
                   <span style={{
@@ -861,7 +882,7 @@ int main() {
             </div>
             <div style={{ padding: '12px 16px', borderTop: '1px solid rgba(63,185,80,0.15)', background: 'rgba(13,17,23,0.8)', flexShrink: 0, display: 'flex', gap: '10px' }}>
               <button onClick={() => { setEditorFullscreen(false); handleAnalyze(); }} disabled={isAnalyzing} className="analyze-btn">
-                {isAnalyzing ? '⟳  Analyzing…' : 'ANALYZE CODE'}
+                {isAnalyzing ? '⟳ Analyzing…' : 'ANALYZE CODE'}
               </button>
             </div>
           </div>

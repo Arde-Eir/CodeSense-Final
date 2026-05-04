@@ -1,15 +1,24 @@
-import React, { useEffect } from 'react';
+import React, { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from './components/AuthScreen';
+import { supabase } from './services/supabase';
 
 export const LandingPage: React.FC = () => {
   const navigate = useNavigate();
   const { isAuthenticated } = useAuth();
+  const [playerCount, setPlayerCount] = useState<number | null>(null);
 
   // Authenticated users who land here (e.g. via the "About" button) go home
   useEffect(() => {
     if (isAuthenticated) navigate('/home', { replace: true });
   }, [isAuthenticated, navigate]);
+
+  useEffect(() => {
+    supabase
+      .from('users')
+      .select('id', { count: 'exact', head: true })
+      .then(({ count }) => setPlayerCount(count ?? 0));
+  }, []);
 
   // Override layout.css overflow:hidden so page can scroll
   useEffect(() => {
@@ -110,9 +119,45 @@ export const LandingPage: React.FC = () => {
           gap: 16px;
           margin-bottom: 36px;
         }
-        @media (max-width: 640px) {
-          .feature-grid { grid-template-columns: 1fr; }
-          .cta-row { flex-direction: column; align-items: center; }
+        .stat-bar {
+          display: flex;
+          gap: 28px;
+          justify-content: center;
+          flex-wrap: wrap;
+          margin-bottom: 40px;
+        }
+        .stat-item {
+          display: flex;
+          flex-direction: column;
+          align-items: center;
+          gap: 2px;
+        }
+        .stat-value {
+          font-size: 22px;
+          font-weight: 800;
+          color: #4caf50;
+          letter-spacing: -0.5px;
+        }
+        .stat-label {
+          font-size: 11px;
+          color: #8b949e;
+          text-transform: uppercase;
+          letter-spacing: 0.6px;
+          font-weight: 600;
+        }
+        @media (max-width: 768px) {
+          .landing-root { padding: 40px 16px; }
+          .feature-grid { grid-template-columns: 1fr; gap: 12px; margin-bottom: 28px; }
+          .cta-row { flex-direction: column; align-items: stretch !important; }
+          .cta-primary, .cta-secondary {
+            padding: 16px 20px;
+            font-size: 15px;
+            min-height: 52px;
+            width: 100%;
+          }
+          .stat-bar { gap: 20px; margin-bottom: 28px; }
+          .stat-value { font-size: 20px; }
+          .landing-card { padding: 22px 16px; }
         }
       `}</style>
 
@@ -147,6 +192,24 @@ export const LandingPage: React.FC = () => {
             Learn C++ security and best practices through interactive code analysis.{' '}
             Master safe coding with real-time feedback.
           </p>
+
+          {/* Live stats bar */}
+          <div className="stat-bar">
+            <div className="stat-item">
+              <span className="stat-value">
+                {playerCount === null ? '—' : playerCount.toLocaleString()}
+              </span>
+              <span className="stat-label">Players</span>
+            </div>
+            <div className="stat-item">
+              <span className="stat-value">4</span>
+              <span className="stat-label">Patch</span>
+            </div>
+            <div className="stat-item">
+              <span className="stat-value">C++</span>
+              <span className="stat-label">Language</span>
+            </div>
+          </div>
 
           {/* Feature cards */}
           <div className="feature-grid">

@@ -169,7 +169,11 @@ const TreeNode: React.FC<{ node: any; depth: number }> = ({ node, depth }) => {
   return (
     <div style={{ marginLeft: depth === 0 ? 0 : '20px', borderLeft: depth > 0 ? '1px solid #21262d' : 'none', paddingLeft: depth > 0 ? '12px' : '0' }}>
       <div
+        role={hasChildren ? 'button' : undefined}
+        tabIndex={hasChildren ? 0 : undefined}
+        aria-expanded={hasChildren ? expanded : undefined}
         onClick={() => hasChildren && setExpanded(e => !e)}
+        onKeyDown={e => { if (hasChildren && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); setExpanded(v => !v); } }}
         style={{
           display: 'flex', alignItems: 'center', gap: '7px',
           padding: '5px 8px', borderRadius: '7px', cursor: hasChildren ? 'pointer' : 'default',

@@ -445,6 +445,9 @@ export const LessonActivity: React.FC = () => {
     resetWidth: resetSidePanelWidth,
   } = useResizableSidePanel(bodyRef);
 
+  // Mobile: hint panel is hidden by default and toggled by a button
+  const [mobilePanelOpen, setMobilePanelOpen] = useState(false);
+
   // ── Load quest + this user's mission_progress row ─────────────────────
   const doFetch = useCallback(async () => {
     if (!user?.id || !questId) return;
@@ -771,6 +774,18 @@ export const LessonActivity: React.FC = () => {
         // post-retake UI knows what was historically done.
         everCompletedRef.current = [...new Set([...everCompletedRef.current, ...newFinished])];
 
+        // Fire-and-forget: write to activity_log for the activity feed.
+        supabase.from('activity_log').insert({
+          userid:      user.id,
+          type:        'quest_completed',
+          title:       `Quest completed: ${quest.title}`,
+          description: hintsUsedRef.current > 0
+            ? `${hintsUsedRef.current} hint${hintsUsedRef.current > 1 ? 's' : ''} used`
+            : 'No hints used',
+          xp_gained:   cumulativeXPRef.current,
+          meta:        { questid: quest.id, phase: quest.phase },
+        }).then(({ error }) => { if (error) console.warn('activity_log write failed', error); });
+
         // Fire-and-forget: record how long the user took to finish the quest.
         if (gameStartedAtRef.current !== null) {
           const totalSeconds = Math.round((Date.now() - gameStartedAtRef.current) / 1000);
@@ -911,43 +926,54 @@ export const LessonActivity: React.FC = () => {
       <style>{ANIM_CSS}</style>
 
       {/* Header */}
-      <header style={{ height: 56, background: 'rgba(13,17,23,0.97)', borderBottom: '1px solid #21262d', display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '0 24px', flexShrink: 0 }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+      <header className="la-header" style={{ height: 56, background: 'rgba(13,17,23,0.97)', borderBottom: '1px solid #21262d', display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '0 24px', flexShrink: 0 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10, minWidth: 0 }}>
           <button
             onClick={() => navigate(-1)}
             title="Back to level"
             style={{
-              background: 'rgba(255,255,255,0.06)',
-              border: '1px solid rgba(255,255,255,0.1)',
-              color: '#c9d1d9',
+              background: 'rgba(255,255,255,0.1)',
+              border: '1px solid rgba(255,255,255,0.25)',
+              color: '#e6edf3',
               cursor: 'pointer',
-              fontSize: 16,
-              width: 32, height: 32,
+              fontSize: 18,
+              width: 38, height: 38,
               borderRadius: '50%',
               display: 'flex', alignItems: 'center', justifyContent: 'center',
               flexShrink: 0,
               transition: 'all .15s',
             }}
-            onMouseEnter={e => { e.currentTarget.style.background = 'rgba(255,255,255,0.12)'; e.currentTarget.style.color = '#e6edf3'; }}
-            onMouseLeave={e => { e.currentTarget.style.background = 'rgba(255,255,255,0.06)'; e.currentTarget.style.color = '#c9d1d9'; }}
+            onMouseEnter={e => { e.currentTarget.style.background = 'rgba(255,255,255,0.2)'; e.currentTarget.style.borderColor = 'rgba(255,255,255,0.45)'; }}
+            onMouseLeave={e => { e.currentTarget.style.background = 'rgba(255,255,255,0.1)'; e.currentTarget.style.borderColor = 'rgba(255,255,255,0.25)'; }}
           >←</button>
-          <span style={{ fontSize: 11, color: '#484f58', fontFamily: "'JetBrains Mono',monospace", letterSpacing: '1px' }}>{phaseLabel}</span>
-          <span style={{ color: '#21262d' }}>›</span>
-          <span style={{ fontSize: 13, fontWeight: 700, color: '#e6edf3', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: 480 }}>{quest.title}</span>
+          <span className="la-phase-label" style={{ fontSize: 11, color: '#484f58', fontFamily: "'JetBrains Mono',monospace", letterSpacing: '1px', flexShrink: 0 }}>{phaseLabel}</span>
+          <span className="la-phase-label" style={{ color: '#21262d', flexShrink: 0 }}>›</span>
+          <span className="la-quest-title" style={{ fontSize: 13, fontWeight: 700, color: '#e6edf3', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: 480 }}>{quest.title}</span>
         </div>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0 }}>
           {appPhase === 'game' && !isCompleted && availableTabs.length > 0 && (
-            <button onClick={handleGoBack} style={{ background: 'transparent', border: '1px solid #30363d', color: '#8b949e', padding: '5px 12px', borderRadius: 6, fontSize: 11, cursor: 'pointer', fontFamily: "'JetBrains Mono',monospace" }}>📖 Theory</button>
+            <button className="la-theory-btn" onClick={handleGoBack} style={{ background: 'transparent', border: '1px solid #30363d', color: '#8b949e', padding: '5px 12px', borderRadius: 6, fontSize: 11, cursor: 'pointer', fontFamily: "'JetBrains Mono',monospace" }}>
+              📖 <span className="la-btn-label">Theory</span>
+            </button>
           )}
           {appPhase === 'game' && !isCompleted && (
-            <button onClick={handleReset} style={{ background: 'transparent', border: '1px solid rgba(218,54,51,0.3)', color: '#f85149', padding: '5px 12px', borderRadius: 6, fontSize: 11, cursor: 'pointer', fontFamily: "'JetBrains Mono',monospace" }}>↺ Reset</button>
+            <button className="la-reset-btn" onClick={handleReset} style={{ background: 'transparent', border: '1px solid rgba(218,54,51,0.3)', color: '#f85149', padding: '5px 12px', borderRadius: 6, fontSize: 11, cursor: 'pointer', fontFamily: "'JetBrains Mono',monospace" }}>
+              ↺ <span className="la-btn-label">Reset</span>
+            </button>
+          )}
+          {appPhase === 'game' && (
+            <button
+              className="la-mobile-hint-btn"
+              onClick={() => setMobilePanelOpen(p => !p)}
+              style={{ background: mobilePanelOpen ? 'rgba(88,166,255,0.15)' : 'transparent', border: `1px solid ${mobilePanelOpen ? 'rgba(88,166,255,0.4)' : '#30363d'}`, color: mobilePanelOpen ? '#58a6ff' : '#8b949e', padding: '5px 12px', borderRadius: 6, fontSize: 11, cursor: 'pointer', fontFamily: "'JetBrains Mono',monospace", alignItems: 'center', gap: 4 }}
+            >💡 Hints</button>
           )}
         </div>
       </header>
 
       {/* Body — overflowY:auto lets the layout scroll at high browser zoom
            instead of clipping the bottom action bar */}
-      <div ref={bodyRef} style={{ flex: 1, display: 'flex', overflow: 'hidden', minHeight: 0 }}>
+      <div ref={bodyRef} className="la-body" style={{ flex: 1, display: 'flex', overflow: 'hidden', minHeight: 0 }}>
         {appPhase === 'tutorial' ? (
           <TutorialLearnPhase
             quest={quest}
@@ -961,7 +987,7 @@ export const LessonActivity: React.FC = () => {
             {/* Left: tab bar + active game */}
             <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minWidth: 0, overflowY: 'auto' }}>
               {!isCompleted && availableTabs.length > 1 && (
-                <div style={{ display: 'flex', gap: 4, padding: '10px 22px 0', borderBottom: '1px solid #21262d', flexShrink: 0 }}>
+                <div className="la-tab-bar" style={{ display: 'flex', gap: 4, padding: '10px 22px 0', borderBottom: '1px solid #21262d', flexShrink: 0 }}>
                   {availableTabs.map(t => {
                     const isDoneTab  = completedActivitiesRef.current.includes(t);
                     const isSelected = activeTab === t;
@@ -1003,7 +1029,7 @@ export const LessonActivity: React.FC = () => {
                 </div>
               )}
 
-              <div style={{ flex: 1, padding: !isCompleted && activeTab === 'balloon' ? 0 : '16px 22px', display: 'flex', flexDirection: 'column', overflowY: 'auto', minHeight: 0 }}>
+              <div className="la-game-area" style={{ flex: 1, padding: !isCompleted && activeTab === 'balloon' ? 0 : '16px 22px', display: 'flex', flexDirection: 'column', overflowY: 'auto', minHeight: 0 }}>
                 {isCompleted ? (
                   <LockedBanner
                     earnedXP={earnedXP}
@@ -1038,6 +1064,7 @@ export const LessonActivity: React.FC = () => {
                 side panel. Highlights on hover and while dragging. Double-click
                 to reset to the default width. */}
             <div
+              className="la-resize-handle"
               role="separator"
               aria-orientation="vertical"
               aria-label="Resize hint panel"
@@ -1054,8 +1081,17 @@ export const LessonActivity: React.FC = () => {
               onMouseLeave={e => { if (!isSideResizing) e.currentTarget.style.background = 'transparent'; }}
             />
 
+            {/* Mobile overlay — tap outside the side panel to close it */}
+            {mobilePanelOpen && (
+              <div
+                onClick={() => setMobilePanelOpen(false)}
+                style={{ position: 'fixed', inset: 0, zIndex: 199, background: 'rgba(0,0,0,0.72)' }}
+                className="la-mobile-overlay"
+              />
+            )}
+
             {/* Right: side panel — width is user-resizable, persisted to localStorage. */}
-            <div style={{ width: sidePanelWidth, flexShrink: 0, minHeight: 0, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
+            <div className={`la-side-panel${mobilePanelOpen ? ' open' : ''}`} style={{ width: sidePanelWidth, flexShrink: 0, minHeight: 0, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
               <GameSidePanel
                 quest={quest}
                 hintsUsed={hintsUsed}
@@ -1098,6 +1134,39 @@ const ANIM_CSS = `
   ::-webkit-scrollbar-track { background: transparent; }
   ::-webkit-scrollbar-thumb { background: #21262d; border-radius: 3px; }
   ::-webkit-scrollbar-thumb:hover { background: #30363d; }
+
+  .la-mobile-hint-btn { display: none !important; }
+  .la-mobile-overlay  { display: none !important; }
+
+  @media (max-width: 768px) {
+    .la-mobile-hint-btn { display: flex !important; }
+    .la-mobile-overlay  { display: block !important; }
+    .la-resize-handle   { display: none !important; }
+    .la-header { padding: 0 14px !important; }
+    .la-phase-label { display: none !important; }
+    .la-quest-title { max-width: 140px !important; font-size: 12px !important; }
+    .la-btn-label { display: none !important; }
+    .la-theory-btn { padding: 6px 8px !important; font-size: 14px !important; }
+    .la-reset-btn  { padding: 6px 8px !important; font-size: 14px !important; }
+    .la-tab-bar  { padding: 10px 14px 0 !important; }
+    .la-game-area { padding: 12px 14px !important; }
+    .la-side-panel {
+      position: fixed !important;
+      right: 0 !important; top: 56px !important; bottom: 0 !important;
+      width: 92vw !important; max-width: 400px !important; z-index: 200;
+      box-shadow: -6px 0 32px rgba(0,0,0,0.8) !important;
+      transform: translateX(100%);
+      transition: transform 0.28s cubic-bezier(0.4,0,0.2,1);
+      overflow-y: auto;
+    }
+    .la-side-panel.open {
+      transform: translateX(0) !important;
+    }
+    .la-body {
+      overflow-y: auto !important;
+      overflow-x: hidden !important;
+    }
+  }
 `;
 
 export default LessonActivity;

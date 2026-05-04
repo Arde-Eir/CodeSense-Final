@@ -96,7 +96,11 @@ const SafetyCard: React.FC<{ check: SafetyCheck; index: number }> = ({ check, in
     }}>
       {/* Header row */}
       <div
+        role="button"
+        tabIndex={0}
+        aria-expanded={expanded}
         onClick={() => setExpanded(e => !e)}
+        onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setExpanded(v => !v); } }}
         style={{
           display: 'flex', alignItems: 'center', gap: '10px',
           padding: '12px 14px', cursor: 'pointer',

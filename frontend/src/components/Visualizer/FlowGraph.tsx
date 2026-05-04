@@ -9,7 +9,6 @@ import {
   useReactFlow, ReactFlowProvider,
 } from '@xyflow/react';
 import type { Connection, Edge, Node, NodeProps, NodeChange, EdgeChange } from '@xyflow/react';
-import ELK from 'elkjs/lib/elk.bundled.js';
 import '@xyflow/react/dist/style.css';
 import type { CFG, SafetyCheck, ControlFlowNode } from '../../types';
 import { generateCppFromGraph } from '../../services/CodeGenerator';
@@ -49,7 +48,6 @@ type FlowNodeType =
 // §2  CONSTANTS
 // ─────────────────────────────────────────────────────────────────────────────
 
-const elk = new ELK();
 let _nodeIdCounter = 1000;
 const newNodeId = () => `user-node-${++_nodeIdCounter}`;
 
@@ -88,20 +86,6 @@ const DEFAULT_LABELS: Record<FlowNodeType, string> = {
   junction:           '⬡',
 };
 
-const NODE_SIZES: Record<FlowNodeType, { width: number; height: number }> = {
-  terminator:         { width: 160, height: 50  },
-  process:            { width: 180, height: 90  },
-  decision:           { width: 140, height: 140 },
-  io:                 { width: 185, height: 70  },
-  predefined:         { width: 180, height: 90  },
-  connector:          { width: 60,  height: 60  },
-  off_page_connector: { width: 70,  height: 70  },
-  document:           { width: 185, height: 90  },
-  manual_input:       { width: 185, height: 75  },
-  delay:              { width: 185, height: 70  },
-  database:           { width: 175, height: 95  },
-  junction:           { width: 36,  height: 36  },
-};
 
 const EDITOR_ACCENT: Record<string, string> = {
   terminator:         '#42a5f5', process:      '#4caf50',
@@ -311,8 +295,10 @@ const EditHint = () => (
 /** Warning badge shown above nodes that have a safety violation. */
 const ViolationBadge = () => (
   <div
+    role="img"
+    aria-label="Safety violation detected on this node"
     style={{
-      position: 'absolute', top: -16, left: '50%',
+      position: 'absolute', top: -20, left: '50%',
       transform: 'translateX(-50%)',
       fontSize: 16, animation: 'bounce 1s ease-in-out infinite', zIndex: 10,
     }}
@@ -639,7 +625,11 @@ const NodePalette: React.FC<{
     <div style={{ background: 'linear-gradient(135deg,rgba(13,17,23,0.98),rgba(22,27,34,0.98))', border: '2px solid #30363d', borderRadius: 12, padding: expanded ? 14 : '10px 14px', boxShadow: '0 8px 32px rgba(0,0,0,0.6)', backdropFilter: 'blur(12px)', transition: 'all 0.3s ease', flexShrink: 0 }}>
 
       <div
+        role="button"
+        tabIndex={0}
+        aria-expanded={expanded}
         onClick={() => setExpanded(v => !v)}
+        onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setExpanded(v => !v); } }}
         style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', cursor: 'pointer', userSelect: 'none', marginBottom: expanded ? 10 : 0 }}
         title={expanded ? 'Collapse node palette' : 'Expand node palette'}
       >
@@ -708,7 +698,11 @@ const FlowchartLegend: React.FC<{ isDrawerOpen?: boolean }> = ({ isDrawerOpen = 
       pointerEvents: isDrawerOpen ? 'none' : 'auto',
     }}>
       <div
+        role="button"
+        tabIndex={0}
+        aria-expanded={expanded}
         onClick={() => setExpanded(v => !v)}
+        onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setExpanded(v => !v); } }}
         style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', cursor: 'pointer', userSelect: 'none' }}
         title={expanded ? 'Hide legend' : 'Show ISO 5807 shape legend'}
       >
@@ -765,7 +759,11 @@ const GameStats: React.FC<{
 
       <div style={{ ...cardBase, border: '2px solid #4caf50', boxShadow: '0 4px 20px rgba(76,175,80,0.25)' }}>
         <div
+          role="button"
+          tabIndex={0}
+          aria-expanded={expanded}
           onClick={() => setExpanded(v => !v)}
+          onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setExpanded(v => !v); } }}
           style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', cursor: 'pointer', userSelect: 'none' }}
           title="Nodes visited so far"
         >
@@ -790,7 +788,11 @@ const GameStats: React.FC<{
 
       <div style={{ ...cardBase, border: `2px solid ${safeColor}`, boxShadow: `0 4px 20px ${allSafe ? 'rgba(76,175,80,0.25)' : 'rgba(255,68,68,0.25)'}` }}>
         <div
+          role="button"
+          tabIndex={0}
+          aria-expanded={expanded}
           onClick={() => setExpanded(v => !v)}
+          onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setExpanded(v => !v); } }}
           style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', cursor: 'pointer', userSelect: 'none' }}
           title="Safety check results"
         >
@@ -908,7 +910,11 @@ const GenerateCodePanel: React.FC<{
     }}>
 
       <div
+        role="button"
+        tabIndex={0}
+        aria-expanded={expanded}
         onClick={() => setExpanded(v => !v)}
+        onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setExpanded(v => !v); } }}
         style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', cursor: 'pointer', userSelect: 'none', marginBottom: expanded ? 10 : 0 }}
         title={expanded ? 'Collapse code generator' : 'Expand code generator'}
       >
@@ -1550,33 +1556,39 @@ const FlowGraphInner: React.FC<Props> = ({
     const capped = safeNodes.length > hardCap ? safeNodes.slice(0, hardCap) : safeNodes;
     const nodeIdSet = new Set(capped.map(n => n.id));
 
+    // Use Sugiyama x/y computed by the backend's CFGGenerator directly.
+    // The backend runs the full Sugiyama pipeline (break cycles → assign layers
+    // → minimize crossings → compute coordinates → restore cycles) and stores
+    // the result in node.x / node.y.  We trust those coordinates here instead
+    // of running a second layout pass in the browser.
     const initialNodes: Node<ExtendedNodeData>[] = capped.map(node => ({
       id:   node.id,
       type: inferNodeType(node),
       data: {
         ...node,
-        // FIX: use stableSafetyChecks here — same stable reference every render
         violation: stableSafetyChecks.some(c => c.line === node.line && c.status === 'UNSAFE'),
         visited:   false,
         onHover:   setHoverInfo,
         onEdit:    handleOpenEdit,
       },
-      position: { x: 0, y: 0 },
+      // node.x / node.y come from the backend Sugiyama layout.
+      // Fall back to a simple vertical stack only when coordinates are missing.
+      position: (node.x != null && node.y != null)
+        ? { x: node.x, y: node.y }
+        : { x: 200, y: capped.indexOf(node) * 220 },
       draggable: true,
     }));
 
     const validCfgEdges = cfg.edges.filter(e => nodeIdSet.has(e.from) && nodeIdSet.has(e.to));
     const initialEdges: Edge[] = validCfgEdges.map((edge, i) => {
       const target       = capped.find(n => n.id === edge.to);
-      // FIX: use stableSafetyChecks here too
       const hasViolation = target && stableSafetyChecks.some(c => c.line === target.line && c.status === 'UNSAFE');
-      const isVisited    = false;
-      const color = hasViolation ? '#ff4444' : isVisited ? '#4caf50' : '#64b5f6';
+      const color = hasViolation ? '#ff4444' : '#64b5f6';
       return {
         id: `e-${i}`, source: edge.from, target: edge.to,
         label: edge.label, type: 'default',
-        animated:       !!(hasViolation || isVisited),
-        style:          { stroke: color, strokeWidth: hasViolation ? 3 : isVisited ? 2.5 : 2 },
+        animated:       !!hasViolation,
+        style:          { stroke: color, strokeWidth: hasViolation ? 3 : 2 },
         markerEnd:      { type: MarkerType.ArrowClosed, color, width: 20, height: 20 },
         labelStyle:     { fill: '#ffffff', fontSize: '11px', fontWeight: '600' },
         labelBgStyle:   { fill: '#0d1117', fillOpacity: 0.9, rx: 4, ry: 4 },
@@ -1586,47 +1598,7 @@ const FlowGraphInner: React.FC<Props> = ({
 
     setNodes(initialNodes);
     setEdges(initialEdges);
-
-    elk.layout({
-      id: 'root',
-      layoutOptions: {
-        'elk.algorithm':                             'layered',
-        'elk.direction':                             'DOWN',
-        'elk.spacing.nodeNode':                      '90',
-        'elk.layered.spacing.nodeNodeBetweenLayers': '120',
-        'elk.layered.nodePlacement.strategy':        'SIMPLE',
-        'elk.edgeRouting':                           'ORTHOGONAL',
-      },
-      children: initialNodes.map(n => ({
-        id: n.id,
-        ...(NODE_SIZES[n.type as FlowNodeType] ?? NODE_SIZES.process),
-      })),
-      edges: initialEdges.map(e => ({
-        id: e.id, sources: [e.source], targets: [e.target],
-      })),
-    })
-      .then(layout => {
-        const layouted = initialNodes.map(n => ({
-          ...n,
-          position: {
-            x: layout.children?.find(c => c.id === n.id)?.x ?? 0,
-            y: layout.children?.find(c => c.id === n.id)?.y ?? 0,
-          },
-        }));
-        setNodes(layouted);
-        setEdges(initialEdges);
-        onGraphChange?.(layouted, initialEdges);
-      })
-      .catch(err => {
-        console.error('ELK layout failed, falling back to vertical stack:', err);
-        const fallback = initialNodes.map((n, i) => ({
-          ...n,
-          position: { x: 200, y: i * 160 },
-        }));
-        setNodes(fallback);
-        setEdges(initialEdges);
-        onGraphChange?.(fallback, initialEdges);
-      });
+    onGraphChange?.(initialNodes, initialEdges);
   // FIX: depend on stableSafetyChecks (stable ref) instead of safetyChecks (new [] each render)
   }, [cfg, stableSafetyChecks]); // eslint-disable-line react-hooks/exhaustive-deps
 

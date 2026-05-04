@@ -105,9 +105,9 @@ export const TokenDrawer: React.FC<TokenDrawerProps> = ({ tokens, isOpen, onClos
             <h2 style={{ margin: 0, fontSize: '1.25rem', fontWeight: 600 }}>Lexical Analysis</h2>
             <span style={{ fontSize: '12px', color: '#7d8590' }}>{tokens.length} total tokens</span>
           </div>
-          <button onClick={onClose} className="close-btn" style={{ 
-            background: '#21262d', border: '1px solid #30363d', color: '#8b949e', 
-            borderRadius: '6px', width: '32px', height: '32px', cursor: 'pointer'
+          <button onClick={onClose} aria-label="Close token drawer" className="close-btn" style={{
+            background: '#21262d', border: '1px solid #30363d', color: '#8b949e',
+            borderRadius: '6px', width: '32px', height: '32px', cursor: 'pointer', fontSize: '16px',
           }}>&times;</button>
         </div>
 
@@ -131,7 +131,7 @@ export const TokenDrawer: React.FC<TokenDrawerProps> = ({ tokens, isOpen, onClos
                 outline: 'none'
               }}
             />
-            <span style={{ position: 'absolute', left: '10px', top: '50%', transform: 'translateY(-50%)', opacity: 0.5 }}>🔍</span>
+            <span aria-hidden="true" style={{ position: 'absolute', left: '10px', top: '50%', transform: 'translateY(-50%)', opacity: 0.5 }}>🔍</span>
           </div>
         </div>
 

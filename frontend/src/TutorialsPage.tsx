@@ -552,31 +552,43 @@ export const TutorialsPage: React.FC = () => {
   const DIFFS: (Tutorial['difficulty'] | 'All')[] = ['All', 'Beginner', 'Intermediate', 'Advanced']
 
   return (
+    <>
+    <style>{`
+      @media (max-width: 768px) {
+        .tut-header { padding: 12px 14px !important; flex-wrap: wrap; gap: 8px; }
+        .tut-header-title { order: -1; width: 100%; justify-content: center; }
+        .tut-header-title span:last-child { font-size: 15px !important; }
+        .tut-content { padding: 20px 14px !important; }
+        .tut-filter-row { flex-wrap: wrap !important; gap: 8px !important; }
+        .tut-card-grid { grid-template-columns: 1fr !important; }
+        .tut-content input { font-size: 16px !important; }
+      }
+    `}</style>
     <div style={{
       minHeight: '100vh', width: '100%',
       background: 'linear-gradient(135deg, #0d1117 0%, #1a1f2e 100%)',
       color: 'white', fontFamily: "'IBM Plex Sans', system-ui, sans-serif",
     }}>
       {/* Header */}
-      <header style={{
+      <header className="tut-header" style={{
         display: 'flex', justifyContent: 'space-between', alignItems: 'center',
         padding: '16px 32px', background: 'rgba(22,27,34,0.95)',
         borderBottom: '1px solid #21262d', position: 'sticky', top: 0, zIndex: 10,
         backdropFilter: 'blur(8px)',
       }}>
         <button onClick={() => navigate('/home')} style={{ background: 'transparent', border: 'none', color: '#8b949e', cursor: 'pointer', fontSize: 14 }}>
-          ← Back to Dashboard
+          ← Back
         </button>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+        <div className="tut-header-title" style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
           <span style={{ fontSize: 22 }}>🎓</span>
           <span style={{ color: '#e6edf3', fontSize: 18, fontWeight: 700 }}>Tutorials</span>
         </div>
         <span style={{ color: '#8b949e', fontSize: 12 }}>
-          {completedCount}/{visibleAll.length} completed
+          {completedCount}/{visibleAll.length} done
         </span>
       </header>
 
-      <div style={{ maxWidth: 960, margin: '0 auto', padding: '32px 24px' }}>
+      <div className="tut-content" style={{ maxWidth: 960, margin: '0 auto', padding: '32px 24px' }}>
         {active ? (
           <TutorialView
             tutorial={active}
@@ -705,7 +717,7 @@ export const TutorialsPage: React.FC = () => {
                 No tutorials match those filters. Try clearing them.
               </div>
             ) : (
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: 14 }}>
+            <div className="tut-card-grid" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: 14 }}>
               {visible.map(t => {
                 const done = (progress[t.id] ?? 0) >= t.steps.length
                 const inProgress = (progress[t.id] ?? 0) > 0 && !done
@@ -761,6 +773,7 @@ export const TutorialsPage: React.FC = () => {
         )}
       </div>
     </div>
+    </>
   )
 }
 

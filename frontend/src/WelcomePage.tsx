@@ -34,6 +34,12 @@ export const WelcomePage: React.FC = () => {
   }
 
   return (
+    <>
+    <style>{`
+      @media (max-width: 480px) {
+        .welcome-card { padding: 36px 24px !important; }
+      }
+    `}</style>
     <div style={{
       minHeight: '100vh', width: '100%',
       background: 'linear-gradient(135deg, #0d1117 0%, #1a1f2e 100%)',
@@ -63,7 +69,7 @@ export const WelcomePage: React.FC = () => {
       }} />
 
       {/* Main card */}
-      <div style={{
+      <div className="welcome-card" style={{
         position: 'relative', zIndex: 1, textAlign: 'center',
         background: 'rgba(22,27,34,0.85)', border: '1px solid #21262d',
         borderRadius: '24px', padding: '60px 72px',
@@ -157,5 +163,6 @@ export const WelcomePage: React.FC = () => {
         )}
       </div>
     </div>
+    </>
   )
 }

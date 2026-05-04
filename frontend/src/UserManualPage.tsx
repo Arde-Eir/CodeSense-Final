@@ -817,22 +817,36 @@ export const UserManualPage: React.FC = () => {
   }, [])
 
   return (
+    <>
+    <style>{`
+      @keyframes um-fadein { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
+      @media (max-width: 768px) {
+        .um-header { padding: 12px 14px !important; flex-wrap: wrap; gap: 8px; }
+        .um-header-title { order: -1; width: 100%; justify-content: center; }
+        .um-header-title span:last-child { font-size: 15px !important; }
+        .um-grid { grid-template-columns: 1fr !important; gap: 14px !important; padding: 16px 14px !important; }
+        .um-sidebar { position: static !important; display: flex; flex-wrap: wrap; gap: 6px; flex-direction: row; }
+        .um-sidebar button { width: auto !important; flex: 0 0 auto; padding: 8px 12px !important; font-size: 11px !important; }
+        .um-content { overflow-x: auto; }
+        .um-content table { min-width: 500px; }
+      }
+    `}</style>
     <div style={{
       minHeight: '100vh', width: '100%',
       background: 'linear-gradient(135deg, #0d1117 0%, #1a1f2e 100%)',
       color: 'white', fontFamily: "'IBM Plex Sans', system-ui, sans-serif",
     }}>
       {/* Header */}
-      <header style={{
+      <header className="um-header" style={{
         display: 'flex', justifyContent: 'space-between', alignItems: 'center',
         padding: '16px 32px', background: 'rgba(22,27,34,0.95)',
         borderBottom: '1px solid #21262d', position: 'sticky', top: 0, zIndex: 10,
         backdropFilter: 'blur(8px)',
       }}>
         <button onClick={() => navigate('/home')} style={{ background: 'transparent', border: 'none', color: '#8b949e', cursor: 'pointer', fontSize: 14 }}>
-          ← Back to Dashboard
+          ← Back
         </button>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+        <div className="um-header-title" style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
           <span style={{ fontSize: 22 }}>📘</span>
           <span style={{ color: '#e6edf3', fontSize: 18, fontWeight: 700 }}>User Manual</span>
         </div>
@@ -842,16 +856,16 @@ export const UserManualPage: React.FC = () => {
           fontSize: 10, fontWeight: 800, letterSpacing: 1.2,
           fontFamily: "'IBM Plex Mono', monospace",
         }}>
-          VIEWING AS {tierLabel(tier)}
+          {tierLabel(tier)}
         </span>
       </header>
 
-      <div style={{
+      <div className="um-grid" style={{
         maxWidth: 920, margin: '0 auto', padding: '32px 24px',
         display: 'grid', gridTemplateColumns: '220px 1fr', gap: 24,
       }}>
         {/* Sidebar nav */}
-        <nav style={{ position: 'sticky', top: 80, alignSelf: 'start' }}>
+        <nav className="um-sidebar" style={{ position: 'sticky', top: 80, alignSelf: 'start' }}>
           <div style={{ color: '#484f58', fontSize: 10, fontWeight: 700, letterSpacing: 1.5, textTransform: 'uppercase', marginBottom: 10, padding: '0 8px' }}>
             Contents
           </div>
@@ -880,7 +894,7 @@ export const UserManualPage: React.FC = () => {
             fade-in animation actually fires on each tab switch. Previously,
             sections used display:none which prevented CSS animations from
             playing because the element was never repainted. */}
-        <main>
+        <main className="um-content">
           {SECTIONS.map(s => {
             if (s.id !== openId) return null
             return (
@@ -906,10 +920,8 @@ export const UserManualPage: React.FC = () => {
         </main>
       </div>
 
-      <style>{`
-        @keyframes um-fadein { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: translateY(0); } }
-      `}</style>
     </div>
+    </>
   )
 }
 

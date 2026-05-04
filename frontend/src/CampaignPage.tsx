@@ -59,13 +59,41 @@ const EMPTY_PROGRESS: Record<Phase, PhaseProgress> = {
   advanced:     { total: 0, finished: 0 },
 };
 
+// ─── DB level info row ─────────────────────────────────────────────────────
+interface LevelInfoRow {
+  phase:        string;
+  title:        string;
+  subtitle:     string | null;
+  description:  string | null;
+  accent_color: string | null;
+  banner_url:   string | null;
+}
+
+function hexToRgba(hex: string, alpha: number): string {
+  const c = hex.replace('#', '');
+  return `rgba(${parseInt(c.slice(0,2),16)},${parseInt(c.slice(2,4),16)},${parseInt(c.slice(4,6),16)},${alpha})`;
+}
+
 // ─── Page ──────────────────────────────────────────────────────────────────
 export const CampaignPage: React.FC = () => {
   const navigate = useNavigate();
   const { user } = useAuth();
 
-  const [visible,  setVisible]  = useState(false);
-  const [progress, setProgress] = useState<Record<Phase, PhaseProgress>>(EMPTY_PROGRESS);
+  const [visible,   setVisible]   = useState(false);
+  const [progress,  setProgress]  = useState<Record<Phase, PhaseProgress>>(EMPTY_PROGRESS);
+  const [levelInfo, setLevelInfo] = useState<Record<string, LevelInfoRow>>({});
+
+  useEffect(() => {
+    supabase
+      .from('level_info')
+      .select('phase, title, subtitle, description, accent_color, banner_url')
+      .then(({ data }) => {
+        if (!data) return;
+        const map: Record<string, LevelInfoRow> = {};
+        for (const row of data) map[row.phase] = row as LevelInfoRow;
+        setLevelInfo(map);
+      });
+  }, []);
 
   const userXP = user?.totalXP ?? 0;
 
@@ -188,16 +216,27 @@ export const CampaignPage: React.FC = () => {
           <HeroBanner />
 
           <div className="level-grid">
-            {LEVELS.map((level, i) => (
-              <LevelCard
-                key={level.id}
-                config={level}
-                index={i}
-                status={statusFor(level)}
-                progress={progress[level.phase]}
-                onClick={(el) => handleLevelClick(level, el)}
-              />
-            ))}
+            {LEVELS.map((level, i) => {
+              const db = levelInfo[level.phase];
+              const color = db?.accent_color ?? level.color;
+              const merged: LevelCardConfig = {
+                ...level,
+                subtitle:  db?.title        ?? level.subtitle,
+                blurb:     db?.description  ?? level.blurb,
+                color,
+                glowColor: db?.accent_color ? hexToRgba(color, 0.35) : level.glowColor,
+              };
+              return (
+                <LevelCard
+                  key={level.id}
+                  config={merged}
+                  index={i}
+                  status={statusFor(level)}
+                  progress={progress[level.phase]}
+                  onClick={(el) => handleLevelClick(level, el)}
+                />
+              );
+            })}
           </div>
         </main>
       </div>
@@ -540,6 +579,86 @@ const STYLE_CSS = `
     transition: transform 0.2s ease;
   }
   .level-card:not(.status-locked):hover .level-card-cta { transform: translateX(3px); }
+
+  /* ── Mobile ──────────────────────────────────────────────────────────── */
+  @media (max-width: 768px) {
+    .campaign-header {
+      height: auto !important;
+      padding: 12px 16px !important;
+      flex-wrap: wrap !important;
+      gap: 8px !important;
+      min-height: 56px !important;
+    }
+    .campaign-main {
+      padding: 16px 14px 40px !important;
+    }
+    .hero {
+      flex-direction: column !important;
+      align-items: flex-start !important;
+      padding: 20px 18px !important;
+      min-height: 0 !important;
+      gap: 10px !important;
+    }
+    .hero-eyebrow {
+      font-size: 10px !important;
+      letter-spacing: 2px !important;
+      margin-bottom: 8px !important;
+    }
+    .hero-title {
+      font-size: clamp(22px, 6vw, 28px) !important;
+    }
+    .xp-pill {
+      padding: 8px 14px !important;
+      font-size: 13px !important;
+      min-height: 40px !important;
+    }
+    .exit-btn {
+      padding: 8px 14px !important;
+      font-size: 12px !important;
+      min-height: 40px !important;
+    }
+    .level-grid {
+      grid-template-columns: 1fr !important;
+      gap: 16px !important;
+    }
+    .level-card {
+      padding: 20px 18px 16px !important;
+      min-height: 0 !important;
+    }
+    .level-card-title {
+      font-size: 15px !important;
+    }
+    .level-card-subtitle {
+      font-size: 13px !important;
+    }
+    .level-card-blurb {
+      font-size: 12px !important;
+      max-width: 100% !important;
+    }
+    .level-card-icon-slot {
+      width: 48px !important;
+      height: 48px !important;
+      font-size: 22px !important;
+    }
+    .level-card-foot {
+      flex-direction: column !important;
+      align-items: flex-start !important;
+      gap: 10px !important;
+    }
+    .level-card-quest-count {
+      font-size: 13px !important;
+    }
+    .level-card-cta {
+      font-size: 12px !important;
+      word-break: break-word !important;
+    }
+    .hero-title {
+      font-size: clamp(20px, 5vw, 26px) !important;
+    }
+    .level-card-head {
+      gap: 10px !important;
+    }
+  }
 `;
 
 export default CampaignPage;

@@ -361,6 +361,15 @@ export const DatabaseService = {
         createdat:            new Date().toISOString(),
       })
 
+      await supabase.from('activity_log').insert({
+        userid:      userId,
+        type:        'sandbox_run',
+        title:       'Sandbox analysis',
+        description: cognitiveComplexity > 0 ? `Complexity score: ${cognitiveComplexity}` : '',
+        xp_gained:   0,
+        meta:        { cognitive_complexity: cognitiveComplexity },
+      })
+
       const { error: rpcError } = await supabase.rpc('increment_sandbox_runs', { p_userid: userId })
       if (rpcError) {
         const { data } = await supabase

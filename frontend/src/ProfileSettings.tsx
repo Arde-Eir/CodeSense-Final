@@ -45,6 +45,16 @@ interface FastQuestEntry {
   quests: { title: string } | null
 }
 
+interface ActivityLogEntry {
+  id:         string
+  type:       string
+  title:      string
+  description:string
+  xp_gained:  number
+  createdat:  string
+  meta:       Record<string, unknown>
+}
+
 const fmtTime = (s: number): string =>
   `${String(Math.floor(s / 60)).padStart(2, '0')}:${String(s % 60).padStart(2, '0')}`
 
@@ -127,6 +137,7 @@ export const ProfileSettings: React.FC = () => {
   const [questsCompleted, setQuestsCompleted] = useState(0)
   const [reports, setReports] = useState<ReportEntry[]>([])
   const [completedQuests, setCompletedQuests] = useState<QuestEntry[]>([])
+  const [activityLog, setActivityLog] = useState<ActivityLogEntry[]>([])
   const [fastestQuests, setFastestQuests] = useState<FastQuestEntry[]>([])
 
   // Image state
@@ -247,11 +258,20 @@ export const ProfileSettings: React.FC = () => {
         .limit(10)
       setFastestQuests((fq as any[]) ?? [])
 
-      // Recent reports
+      // Recent reports (kept for stats counters)
       const { data: reps } = await supabase.from('reports')
         .select('id, type, createdat, mode_context, cognitive_complexity')
         .eq('userid', user.id).order('createdat', { ascending: false }).limit(20)
       setReports((reps ?? []) as ReportEntry[])
+
+      // Activity log — primary feed source
+      const { data: al } = await supabase
+        .from('activity_log')
+        .select('id, type, title, description, xp_gained, createdat, meta')
+        .eq('userid', user.id)
+        .order('createdat', { ascending: false })
+        .limit(30)
+      setActivityLog((al ?? []) as ActivityLogEntry[])
 
       // Avatar
       const { data: avatarFiles } = await supabase.storage.from('Avatars').list(user.id, { limit: 10 })
@@ -345,10 +365,15 @@ export const ProfileSettings: React.FC = () => {
 
   const handleChangePassword = async () => {
     setPwMsg(null)
+    if (!pwCurrent) { setPwMsg({ text: 'Enter your current password', ok: false }); return }
     if (!pwNew || pwNew.length < 8) { setPwMsg({ text: 'New password must be at least 8 characters', ok: false }); return }
     if (pwNew !== pwConfirm) { setPwMsg({ text: 'Passwords do not match', ok: false }); return }
     setSaving(true)
     try {
+      const { error: reAuthErr } = await supabase.auth.signInWithPassword({
+        email: profile!.email, password: pwCurrent,
+      })
+      if (reAuthErr) { setPwMsg({ text: 'Current password is incorrect', ok: false }); return }
       const { error } = await supabase.auth.updateUser({ password: pwNew })
       if (error) { setPwMsg({ text: error.message, ok: false }) }
       else { setPwMsg({ text: 'Password changed successfully!', ok: true }); setPwCurrent(''); setPwNew(''); setPwConfirm('') }
@@ -385,24 +410,49 @@ export const ProfileSettings: React.FC = () => {
     { id: 'learn',         label: '📚 Learn'         },
   ] as const
 
-  // Merge and sort activity feed
-  const activityFeed = [
-    ...reports.map(r => ({
-      key: `r-${r.id}`, date: r.createdat, icon: '🔬',
-      title: `${r.mode_context === 'campaign' ? 'Campaign' : 'Sandbox'} analysis`,
-      sub: r.cognitive_complexity != null ? `Complexity score: ${r.cognitive_complexity}` : r.type,
-      color: MODE_COLOR[r.mode_context] ?? '#8b949e',
-    })),
-    ...completedQuests.map(q => {
-      const questTitle = Array.isArray(q.quests) ? q.quests[0]?.title : q.quests?.title
-      return {
-        key: `q-${q.questid}`, date: q.completedat ?? '', icon: '⚔️',
-        title: `Quest completed: ${questTitle ?? 'Unknown'}`,
-        sub: q.hintsused > 0 ? `${q.hintsused} hint${q.hintsused > 1 ? 's' : ''} used` : 'No hints used 🎯',
-        color: '#ffa726',
-      }
-    }),
-  ].sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime()).slice(0, 25)
+  // Activity feed — prefer activity_log rows; fall back to manual merge when empty
+  const TYPE_ICON: Record<string, string> = {
+    sandbox_run:      '🔬',
+    report_generated: '🔬',
+    quest_completed:  '⚔️',
+    quest_started:    '📖',
+    level_up:         '🏆',
+  }
+  const TYPE_COLOR: Record<string, string> = {
+    sandbox_run:      '#58a6ff',
+    report_generated: '#58a6ff',
+    quest_completed:  '#ffa726',
+    quest_started:    '#3fb950',
+    level_up:         '#e3b341',
+  }
+
+  const activityFeed = activityLog.length > 0
+    ? activityLog.map(e => ({
+        key:   `al-${e.id}`,
+        date:  e.createdat,
+        icon:  TYPE_ICON[e.type] ?? '📌',
+        title: e.title,
+        sub:   e.description || (e.xp_gained > 0 ? `+${e.xp_gained} XP` : ''),
+        color: TYPE_COLOR[e.type] ?? '#8b949e',
+      }))
+    // Fallback: derive feed from reports + mission_progress while activity_log is empty
+    : [
+        ...reports.map(r => ({
+          key: `r-${r.id}`, date: r.createdat, icon: '🔬',
+          title: `${r.mode_context === 'campaign' ? 'Campaign' : 'Sandbox'} analysis`,
+          sub: r.cognitive_complexity != null ? `Complexity score: ${r.cognitive_complexity}` : r.type,
+          color: MODE_COLOR[r.mode_context] ?? '#8b949e',
+        })),
+        ...completedQuests.map(q => {
+          const questTitle = Array.isArray(q.quests) ? q.quests[0]?.title : q.quests?.title
+          return {
+            key: `q-${q.questid}`, date: q.completedat ?? '', icon: '⚔️',
+            title: `Quest completed: ${questTitle ?? 'Unknown'}`,
+            sub: q.hintsused > 0 ? `${q.hintsused} hint${q.hintsused > 1 ? 's' : ''} used` : 'No hints used 🎯',
+            color: '#ffa726',
+          }
+        }),
+      ].sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime()).slice(0, 25)
 
   return (
     <div style={{
@@ -410,6 +460,34 @@ export const ProfileSettings: React.FC = () => {
       background: 'linear-gradient(135deg, #0d1117 0%, #1a1f2e 100%)',
       color: 'white', fontFamily: "'IBM Plex Sans', system-ui, sans-serif",
     }}>
+      <style>{`
+        @media (max-width: 768px) {
+          .ps-header {
+            padding: 10px 14px !important;
+            flex-wrap: wrap !important;
+            gap: 8px !important;
+          }
+          .ps-header-actions { display: none !important; }
+          .ps-main-grid {
+            grid-template-columns: 1fr !important;
+            padding: 14px !important;
+            gap: 14px !important;
+            max-width: 100% !important;
+          }
+          .ps-sidebar { order: -1; }
+          .prof-tab {
+            padding: 10px 14px !important;
+            font-size: 13px !important;
+            min-height: 44px !important;
+          }
+          .prof-stats-grid {
+            grid-template-columns: repeat(2, 1fr) !important;
+          }
+          .prof-stat-chip {
+            padding: 16px 8px !important;
+          }
+        }
+      `}</style>
       <input ref={avatarInputRef} type="file" accept="image/png,image/jpeg,image/webp" style={{ display: 'none' }} onChange={handleAvatarUpload} />
       <input ref={bannerInputRef} type="file" accept="image/png,image/jpeg,image/webp" style={{ display: 'none' }} onChange={handleBannerUpload} />
 
@@ -444,7 +522,7 @@ export const ProfileSettings: React.FC = () => {
       )}
 
       {/* ── Nav ── */}
-      <header style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '14px 24px', background: 'rgba(22,27,34,0.95)', borderBottom: '1px solid #21262d', position: 'sticky', top: 0, zIndex: 100, backdropFilter: 'blur(8px)' }}>
+      <header className="ps-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '14px 24px', background: 'rgba(22,27,34,0.95)', borderBottom: '1px solid #21262d', position: 'sticky', top: 0, zIndex: 100, backdropFilter: 'blur(8px)' }}>
         <button onClick={() => navigate('/home')} style={{ background: 'transparent', border: 'none', color: '#8b949e', cursor: 'pointer', fontSize: '14px', display: 'flex', alignItems: 'center', gap: '6px' }}>
           ← Dashboard
         </button>
@@ -452,13 +530,13 @@ export const ProfileSettings: React.FC = () => {
           <span style={{ color: '#8b949e', fontSize: '13px', fontWeight: '500' }}>Profile Settings</span>
           {saveMsg && <span style={{ color: '#4caf50', fontSize: '12px', fontWeight: '600', animation: 'profileFadeUp 0.3s ease' }}>✓ {saveMsg}</span>}
         </div>
-        <div style={{ display: 'flex', gap: '8px' }}>
+        <div className="ps-header-actions" style={{ display: 'flex', gap: '8px' }}>
           <button onClick={() => navigate('/sandbox')} style={{ background: 'rgba(76,175,80,0.1)', border: '1px solid rgba(76,175,80,0.3)', color: '#4caf50', padding: '6px 14px', borderRadius: '8px', fontSize: '12px', fontWeight: '600', cursor: 'pointer' }}>🔬 Sandbox</button>
           <button onClick={() => navigate('/campaign')} style={{ background: 'rgba(255,167,38,0.1)', border: '1px solid rgba(255,167,38,0.3)', color: '#ffa726', padding: '6px 14px', borderRadius: '8px', fontSize: '12px', fontWeight: '600', cursor: 'pointer' }}>⚔️ Campaign</button>
         </div>
       </header>
 
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 300px', gap: '20px', padding: '24px', maxWidth: '1100px', margin: '0 auto', boxSizing: 'border-box' }}>
+      <div className="ps-main-grid" style={{ display: 'grid', gridTemplateColumns: '1fr 300px', gap: '20px', padding: '24px', maxWidth: '1100px', margin: '0 auto', boxSizing: 'border-box' }}>
 
         {/* ── LEFT ── */}
         <div style={{ minWidth: 0 }}>
@@ -547,7 +625,7 @@ export const ProfileSettings: React.FC = () => {
                   </div>
 
                   {/* Stats grid */}
-                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '10px' }}>
+                  <div className="prof-stats-grid" style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '10px' }}>
                     {[
                       { icon: '⭐', value: profile.totalxp,    label: 'Total XP',   color: '#ffc107' },
                       { icon: '🔬', value: profile.sandbox_runs, label: 'Analyses',  color: '#4caf50' },
@@ -844,7 +922,7 @@ export const ProfileSettings: React.FC = () => {
         </div>
 
         {/* ── RIGHT SIDEBAR ── */}
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
+        <div className="ps-sidebar" style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
 
           {/* Share stats card */}
           <div style={{ background: 'linear-gradient(135deg, rgba(76,175,80,0.12), rgba(100,181,246,0.08))', border: '1px solid rgba(76,175,80,0.25)', borderRadius: '14px', padding: '16px' }}>

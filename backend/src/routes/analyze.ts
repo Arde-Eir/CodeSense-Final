@@ -40,6 +40,36 @@ router.post('/analyze', (req, res) => {
   console.log('\n--- [DEBUG] New Analysis Request ---');
   console.log('Source Snippet:', sourceCode.substring(0, 60).replace(/\n/g, ' '));
 
+  // ─── PHASE 0: Unsupported Feature Detection ───────────────────────────────
+  const UNSUPPORTED_PATTERNS: Array<{ re: RegExp; msg: string }> = [
+    { re: /template\s*</,
+      msg: 'Templates (template<...>) are not supported — the analyzer covers intro/intermediate C++ only.' },
+    { re: /std::(vector|map|unordered_map|set|unordered_set|multimap|multiset|list|deque|queue|priority_queue|stack|pair|tuple|array|forward_list|bitset|optional|variant|any)\b/,
+      msg: 'STL containers (std::vector, std::map, etc.) are not supported — use plain arrays or basic types.' },
+    { re: /#include\s*<(vector|map|unordered_map|set|list|deque|queue|stack|algorithm|utility|tuple|array|functional|memory|optional|variant|bitset|numeric|iterator|ranges)>/,
+      msg: 'STL headers (<vector>, <map>, <algorithm>, etc.) are not supported by the analyzer.' },
+    { re: /\boperator\s*(==|!=|<=|>=|<|>|\+|-|\*|\/|%|<<|>>|\[\]|\(\)|=|\+=|-=|\*=|\/=)/,
+      msg: 'Operator overloading is not supported.' },
+    { re: /\bvirtual\s+\w/,
+      msg: 'Virtual functions / polymorphism are not fully analyzed.' },
+    { re: /\[\s*(?:&|=|\w+)\s*\]\s*\(/,
+      msg: 'Lambda expressions are not fully supported.' },
+    { re: /\bco_await\b|\bco_yield\b|\bco_return\b/,
+      msg: 'Coroutines (co_await, co_yield, co_return) are not supported.' },
+    { re: /\bconcept\b|\brequires\b/,
+      msg: 'C++20 concepts/requires are not supported.' },
+  ];
+
+  const unsupportedWarnings = UNSUPPORTED_PATTERNS
+    .filter(({ re }) => re.test(sourceCode))
+    .map(({ msg }) => ({
+      type: 'semantic' as const,
+      severity: 'warning' as const,
+      message: `Unsupported feature: ${msg}`,
+      line: 0,
+      column: 0,
+    }));
+
   // ─── PHASE 1: Lexical Analysis ─────────────────────────────────────────────
   const lexResult = tokenize(sourceCode);
 
@@ -59,6 +89,7 @@ router.post('/analyze', (req, res) => {
       explanations: [
         '❌ **Status:** Lexical Analysis Failed.',
         ...lexResult.errors.map(e => `🔤 **Lexical Error (L${e.line}:C${e.column}):** ${e.message}`),
+        ...unsupportedWarnings.map(w => `⚠️ **Note:** ${w.message}`),
       ],
     });
   }
@@ -68,17 +99,23 @@ router.post('/analyze', (req, res) => {
   try {
     ast = parser.parse(sourceCode);
   } catch (syntaxErr: any) {
+    const unsupportedHints = unsupportedWarnings.length > 0
+      ? unsupportedWarnings.map(w => `⚠️ **Unsupported Feature:** ${w.message}`)
+      : [];
     return res.status(200).json({
       success: false,
       tokens: lexResult.tokens,
       ast: getCleanAST(ast),
-      errors: [{
-        type: 'syntactic',
-        message: syntaxErr.message,
-        line: syntaxErr.location?.start.line || 1,
-        column: syntaxErr.location?.start.column || 1,
-        severity: 'error',
-      }],
+      errors: [
+        {
+          type: 'syntactic',
+          message: syntaxErr.message,
+          line: syntaxErr.location?.start.line || 1,
+          column: syntaxErr.location?.start.column || 1,
+          severity: 'error',
+        },
+        ...unsupportedWarnings,
+      ],
       safetyChecks: [],
       cfg: { nodes: [], edges: [] },
       cognitiveComplexity: 0,
@@ -87,6 +124,8 @@ router.post('/analyze', (req, res) => {
       explanations: [
         `❌ **Status:** Syntax Error Detected`,
         `🔧 **Line ${syntaxErr.location?.start.line || '?'}:** ${syntaxErr.message}`,
+        ...unsupportedHints,
+        ...(unsupportedWarnings.length > 0 ? ['💡 **Tip:** This analyzer supports intro/intermediate C++ — remove unsupported features and try again.'] : []),
       ],
     });
   }
@@ -184,7 +223,14 @@ router.post('/analyze', (req, res) => {
       typeResult = typeChecker.check(ast);
     } catch (tcErr: any) {
       console.error('⚠️ TypeChecker Error:', tcErr?.message, tcErr?.stack);
-      typeResult = { symbolTable: {}, errors: [] };
+      typeResult = {
+        symbolTable: {},
+        errors: [{
+          type: 'semantic', severity: 'warning' as const,
+          message: `Type checker stopped early: ${tcErr?.message ?? 'unknown error'}`,
+          line: 0, column: 0,
+        }],
+      };
     }
 
     const semanticErrors = typeResult.errors.filter(e => e.severity === 'error');
@@ -225,21 +271,22 @@ router.post('/analyze', (req, res) => {
     }
 
     // ─── PHASE 5: Symbolic Execution (Safety Checks) ────────────────────────
-    // ─── PHASE 5: Symbolic Execution (Safety Checks) ────────────────────────
-let safetyChecks: any[] = [];
-const executor = new SymbolicExecutor(typeResult.symbolTable);
+    let safetyChecks: any[] = [];
+    let executorCrashMsg = '';
+    const executor = new SymbolicExecutor(typeResult.symbolTable);
 
-try {
-  safetyChecks = executor.execute(ast);
-} catch (execErr: any) {
-  console.error('⚠️ Symbolic Executor Crashed:', execErr?.message);
-  safetyChecks = [{
-    type: 'runtime',
-    severity: 'warning',
-    message: 'Symbolic execution engine encountered an error and stopped early.',
-    line: 0
-  }];
-}
+    try {
+      safetyChecks = executor.execute(ast);
+    } catch (execErr: any) {
+      console.error('⚠️ Symbolic Executor Crashed:', execErr?.message);
+      executorCrashMsg = execErr?.message ?? 'unknown error';
+      safetyChecks = [{
+        type: 'runtime',
+        severity: 'warning',
+        message: `Safety analyzer stopped early: ${executorCrashMsg}`,
+        line: 0,
+      }];
+    }
 
     // ─── PHASE 6: Symbolic Execution — real value trace for the Math tab ──────
     // Pull the rich value trace from the executor (concrete values tracked during execution)
@@ -248,16 +295,17 @@ try {
       : buildSymbolicTrace(typeResult.symbolTable);
 
     // ─── PHASE 7: Control Flow Graph ─────────────────────────────────────────
-let cfg: any = { nodes: [], edges: [] };
-try { 
-  if (ast && ast.type === 'Program') {
-    cfg = new CFGGenerator().generate(ast); 
-  }
-} catch (cfgErr: any) { 
-  console.error('⚠️ CFG Error caught in Phase 7:', cfgErr?.message);
-  // Fallback to empty CFG so the rest of the analysis (Complexity, Gamification) can finish
-  cfg = { nodes: [{ id: 'error', label: 'CFG Generation Failed' }], edges: [] };
-}
+    let cfg: any = { nodes: [], edges: [] };
+    let cfgCrashMsg = '';
+    try {
+      if (ast && ast.type === 'Program') {
+        cfg = new CFGGenerator().generate(ast);
+      }
+    } catch (cfgErr: any) {
+      console.error('⚠️ CFG Error caught in Phase 7:', cfgErr?.message);
+      cfgCrashMsg = cfgErr?.message ?? 'unknown error';
+      cfg = { nodes: [{ id: 'cfg_error', type: 'end', label: 'CFG Generation Failed', x: 0, y: 0, children: [] }], edges: [] };
+    }
 
     // ─── PHASE 8: Mentor Explanations ────────────────────────────────────────
     let mentorExplanations: string[] = [];
@@ -303,8 +351,11 @@ try {
     cyclomaticComplexity: cyclomaticResult,
     // CRITICAL: Adding this string triggers the PASS status in your LogsTab UI
     explanations: [
-        "✅ **Status:** Analysis Successful", 
+        "✅ **Status:** Analysis Successful",
         ...combinedWarnings.map(w => `⚠️ **WARNING (L${w.line}):** ${w.message}`),
+        ...unsupportedWarnings.map(w => `⚠️ **Unsupported Feature:** ${w.message}`),
+        ...(executorCrashMsg ? [`⚠️ **Safety Analyzer:** Stopped early — ${executorCrashMsg}`] : []),
+        ...(cfgCrashMsg      ? [`⚠️ **Flow Graph:** Generation failed — ${cfgCrashMsg}`]       : []),
         ...mentorExplanations,
     ],
     // OPTIONAL: If your frontend specifically looks for a 'logs' key, add it here

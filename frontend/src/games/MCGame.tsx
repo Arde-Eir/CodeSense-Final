@@ -77,7 +77,7 @@ const MCGameInner: React.FC<{ questions: MCQ[]; onComplete: (score: number, tota
     : ((qIdx + (revealed ? 1 : 0)) / questions.length) * 100;
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0 }}>
+    <div style={{ display: 'flex', flexDirection: 'column' }}>
 
       {/* ── Progress bar ─────────────────────────────────────────────────── */}
       <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 14 }}>
@@ -100,7 +100,7 @@ const MCGameInner: React.FC<{ questions: MCQ[]; onComplete: (score: number, tota
       </div>
 
       {/* ── Options ───────────────────────────────────────────────────────── */}
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 8, flex: 1 }}>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
         {q.options.map((opt, i) => {
           const isSelected = selected === i;
           const isRight    = i === q.correct;

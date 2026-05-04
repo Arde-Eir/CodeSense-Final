@@ -431,14 +431,47 @@ export const LeaderboardPage: React.FC = () => {
       color: 'white', fontFamily: "'IBM Plex Sans', system-ui, sans-serif",
       boxSizing: 'border-box' as const
     }}>
+      <style>{`
+        @media (max-width: 768px) {
+          .lb-header {
+            padding: 12px 16px !important;
+          }
+          .lb-header-back {
+            font-size: 13px !important;
+            min-height: 40px !important;
+            display: flex !important;
+            align-items: center !important;
+          }
+          .lb-content {
+            padding: 16px 12px !important;
+          }
+          .lb-stats-grid {
+            grid-template-columns: repeat(2, 1fr) !important;
+          }
+          .lb-thead, .lb-row {
+            grid-template-columns: 44px 1fr 76px 80px !important;
+            padding: 12px 14px !important;
+          }
+          .lb-col-level, .lb-col-runs {
+            display: none !important;
+          }
+          .lb-row-player-name {
+            font-size: 14px !important;
+          }
+          .lb-row-player-sub {
+            display: none !important;
+          }
+        }
+      `}</style>
+
       {/* Header */}
-      <header style={{
+      <header className="lb-header" style={{
         display: 'flex', justifyContent: 'space-between', alignItems: 'center',
         padding: '16px 32px', background: 'rgba(22,27,34,0.95)',
         borderBottom: '1px solid #21262d', position: 'sticky', top: 0, zIndex: 100,
         backdropFilter: 'blur(8px)'
       }}>
-        <button onClick={() => navigate('/home')} style={{ background: 'transparent', border: 'none', color: '#8b949e', cursor: 'pointer', fontSize: '14px' }}>
+        <button className="lb-header-back" onClick={() => navigate('/home')} style={{ background: 'transparent', border: 'none', color: '#8b949e', cursor: 'pointer', fontSize: '14px' }}>
           ← Back to Dashboard
         </button>
         <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
@@ -450,10 +483,10 @@ export const LeaderboardPage: React.FC = () => {
         </div>
       </header>
 
-      <div style={{ maxWidth: '960px', margin: '0 auto', padding: '28px 24px', boxSizing: 'border-box' as const }}>
+      <div className="lb-content" style={{ maxWidth: '960px', margin: '0 auto', padding: '28px 24px', boxSizing: 'border-box' as const }}>
 
         {/* ── Stats summary strip ── */}
-        <div style={{
+        <div className="lb-stats-grid" style={{
           display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '10px',
           marginBottom: '22px',
         }}>
@@ -650,13 +683,20 @@ export const LeaderboardPage: React.FC = () => {
         {/* Players table */}
         <div style={{ background: 'rgba(22,27,34,0.9)', border: '1px solid #21262d', borderRadius: '14px', overflow: 'hidden' }}>
           {/* Table header */}
-          <div style={{
+          <div className="lb-thead" style={{
             display: 'grid', gridTemplateColumns: '52px 1fr 110px 110px 90px 110px',
             padding: '10px 20px', borderBottom: '1px solid #21262d',
             background: 'rgba(255,255,255,0.02)'
           }}>
-            {['RANK', 'PLAYER', 'LEVEL', 'XP', 'RUNS', 'LAST ACTIVE'].map(h => (
-              <div key={h} style={{ color: '#484f58', fontSize: '10px', fontWeight: '700', letterSpacing: '1.2px' }}>{h}</div>
+            {[
+              { label: 'RANK',        cls: '' },
+              { label: 'PLAYER',      cls: '' },
+              { label: 'LEVEL',       cls: 'lb-col-level' },
+              { label: 'XP',          cls: '' },
+              { label: 'RUNS',        cls: 'lb-col-runs' },
+              { label: 'LAST ACTIVE', cls: '' },
+            ].map(h => (
+              <div key={h.label} className={h.cls} style={{ color: '#484f58', fontSize: '10px', fontWeight: '700', letterSpacing: '1.2px' }}>{h.label}</div>
             ))}
           </div>
 
@@ -675,7 +715,7 @@ export const LeaderboardPage: React.FC = () => {
               const isMe = player.id === user?.id
               const online = isRecentlyActive(player.lastactive)
               return (
-                <div key={player.id} onClick={() => setDetailPlayer(player)} style={{
+                <div key={player.id} className="lb-row" onClick={() => setDetailPlayer(player)} style={{
                   display: 'grid', gridTemplateColumns: '52px 1fr 110px 110px 90px 110px',
                   padding: '14px 20px', borderBottom: '1px solid #21262d',
                   background: isMe ? 'rgba(76,175,80,0.07)' : i % 2 === 0 ? 'transparent' : 'rgba(255,255,255,0.01)',
@@ -722,19 +762,19 @@ export const LeaderboardPage: React.FC = () => {
                       )}
                     </div>
                     <div style={{ minWidth: 0 }}>
-                      <div style={{ color: isMe ? '#4caf50' : '#e6edf3', fontSize: '13px', fontWeight: isMe ? '700' : '500', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                      <div className="lb-row-player-name" style={{ color: isMe ? '#4caf50' : '#e6edf3', fontSize: '13px', fontWeight: isMe ? '700' : '500', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                         {player.playername}
                         {isMe && <span style={{ fontSize: '10px', color: '#4caf50', marginLeft: '6px', opacity: 0.8 }}>(you)</span>}
                         {player.user_type === 'professional' && <span style={{ fontSize: '9px', marginLeft: '6px', opacity: 0.7 }}>💼</span>}
                       </div>
-                      <div style={{ color: '#484f58', fontSize: '11px' }}>
+                      <div className="lb-row-player-sub" style={{ color: '#484f58', fontSize: '11px' }}>
                         Joined {new Date(player.createdat).toLocaleDateString([], { month: 'short', year: 'numeric' })}
                       </div>
                     </div>
                   </div>
 
                   {/* Level */}
-                  <div style={{ display: 'flex', alignItems: 'center' }}>
+                  <div className="lb-col-level" style={{ display: 'flex', alignItems: 'center' }}>
                     <span style={{ color: '#64b5f6', fontSize: '12px', fontWeight: '600' }}>
                       {getRank(player.totalxp ?? 0).name}
                     </span>
@@ -747,7 +787,7 @@ export const LeaderboardPage: React.FC = () => {
                   </div>
 
                   {/* Sandbox runs */}
-                  <div style={{ display: 'flex', alignItems: 'center' }}>
+                  <div className="lb-col-runs" style={{ display: 'flex', alignItems: 'center' }}>
                     <span style={{ color: '#4caf50', fontSize: '12px', fontWeight: '600' }}>{player.sandbox_runs}</span>
                   </div>
 
