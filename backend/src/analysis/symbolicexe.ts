@@ -56,6 +56,7 @@ export class SymbolicExecutor {
   private symbolTable: SymbolTable;
 
   private currentFunction: string = '';
+  private returned = false;
 
   private readonly INT_MAX = 2147483647;
   private readonly INT_MIN = -2147483648;
@@ -222,6 +223,8 @@ export class SymbolicExecutor {
   private visitFunctionDecl(node: FunctionDeclNode): SymbolicValue {
     const prevFunc = this.currentFunction;
     this.currentFunction = node.name;
+    const prevReturned = this.returned;
+    this.returned = false;
 
     const entryState = this.cloneState();
 
@@ -234,7 +237,10 @@ export class SymbolicExecutor {
       this.state.initialized.add(param.name);
     });
 
-    node.body?.forEach(stmt => this.visit(stmt));
+    for (const stmt of (node.body ?? [])) {
+      this.visit(stmt);
+      if (this.returned) break;
+    }
 
     // Check for local memory leaks before exiting function scope
     this.state.allocatedPointers.forEach((info, ptr) => {
@@ -247,6 +253,7 @@ export class SymbolicExecutor {
     });
 
     this.currentFunction = prevFunc;
+    this.returned = prevReturned;
     return { type: 'unknown' as const };
   }
 
@@ -403,6 +410,15 @@ export class SymbolicExecutor {
     }
 
     this.visit(node.condition);
+
+    // If the condition is provably false with current concrete values, skip the
+    // then-branch entirely — it is dead code and should not raise safety checks.
+    const condValue = this.evalConcreteCondition(node.condition);
+    if (condValue === false) {
+      node.elseBranch?.forEach(s => this.visit(s));
+      return { type: 'unknown' as const };
+    }
+
     const preBranchState = this.cloneState();
 
     this.applyPathConstraint(node.condition, false);
@@ -454,8 +470,7 @@ export class SymbolicExecutor {
     // Literal booleans
     if (cond.type === 'Boolean' || cond.type === 'Literal') return !!cond.value;
     if (cond.type === 'Integer' || cond.type === 'Float')   return cond.value !== 0;
-    // Bare identifier — the parser emits identifiers as plain strings inside
-    // BinaryOp / etc., so check that case before the structural Identifier.
+    // Bare identifier
     if (typeof cond === 'string') {
       const v = this.state.variables.get(cond);
       if (v?.type === 'concrete') return !!v.value;
@@ -464,6 +479,23 @@ export class SymbolicExecutor {
     if (cond.type === 'Identifier') {
       const v = this.state.variables.get(cond.name);
       if (v?.type === 'concrete') return !!v.value;
+      return null;
+    }
+    // Logical AND / OR — short-circuit using concrete sub-evaluations
+    if (cond.type === 'BinaryOp' && cond.operator === '&&') {
+      const l = this.evalConcreteCondition(cond.left);
+      if (l === false) return false;
+      const r = this.evalConcreteCondition(cond.right);
+      if (r === false) return false;
+      if (l === true && r === true) return true;
+      return null;
+    }
+    if (cond.type === 'BinaryOp' && cond.operator === '||') {
+      const l = this.evalConcreteCondition(cond.left);
+      if (l === true) return true;
+      const r = this.evalConcreteCondition(cond.right);
+      if (r === true) return true;
+      if (l === false && r === false) return false;
       return null;
     }
     // Binary comparison
@@ -865,6 +897,7 @@ export class SymbolicExecutor {
       const info = this.state.allocatedPointers.get(val.target);
       if (info) info.freed = true; // pointer escapes function — not a leak
     }
+    this.returned = true;
     return val;
   }
 

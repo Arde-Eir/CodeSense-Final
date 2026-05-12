@@ -60,19 +60,24 @@ const isMultipleChoiceType = (t: string | null | undefined): boolean => {
 
 // ─── Small UI bits ─────────────────────────────────────────────────────────
 const StatBar: React.FC<{
-  icon: string; label: string; current: number; total: number; color: string;
-}> = ({ icon, label, current, total, color }) => {
+  icon: string; label: string; current: number; total: number; color: string; maxed?: boolean;
+}> = ({ icon, label, current, total, color, maxed }) => {
   const pct = total > 0 ? Math.min((current / total) * 100, 100) : 0;
   return (
     <div style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '9px 0' }}>
       <span style={{ fontSize: 18, flexShrink: 0, width: 24, textAlign: 'center' }}>{icon}</span>
       <div style={{ flex: 1 }}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 5 }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 5 }}>
           <span style={{ fontSize: 11, color: '#c9d1d9', fontWeight: 600, fontFamily: "'Syne', sans-serif" }}>{label}</span>
-          <span style={{ fontSize: 11, color, fontWeight: 800, fontFamily: "'JetBrains Mono', monospace" }}>{current}/{total}</span>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+            {maxed && (
+              <span style={{ fontSize: 9, fontWeight: 800, color: '#e3b341', background: 'rgba(227,179,65,0.15)', border: '1px solid rgba(227,179,65,0.4)', borderRadius: 4, padding: '1px 5px', fontFamily: "'JetBrains Mono',monospace", letterSpacing: '0.5px' }}>MAX</span>
+            )}
+            <span style={{ fontSize: 11, color, fontWeight: 800, fontFamily: "'JetBrains Mono', monospace" }}>{current}/{total}</span>
+          </div>
         </div>
         <div style={{ height: 6, background: 'rgba(255,255,255,0.06)', borderRadius: 3, overflow: 'hidden' }}>
-          <div style={{ width: `${pct}%`, height: '100%', background: `linear-gradient(90deg,${color}cc,${color})`, borderRadius: 3, transition: 'width 0.9s cubic-bezier(0.4,0,0.2,1)' }} />
+          <div style={{ width: `${pct}%`, height: '100%', background: maxed ? 'linear-gradient(90deg,#e3b341,#facc15)' : `linear-gradient(90deg,${color}cc,${color})`, borderRadius: 3, transition: 'width 0.9s cubic-bezier(0.4,0,0.2,1)' }} />
         </div>
       </div>
     </div>
@@ -169,19 +174,27 @@ const QuestCard: React.FC<{
 };
 
 // ─── Sidebar panels ───────────────────────────────────────────────────────
-const ProgressPanel: React.FC<{ stats: LevelStats }> = ({ stats }) => (
-  <div style={{ background: 'rgba(255,255,255,.02)', border: '1.5px solid rgba(255,255,255,.06)', borderRadius: 13, padding: '18px 16px', animation: 'questIn .5s ease .15s both' }}>
-    <div style={{ fontSize: 9, fontWeight: 700, color: '#484f58', letterSpacing: '1.5px', textTransform: 'uppercase', marginBottom: 14, fontFamily: "'JetBrains Mono',monospace" }}>
-      Your Progress
-      <span style={{ marginLeft: 8, display: 'inline-block', width: 6, height: 6, borderRadius: '50%', background: '#3fb950', boxShadow: '0 0 6px #3fb950', verticalAlign: 'middle' }} title="Live" />
+const ProgressPanel: React.FC<{ stats: LevelStats; phase: string }> = ({ stats, phase }) => {
+  const xpMaxed = stats.xpTotal > 0 && stats.xpEarned >= stats.xpTotal;
+  return (
+    <div style={{ background: 'rgba(255,255,255,.02)', border: '1.5px solid rgba(255,255,255,.06)', borderRadius: 13, padding: '18px 16px', animation: 'questIn .5s ease .15s both' }}>
+      <div style={{ fontSize: 9, fontWeight: 700, color: '#484f58', letterSpacing: '1.5px', textTransform: 'uppercase', marginBottom: 14, fontFamily: "'JetBrains Mono',monospace" }}>
+        Your Progress
+        <span style={{ marginLeft: 8, display: 'inline-block', width: 6, height: 6, borderRadius: '50%', background: '#3fb950', boxShadow: '0 0 6px #3fb950', verticalAlign: 'middle' }} title="Live" />
+      </div>
+      <StatBar icon="🎒" label="Lessons Done" current={stats.finished} total={stats.total}   color="#58a6ff" />
+      <div style={{ height: 1, background: 'rgba(255,255,255,.04)', margin: '3px 0' }} />
+      <StatBar icon="⚡" label="XP Earned"    current={stats.xpEarned} total={stats.xpTotal} color="#e3b341" maxed={xpMaxed} />
+      <div style={{ height: 1, background: 'rgba(255,255,255,.04)', margin: '3px 0' }} />
+      <StatBar icon="🔥" label="Streak"       current={stats.streak}   total={stats.total}   color="#f0883e" />
+      {xpMaxed && (
+        <div style={{ marginTop: 12, padding: '8px 12px', borderRadius: 8, background: 'rgba(227,179,65,0.08)', border: '1px solid rgba(227,179,65,0.3)', fontSize: 11, color: '#e3b341', fontFamily: "'Syne',sans-serif", textAlign: 'center', lineHeight: 1.5 }}>
+          ⚡ Level XP maxed!{phase !== 'advanced' ? ' Advance to the next level to earn more.' : ' You\'ve mastered all levels!'}
+        </div>
+      )}
     </div>
-    <StatBar icon="🎒" label="Lessons Done" current={stats.finished} total={stats.total}   color="#58a6ff" />
-    <div style={{ height: 1, background: 'rgba(255,255,255,.04)', margin: '3px 0' }} />
-    <StatBar icon="⚡" label="XP Earned"    current={stats.xpEarned} total={stats.xpTotal} color="#e3b341" />
-    <div style={{ height: 1, background: 'rgba(255,255,255,.04)', margin: '3px 0' }} />
-    <StatBar icon="🔥" label="Streak"       current={stats.streak}   total={stats.total}   color="#f0883e" />
-  </div>
-);
+  );
+};
 
 const ActivityTypesPanel: React.FC<{ quests: QuestRow[] }> = ({ quests }) => {
   const counts: Record<string, number> = {};
@@ -492,7 +505,7 @@ export const CampaignInside: React.FC = () => {
               <h1 style={{ fontSize: 'clamp(20px,2.8vw,28px)', fontWeight: 900, color: '#f0f6fc', letterSpacing: '-0.5px', lineHeight: 1.1, fontFamily: "'Syne',sans-serif" }}>{levelInfo.title}</h1>
               {levelInfo.description && <p style={{ fontSize: 11, color: 'rgba(240,246,252,.5)', marginTop: 7, maxWidth: 460, lineHeight: 1.6, fontFamily: "'Syne',sans-serif" }}>{levelInfo.description}</p>}
             </div>
-            <div style={{ position: 'absolute', top: 16, right: 16, display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 8 }}>
+            <div style={{ position: 'absolute', top: 16, right: 16, zIndex: 2, display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 8 }}>
               <div style={{ position: 'relative', height: 32, display: 'flex', alignItems: 'center' }}>
   {/* Locked badge — fades out when allDone */}
   <div style={{
@@ -571,7 +584,7 @@ export const CampaignInside: React.FC = () => {
 
             {/* Sidebar */}
             <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
-              <ProgressPanel      stats={stats} />
+              <ProgressPanel      stats={stats} phase={phase} />
               <ActivityTypesPanel quests={quests} />
               <QuestMixPanel      quests={quests} />
 

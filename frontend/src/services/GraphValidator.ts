@@ -38,6 +38,18 @@ const isTrueLabel  = (l: string) => l === 'true'  || l === 'yes';
 const isFalseLabel = (l: string) => l === 'false' || l === 'no';
 const isBranchLabel = (l: string) => isTrueLabel(l) || isFalseLabel(l);
 
+const LINEAR_NODE_TYPES = new Set([
+  'process',
+  'io',
+  'manual_input',
+  'predefined',
+  'document',
+  'delay',
+  'database',
+  'connector',
+  'off_page_connector',
+]);
+
 /** BFS from startId, returns all reachable node ids. */
 function reachableFrom(startId: string, edges: Edge[]): Set<string> {
   const adj = new Map<string, string[]>();
@@ -141,11 +153,21 @@ export function validateGraph(nodes: Node[], edges: Edge[]): ValidationResult {
 
   // ── 6. Start node must have at least one outgoing edge ────────────────────
   if (startNodes.length === 1) {
+    const startIn  = inEdges.get(startNodes[0].id) ?? [];
     const startOut = outEdges.get(startNodes[0].id) ?? [];
+    if (startIn.length > 0) {
+      push('error', 'START_HAS_INCOMING_EDGE',
+        'The Start terminator must not have incoming edges. It is the single entry point of the flowchart.',
+        { nodeIds: [startNodes[0].id], edgeIds: startIn.map(e => e.id) });
+    }
     if (startOut.length === 0) {
       push('error', 'START_NOT_CONNECTED',
         'The Start node has no outgoing connection. Draw an edge from Start to your first step.',
         { nodeIds: [startNodes[0].id] });
+    } else if (startOut.length > 1) {
+      push('error', 'START_MULTIPLE_OUTGOING',
+        `The Start terminator has ${startOut.length} outgoing edges. Use exactly one outgoing flow line from Start.`,
+        { nodeIds: [startNodes[0].id], edgeIds: startOut.map(e => e.id) });
     }
   }
 
@@ -191,47 +213,49 @@ export function validateGraph(nodes: Node[], edges: Edge[]): ValidationResult {
       continue; // remaining checks require edges
     }
 
-    // 8b. Only one outgoing edge
-    if (out.length === 1) {
-      push('warning', 'DECISION_SINGLE_EDGE',
-        `Decision "${lbl}" has only one outgoing edge — it will generate an if (…) with no else branch. ` +
-        'Add a second edge and label them "true" / "false" if you need both branches.',
-        { nodeIds: [d.id] });
+    // 8b. ISO-style code generation supports exactly two decision exits:
+    // true/yes and false/no. Anything else is ambiguous and used to be silently
+    // truncated by the generator.
+    if (out.length !== 2) {
+      push('error', 'DECISION_REQUIRES_TWO_BRANCHES',
+        `Decision "${lbl}" has ${out.length} outgoing edge(s). Use exactly two outgoing edges: one labelled "true" and one labelled "false".`,
+        { nodeIds: [d.id], edgeIds: out.map(e => e.id) });
     }
 
-    // 8c. Two+ edges but none labelled true/false
-    if (out.length >= 2) {
-      const labelled   = out.filter(e => isBranchLabel(str(e.label).toLowerCase()));
+    // 8c. Edges must be labelled true/false
+    if (out.length > 0) {
       const unlabelled = out.filter(e => !isBranchLabel(str(e.label).toLowerCase()));
 
-      if (labelled.length === 0) {
+      if (unlabelled.length > 0) {
         push('error', 'DECISION_UNLABELLED_EDGES',
-          `Decision "${lbl}" has ${out.length} outgoing edges but none are labelled "true" or "false". ` +
-          'Double-click each edge and label them — the generator cannot tell which branch is which.',
-          { nodeIds: [d.id], edgeIds: out.map(e => e.id) });
-      } else if (unlabelled.length > 0) {
-        push('warning', 'DECISION_PARTIALLY_LABELLED',
-          `Decision "${lbl}" has ${unlabelled.length} unlabelled edge(s). ` +
-          'Label all outgoing edges "true" / "false" to avoid incorrect code generation.',
+          `Decision "${lbl}" has ${unlabelled.length} outgoing edge(s) without a "true" or "false" label. ` +
+          'Label each decision edge so code generation can map the branches correctly.',
           { nodeIds: [d.id], edgeIds: unlabelled.map(e => e.id) });
       }
 
-      // 8d. Duplicate true / false labels
       const trueEdges  = out.filter(e => isTrueLabel(str(e.label).toLowerCase()));
       const falseEdges = out.filter(e => isFalseLabel(str(e.label).toLowerCase()));
-      if (trueEdges.length > 1) {
+      if (trueEdges.length === 0) {
+        push('error', 'DECISION_MISSING_TRUE',
+          `Decision "${lbl}" is missing a "true" branch.`,
+          { nodeIds: [d.id] });
+      } else if (trueEdges.length > 1) {
         push('error', 'DECISION_DUPLICATE_TRUE',
           `Decision "${lbl}" has ${trueEdges.length} edges labelled "true". Only one "true" branch is allowed.`,
           { nodeIds: [d.id], edgeIds: trueEdges.map(e => e.id) });
       }
-      if (falseEdges.length > 1) {
+      if (falseEdges.length === 0) {
+        push('error', 'DECISION_MISSING_FALSE',
+          `Decision "${lbl}" is missing a "false" branch.`,
+          { nodeIds: [d.id] });
+      } else if (falseEdges.length > 1) {
         push('error', 'DECISION_DUPLICATE_FALSE',
           `Decision "${lbl}" has ${falseEdges.length} edges labelled "false". Only one "false" branch is allowed.`,
           { nodeIds: [d.id], edgeIds: falseEdges.map(e => e.id) });
       }
     }
 
-    // 8e. Empty / default condition
+    // 8d. Empty / default condition
     // A decision is considered "unconfigured" only when BOTH label AND code are
     // placeholder/empty. If the user set code (e.g. "hp > 0") but left the
     // label as "Condition", that is fine — the code field is what gets emitted.
@@ -239,7 +263,7 @@ export function validateGraph(nodes: Node[], edges: Edge[]): ValidationResult {
     const dLabel = str(d.data?.label);
     const hasRealCondition = dCode || (dLabel && dLabel !== 'Condition');
     if (!hasRealCondition) {
-      push('warning', 'DECISION_EMPTY_CONDITION',
+      push('error', 'DECISION_EMPTY_CONDITION',
         'Decision node has no condition set. Double-click it and enter a C++ condition like "hp > 0" or "i < n".',
         { nodeIds: [d.id] });
     }
@@ -286,12 +310,30 @@ export function validateGraph(nodes: Node[], edges: Edge[]): ValidationResult {
 
     if (outCount > 1) {
       push(
-        'warning',
+        'error',
         'JUNCTION_MULTI_OUT',
-        `Junction "${str(j.data?.label) || '⬡'}" has ${outCount} outgoing edges. Code generation follows the first path only; use a Decision node to branch.`,
+        `Junction "${str(j.data?.label) || '⬡'}" has ${outCount} outgoing edges. Junctions are routing-only and must have exactly one outgoing path; use a Decision node to branch.`,
         { nodeIds: [j.id], edgeIds: (outEdges.get(j.id) ?? []).map(e => e.id) },
       );
     }
+  }
+
+  // ── 10c. ISO linear shape cardinality ─────────────────────────────────────
+  // All supported non-decision action/data/reference shapes are deterministic
+  // sequence steps. They must not branch. Older generator behavior followed
+  // the first outgoing edge and silently ignored the rest.
+  const linearViolations = nodes.filter(n => LINEAR_NODE_TYPES.has(String(n.type ?? ''))).flatMap(n => {
+    const out = outEdges.get(n.id) ?? [];
+    if (out.length <= 1) return [];
+    return [{ node: n, out }];
+  });
+  for (const { node, out } of linearViolations) {
+    push(
+      'error',
+      'LINEAR_NODE_MULTIPLE_OUTGOING',
+      `"${str(node.data?.label) || node.type}" has ${out.length} outgoing edges. Only Decision nodes may branch; use exactly one outgoing path from this shape.`,
+      { nodeIds: [node.id], edgeIds: out.map(e => e.id) },
+    );
   }
 
   // ── 11. Placeholder nodes with no real code ───────────────────────────────

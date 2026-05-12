@@ -484,8 +484,7 @@ function traverse(
   adj: Map<string, Edge[]>,
   visited: Set<string>,
   indent: string,
-  stopAt: Set<string>,
-  declaredVars: Set<string>
+  stopAt: Set<string>
 ): string {
   let output = '';
   let currentId: string | undefined = nodeId;
@@ -512,16 +511,27 @@ function traverse(
     // ── On-page connector (break / continue) ─────────────────────────────────
     if (node.type === 'connector') {
       const code = str(node.data.code);
-      if (code === 'break')    output += `${indent}break;\n`;
-      else if (code === 'continue') output += `${indent}continue;\n`;
+      if (code === 'break') {
+        output += `${indent}break;\n`;
+        break;
+      }
+      if (code === 'continue') {
+        output += `${indent}continue;\n`;
+        break;
+      }
       currentId = outEdges[0]?.target;
       continue;
     }
 
     // ── Off-page connector (call to user-defined function) ────────────────────
     if (node.type === 'off_page_connector') {
-      const rawCode = resolveCode(node);
-      if (rawCode) output += `${indent}${emitPredefined(str(node.data.label), rawCode)}\n`;
+      const label = str(node.data.label);
+      const rawCode = str(node.data.code);
+      if (!rawCode) {
+        output += `${indent}// Off-page connector: ${label || 'reference'}\n`;
+      } else {
+        output += `${indent}${emitPredefined(label, rawCode)}\n`;
+      }
       currentId = outEdges[0]?.target;
       continue;
     }
@@ -560,7 +570,7 @@ function traverse(
           // Body must terminate when it reaches back to the decision — pass
           // the decision node id as a stop so we don't re-emit it.
           const stopAtBody = new Set([currentId]);
-          output += traverse(bodyEdge.target, nodeMap, adj, new Set(visited), indent + '    ', stopAtBody, declaredVars);
+          output += traverse(bodyEdge.target, nodeMap, adj, new Set(visited), indent + '    ', stopAtBody);
         }
         output += `${indent}}\n`;
 
@@ -574,12 +584,12 @@ function traverse(
 
       output += `${indent}if (${condition}) {\n`;
       if (trueEdge && trueEdge.target !== mergeNode) {
-        output += traverse(trueEdge.target, nodeMap, adj, new Set(visited), indent + '    ', mergeSet, declaredVars);
+        output += traverse(trueEdge.target, nodeMap, adj, new Set(visited), indent + '    ', mergeSet);
       }
       output += `${indent}}`;
       if (falseEdge && falseEdge.target !== mergeNode) {
         output += ` else {\n`;
-        output += traverse(falseEdge.target, nodeMap, adj, new Set(visited), indent + '    ', mergeSet, declaredVars);
+        output += traverse(falseEdge.target, nodeMap, adj, new Set(visited), indent + '    ', mergeSet);
         output += `${indent}}`;
       }
       output += '\n';
@@ -644,20 +654,13 @@ function traverse(
       } else {
         const decl = parseVarDecl(rawCode);
         if (decl) {
-          if (declaredVars.has(decl.name)) {
-            if (decl.value !== undefined) {
-              output += `${indent}${decl.name} = ${decl.value};\n`;
-            }
+          const modPart = decl.modifiers.length ? decl.modifiers.join(' ') + ' ' : '';
+          if (decl.isArray) {
+            const init = decl.value ? ` = ${decl.value}` : '';
+            output += `${indent}${modPart}${decl.varType} ${decl.name}[${decl.arraySize}]${init};\n`;
           } else {
-            declaredVars.add(decl.name);
-            const modPart = decl.modifiers.length ? decl.modifiers.join(' ') + ' ' : '';
-            if (decl.isArray) {
-              const init = decl.value ? ` = ${decl.value}` : '';
-              output += `${indent}${modPart}${decl.varType} ${decl.name}[${decl.arraySize}]${init};\n`;
-            } else {
-              const init = decl.value !== undefined ? ` = ${decl.value}` : '';
-              output += `${indent}${modPart}${decl.varType} ${decl.name}${init};\n`;
-            }
+            const init = decl.value !== undefined ? ` = ${decl.value}` : '';
+            output += `${indent}${modPart}${decl.varType} ${decl.name}${init};\n`;
           }
         } else {
           if (rawCode.includes('\n') || rawCode.trimEnd().endsWith('}')) {
@@ -712,7 +715,6 @@ export const generateCppFromGraph = (nodes: Node[], edges: Edge[]): string => {
 
   const allCode = collectAllCode(typedNodes);
   const includes = detectIncludes(allCode);
-  const declaredVars = new Set<string>();
 
   const bodyLines = traverse(
     startNode.id,
@@ -720,8 +722,7 @@ export const generateCppFromGraph = (nodes: Node[], edges: Edge[]): string => {
     adj,
     new Set(),
     '    ',
-    new Set(),
-    declaredVars
+    new Set()
   );
 
   return [

@@ -1,5 +1,5 @@
 {
-  "devDependencies": {
-    "@types/node": "^25.5.0"
+  "scripts": {
+    "test": "node --test tests/run-integration-tests.mjs"
   }
 }

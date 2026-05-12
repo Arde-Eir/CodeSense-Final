@@ -52,7 +52,7 @@ const PlayerHUD: React.FC<{
   );
 
   if (!user || !liveStats) return (
-    <div style={{ width: '180px', height: '36px', background: '#1c2128', border: '1px solid #2d333b', borderRadius: '8px', display: 'flex', alignItems: 'center', padding: '0 12px' }}>
+    <div style={{ width: '180px', maxWidth: '100%', height: '36px', background: '#1c2128', border: '1px solid #2d333b', borderRadius: '8px', display: 'flex', alignItems: 'center', padding: '0 12px' }}>
       <div style={{ width: '100%', height: '6px', background: '#2d333b', borderRadius: '3px', animation: 'shimmer 1.2s ease-in-out infinite' }} />
     </div>
   );
@@ -77,7 +77,6 @@ const PlayerHUD: React.FC<{
       }}>
         {rank.icon}
       </div>
-
       <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', minWidth: '110px' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
           <span style={{ color: '#e6edf3', fontSize: '12px', fontWeight: '700', maxWidth: '80px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
@@ -96,16 +95,13 @@ const PlayerHUD: React.FC<{
           </span>
         </div>
       </div>
-
       <div style={{ width: '1px', height: '28px', background: '#2d333b', flexShrink: 0 }} />
-
       <div style={{ textAlign: 'center', flexShrink: 0 }}>
         <div style={{ color: '#3fb950', fontSize: '16px', fontWeight: '700', lineHeight: 1, fontFamily: 'IBM Plex Mono, monospace' }}>
           {liveStats.sandboxRuns}
         </div>
         <div style={{ color: '#484f58', fontSize: '9px', letterSpacing: '0.5px', textTransform: 'uppercase', fontFamily: 'IBM Plex Mono, monospace' }}>RUNS</div>
       </div>
-
       {runFlash && (
         <div style={{ position: 'absolute', top: '-28px', right: '6px', color: '#58a6ff', fontSize: '11px', fontWeight: '700', animation: 'xpFloat 1.8s ease-out forwards', pointerEvents: 'none', whiteSpace: 'nowrap', fontFamily: 'IBM Plex Mono, monospace' }}>
           🔬 analyzed
@@ -225,7 +221,8 @@ interface AccordionPanelProps {
   isOpen: boolean;
   onToggle: () => void;
   children: React.ReactNode;
-  height?: number;
+  // FIX: accept string (e.g. "55%") or number (pixels) or undefined
+  height?: number | string;
   accentColor?: string;
   badge?: React.ReactNode;
   className?: string;
@@ -238,9 +235,10 @@ const AccordionPanel: React.FC<AccordionPanelProps> = ({
 }) => {
   const outerStyle: React.CSSProperties = isOpen
     ? height != null
-      ? { height: `${height}px`, flexShrink: 0, flexGrow: 0 }
-      : { flex: '1 1 0', minHeight: 120, overflow: 'hidden' }
-    : { flexShrink: 0 };
+      // FIX: pass the value as-is — works for both "55%" strings and pixel numbers
+      ? { height: typeof height === 'number' ? `${height}px` : height, flex: 'none', minHeight: 0 }
+      : { flex: '1 1 0', minHeight: 0, overflow: 'hidden' }
+    : { height: `${HEADER_H}px`, flex: 'none', minHeight: 0 };
 
   const cls = [className, isOpen ? 'accordion-open' : 'accordion-closed'].filter(Boolean).join(' ');
 
@@ -259,21 +257,13 @@ const AccordionPanel: React.FC<AccordionPanelProps> = ({
       <button
         onClick={onToggle}
         style={{
-          display: 'flex',
-          alignItems: 'center',
-          gap: '10px',
-          padding: '0 16px',
-          height: `${HEADER_H}px`,
-          background: isOpen
-            ? `linear-gradient(90deg, ${accentColor}0d 0%, transparent 100%)`
-            : 'transparent',
+          display: 'flex', alignItems: 'center', gap: '10px',
+          padding: '0 16px', height: `${HEADER_H}px`,
+          background: isOpen ? `linear-gradient(90deg, ${accentColor}0d 0%, transparent 100%)` : 'transparent',
           border: 'none',
           borderBottom: isOpen ? `1px solid ${accentColor}20` : '1px solid transparent',
-          cursor: 'pointer',
-          width: '100%',
-          textAlign: 'left',
-          transition: 'background 0.2s',
-          flexShrink: 0,
+          cursor: 'pointer', width: '100%', textAlign: 'left',
+          transition: 'background 0.2s', flexShrink: 0,
         }}
       >
         <div style={{ width: '3px', height: '18px', borderRadius: '2px', background: isOpen ? accentColor : '#2d333b', transition: 'background 0.2s', flexShrink: 0 }} />
@@ -292,80 +282,6 @@ const AccordionPanel: React.FC<AccordionPanelProps> = ({
           {children}
         </div>
       )}
-    </div>
-  );
-};
-
-// ─── Resize Handle ────────────────────────────────────────────────────────────
-const ResizeHandle: React.FC<{ onDrag: (dy: number) => void; disabled?: boolean }> = ({ onDrag, disabled }) => {
-  const dragging = useRef(false);
-  const lastY = useRef(0);
-  const [hovered, setHovered] = useState(false);
-
-  const onMouseDown = useCallback((e: React.MouseEvent) => {
-    if (disabled) return;
-    e.preventDefault();
-    dragging.current = true;
-    lastY.current = e.clientY;
-    document.body.style.cursor = 'row-resize';
-    document.body.style.userSelect = 'none';
-
-    const onMove = (ev: MouseEvent) => {
-      if (!dragging.current) return;
-      onDrag(ev.clientY - lastY.current);
-      lastY.current = ev.clientY;
-    };
-    const onUp = () => {
-      dragging.current = false;
-      document.body.style.cursor = '';
-      document.body.style.userSelect = '';
-      window.removeEventListener('mousemove', onMove);
-      window.removeEventListener('mouseup', onUp);
-    };
-    window.addEventListener('mousemove', onMove);
-    window.addEventListener('mouseup', onUp);
-  }, [onDrag, disabled]);
-
-  if (disabled) return <div className="sandbox-resize-handle" style={{ height: '8px' }} />;
-
-  return (
-    <div
-      className="sandbox-resize-handle"
-      onMouseDown={onMouseDown}
-      onMouseEnter={() => setHovered(true)}
-      onMouseLeave={() => setHovered(false)}
-      style={{
-        height: '16px',
-        cursor: 'row-resize',
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'center',
-        flexShrink: 0,
-        position: 'relative',
-        zIndex: 10,
-      }}
-    >
-      <div style={{
-        display: 'flex',
-        flexDirection: 'column',
-        alignItems: 'center',
-        gap: '3px',
-        padding: '4px 20px',
-        borderRadius: '6px',
-        background: hovered ? 'rgba(88,166,255,0.08)' : 'transparent',
-        border: hovered ? '1px solid rgba(88,166,255,0.2)' : '1px solid transparent',
-        transition: 'all 0.15s',
-      }}>
-        {[0, 1].map(i => (
-          <div key={i} style={{
-            width: '32px',
-            height: '2px',
-            borderRadius: '1px',
-            background: hovered ? '#58a6ff' : '#2d333b',
-            transition: 'background 0.15s',
-          }} />
-        ))}
-      </div>
     </div>
   );
 };
@@ -417,34 +333,38 @@ int main() {
     tabs: false,
   });
 
+  // ─── Resizer ────────────────────────────────────────────────────────────────
+  // ratio: fraction of the left column's height given to the editor panel.
+  // We use getBoundingClientRect on mousemove so it's always accurate —
+  // no ResizeObserver, no pixel state, no drift.
   const containerRef = useRef<HTMLDivElement>(null);
-  const [editorHeight, setEditorHeight] = useState<number | null>(null);
-  const [tabsHeight, setTabsHeight] = useState<number | null>(null);
+  const [ratio, setRatio] = useState(0.58);
 
   const bothOpen = openPanels.editor && openPanels.tabs;
 
+  const handleResizerMouseDown = useCallback((e: React.MouseEvent) => {
+    e.preventDefault();
+    document.body.style.cursor = 'row-resize';
+    document.body.style.userSelect = 'none';
+
+    const onMouseMove = (e: MouseEvent) => {
+      if (!containerRef.current) return;
+      const { top, height } = containerRef.current.getBoundingClientRect();
+      setRatio(Math.min(0.85, Math.max(0.15, (e.clientY - top) / height)));
+    };
+    const onMouseUp = () => {
+      document.body.style.cursor = '';
+      document.body.style.userSelect = '';
+      window.removeEventListener('mousemove', onMouseMove);
+      window.removeEventListener('mouseup', onMouseUp);
+    };
+    window.addEventListener('mousemove', onMouseMove);
+    window.addEventListener('mouseup', onMouseUp);
+  }, []);
+
   const togglePanel = (panel: 'editor' | 'tabs') => {
-    setEditorHeight(null);
-    setTabsHeight(null);
     setOpenPanels(prev => ({ ...prev, [panel]: !prev[panel] }));
   };
-
-  const handleDrag = useCallback((dy: number) => {
-    if (window.innerWidth <= 768) return; // drag resize disabled on mobile
-    const container = containerRef.current;
-    if (!container) return;
-    // available = total space both panels can occupy (padding 24px + handle 16px subtracted).
-    // Panel heights are OUTER heights (header included), so headers must NOT be subtracted again.
-    const available = container.clientHeight - 24 - 16;
-    const minPanel = HEADER_H + 60; // header + a small content area
-
-    setEditorHeight(prev => {
-      const current = prev ?? Math.round(available * 0.5);
-      const next = Math.max(minPanel, Math.min(available - minPanel, current + dy));
-      setTabsHeight(available - next);
-      return next;
-    });
-  }, []);
 
   const fetchLiveStats = async () => {
     if (!user?.id) return;
@@ -488,17 +408,8 @@ int main() {
     setResult(null);
     setAnalysisRunKey(prev => prev + 1);
     setIsAnalyzing(true);
-    // Open the Analysis panel immediately so results appear as soon as they arrive.
-    setOpenPanels(prev => {
-      const editorAlreadyOpen = prev.editor;
-      if (editorAlreadyOpen && containerRef.current && window.innerWidth > 768) {
-        const available = containerRef.current.clientHeight - 24 - 16;
-        const newTabsHeight = Math.max(HEADER_H + 120, Math.round(available * 0.42));
-        setTabsHeight(newTabsHeight);
-        setEditorHeight(available - newTabsHeight);
-      }
-      return { ...prev, tabs: true };
-    });
+    setOpenPanels(prev => ({ ...prev, tabs: true }));
+    if (window.innerWidth > 768) setRatio(0.55);
 
     let data: AnalysisResult | null = null;
     try {
@@ -510,14 +421,11 @@ int main() {
     } catch (err) {
       console.error('Analysis failed:', err);
     } finally {
-      // Unblock the UI as soon as we have (or failed to get) results.
       setIsAnalyzing(false);
       try { editorRef.current?.focus?.(); } catch {/* editor may have unmounted */}
     }
 
-    // DB logging and stat refresh run in the background — never block the UI.
     if (data?.success && user) {
-      // Optimistically bump the run counter so the HUD updates instantly.
       setLiveStats(prev => prev ? { ...prev, sandboxRuns: prev.sandboxRuns + 1 } : prev);
       setRunFlash(true);
       setTimeout(() => setRunFlash(false), 2200);
@@ -533,14 +441,8 @@ int main() {
   };
   const symbols = getSymbolList();
 
-  // FIX: memoize cfg and safetyChecks so FlowGraph receives a stable reference.
-  // Without this, result?.cfg and result?.safetyChecks produce new object
-  // references on every SandboxPage render, causing FlowGraph's
-  // useEffect([cfg, safetyChecks]) to fire every render → setEdges →
-  // re-render → infinite loop ("Maximum update depth exceeded").
   const cfg = useMemo(() => result?.cfg ?? null, [result]);
   const safetyChecks = useMemo(() => result?.safetyChecks, [result]);
-
   const totalNodes  = cfg?.nodes?.length ?? 0;
   const unsafeCount = useMemo(
     () => safetyChecks?.filter(c => c.status === 'UNSAFE').length ?? 0,
@@ -563,18 +465,15 @@ int main() {
           <span className="brand-icon">📦</span>
           <span className="brand-text">CodeSense</span>
         </div>
-
         <div className="header-mode-toggle" style={{ position: 'absolute', left: '50%', transform: 'translateX(-50%)' }}>
           <ModeToggle mode={mode} onChange={setMode} />
         </div>
-
         <div className="header-actions">
           <div className="sandbox-free-badge" style={{
             display: 'flex', alignItems: 'center', gap: '5px',
             padding: '4px 10px', borderRadius: '6px',
             background: 'rgba(88,166,255,0.08)', border: '1px solid rgba(88,166,255,0.2)',
-            fontSize: '10px', color: '#58a6ff', fontFamily: 'IBM Plex Mono, monospace',
-            fontWeight: '700',
+            fontSize: '10px', color: '#58a6ff', fontFamily: 'IBM Plex Mono, monospace', fontWeight: '700',
           }}>
             🔬 FREE SANDBOX — No XP
           </div>
@@ -594,12 +493,9 @@ int main() {
             ref={containerRef}
             className="left-column"
             style={{
-              display: 'flex',
-              flexDirection: 'column',
-              gap: '0px',
+              display: 'flex', flexDirection: 'column',
               padding: '12px 10px 12px 12px',
-              overflow: 'hidden',
-              minHeight: 0,
+              overflow: 'hidden', minHeight: 0, height: '100%', gap: 0,
             }}
           >
             <AccordionPanel
@@ -609,18 +505,9 @@ int main() {
               isOpen={openPanels.editor}
               onToggle={() => togglePanel('editor')}
               accentColor="#3fb950"
-              height={bothOpen && editorHeight != null && window.innerWidth > 768 ? editorHeight : undefined}
+              height={bothOpen ? `${ratio * 100}%` : undefined}
               badge={
-                <span style={{
-                  fontSize: '9px',
-                  fontFamily: 'IBM Plex Mono, monospace',
-                  color: '#484f58',
-                  background: '#1c2128',
-                  border: '1px solid #2d333b',
-                  borderRadius: '4px',
-                  padding: '2px 6px',
-                  letterSpacing: '0.4px',
-                }}>
+                <span style={{ fontSize: '9px', fontFamily: 'IBM Plex Mono, monospace', color: '#484f58', background: '#1c2128', border: '1px solid #2d333b', borderRadius: '4px', padding: '2px 6px', letterSpacing: '0.4px' }}>
                   main.cpp
                 </span>
               }
@@ -655,7 +542,33 @@ int main() {
               </div>
             </AccordionPanel>
 
-            <ResizeHandle onDrag={handleDrag} disabled={!bothOpen} />
+            {/* ── Inline Resize Handle ── */}
+            {bothOpen && (
+              <div
+                onMouseDown={handleResizerMouseDown}
+                onDoubleClick={() => setRatio(0.5)}
+                title="Drag to resize · Double-click to reset"
+                style={{
+                  flexShrink: 0, height: '10px', cursor: 'row-resize',
+                  display: 'flex', alignItems: 'center', justifyContent: 'center',
+                  borderTop: '1px solid #1e242c', borderBottom: '1px solid #1e242c',
+                }}
+                onMouseEnter={e => {
+                  (e.currentTarget as HTMLDivElement).style.background = 'rgba(88,166,255,0.06)';
+                  (e.currentTarget.firstChild as HTMLDivElement).style.background = 'rgba(88,166,255,0.6)';
+                }}
+                onMouseLeave={e => {
+                  (e.currentTarget as HTMLDivElement).style.background = 'transparent';
+                  (e.currentTarget.firstChild as HTMLDivElement).style.background = 'rgba(88,166,255,0.2)';
+                }}
+              >
+                <div style={{ display: 'flex', gap: '3px', alignItems: 'center', pointerEvents: 'none' }}>
+                  {[...Array(5)].map((_, i) => (
+                    <div key={i} style={{ width: '3px', height: '3px', borderRadius: '50%', background: 'rgba(88,166,255,0.2)', transition: 'background 0.15s' }} />
+                  ))}
+                </div>
+              </div>
+            )}
 
             <AccordionPanel
               className="tabs-section"
@@ -664,17 +577,15 @@ int main() {
               isOpen={openPanels.tabs}
               onToggle={() => togglePanel('tabs')}
               accentColor="#58a6ff"
-              height={bothOpen && tabsHeight != null && window.innerWidth > 768 ? tabsHeight : undefined}
+              height={bothOpen ? `${(1 - ratio) * 100}%` : undefined}
               badge={
                 result && (
                   <span style={{
-                    fontSize: '9px',
-                    fontFamily: 'IBM Plex Mono, monospace',
+                    fontSize: '9px', fontFamily: 'IBM Plex Mono, monospace',
                     color: unsafeCount > 0 ? '#f85149' : '#3fb950',
                     background: unsafeCount > 0 ? 'rgba(248,81,73,0.1)' : 'rgba(63,185,80,0.1)',
                     border: `1px solid ${unsafeCount > 0 ? 'rgba(248,81,73,0.3)' : 'rgba(63,185,80,0.3)'}`,
-                    borderRadius: '4px',
-                    padding: '2px 6px',
+                    borderRadius: '4px', padding: '2px 6px',
                   }}>
                     {unsafeCount > 0 ? `⚠ ${unsafeCount} issue${unsafeCount > 1 ? 's' : ''}` : '✓ clear'}
                   </span>
@@ -693,8 +604,7 @@ int main() {
                       onClick={() => setTabFullscreen(true)}
                       title="View Fullscreen"
                       style={{
-                        marginLeft: 'auto', marginRight: '8px',
-                        padding: '4px 10px', borderRadius: '6px',
+                        marginLeft: 'auto', marginRight: '8px', padding: '4px 10px', borderRadius: '6px',
                         border: '1px solid rgba(88,166,255,0.3)', background: 'rgba(88,166,255,0.08)',
                         color: '#58a6ff', fontSize: '11px', fontWeight: '700', cursor: 'pointer',
                         fontFamily: 'IBM Plex Mono, monospace', letterSpacing: '0.4px',
@@ -706,7 +616,6 @@ int main() {
                     </button>
                   )}
                 </div>
-
                 <div className="tab-content" style={{ flex: 1, overflow: 'hidden', minHeight: 0 }}>
                   {activeTab === 'lexical' && (
                     <div className="tab-view-scroll">
@@ -714,14 +623,10 @@ int main() {
                         <div className="token-integration">
                           <TokenChart tokens={result.tokens} />
                           <div className="token-action-footer">
-                            <button onClick={() => setIsTokenDrawerOpen(true)} className="view-all-tokens-btn">
-                              Open Token Drawer →
-                            </button>
+                            <button onClick={() => setIsTokenDrawerOpen(true)} className="view-all-tokens-btn">Open Token Drawer →</button>
                           </div>
                         </div>
-                      ) : (
-                        <div className="placeholder-text">Run analysis to view token distribution.</div>
-                      )}
+                      ) : <div className="placeholder-text">Run analysis to view token distribution.</div>}
                     </div>
                   )}
                   {activeTab === 'syntactic' && (
@@ -734,15 +639,7 @@ int main() {
                       {symbols.length > 0 ? (
                         <table className="symbol-table">
                           <thead><tr><th>Type</th><th>Variable</th><th style={{ textAlign: 'right' }}>Line</th></tr></thead>
-                          <tbody>
-                            {symbols.map((s, i) => (
-                              <tr key={i}>
-                                <td className="symbol-type">{s.type}</td>
-                                <td className="symbol-name">{s.name}</td>
-                                <td className="symbol-line">{s.line}</td>
-                              </tr>
-                            ))}
-                          </tbody>
+                          <tbody>{symbols.map((s, i) => <tr key={i}><td className="symbol-type">{s.type}</td><td className="symbol-name">{s.name}</td><td className="symbol-line">{s.line}</td></tr>)}</tbody>
                         </table>
                       ) : <div className="placeholder-text">No symbols detected.</div>}
                     </div>
@@ -754,14 +651,7 @@ int main() {
                   )}
                   {activeTab === 'logs' && (
                     <div className="tab-view-scroll" style={{ height: '100%' }}>
-                      <LogsTab
-                        explanations={result?.explanations}
-                        errors={result?.errors}
-                        warnings={result?.warnings}
-                        success={result?.success}
-                        cognitiveComplexity={result?.cognitiveComplexity}
-                        cyclomaticComplexity={result?.cyclomaticComplexity}
-                      />
+                      <LogsTab explanations={result?.explanations} errors={result?.errors} warnings={result?.warnings} success={result?.success} cognitiveComplexity={result?.cognitiveComplexity} cyclomaticComplexity={result?.cyclomaticComplexity} />
                     </div>
                   )}
                 </div>
@@ -771,22 +661,12 @@ int main() {
 
           <div className="right-column">
             <div className="section-title cfg-title">Control Flow Graph</div>
-            {result?.success && cfg && (
-              <SafetyBanner total={totalNodes} unsafe={unsafeCount} />
-            )}
+            {result?.success && cfg && <SafetyBanner total={totalNodes} unsafe={unsafeCount} />}
             <div className="visualizer-container">
               {result?.success && cfg ? (
-                <FlowGraph
-                  key={analysisRunKey}
-                  cfg={cfg}
-                  safetyChecks={safetyChecks}
-                  onNodeClick={handleNodeClick}
-                  isDrawerOpen={isTokenDrawerOpen}
-                />
+                <FlowGraph key={analysisRunKey} cfg={cfg} safetyChecks={safetyChecks} onNodeClick={handleNodeClick} isDrawerOpen={isTokenDrawerOpen} />
               ) : (
-                <div className="placeholder-msg">
-                  Run ANALYZE CODE to generate<br />the Control Flow Graph
-                </div>
+                <div className="placeholder-msg">Run ANALYZE CODE to generate<br />the Control Flow Graph</div>
               )}
             </div>
           </div>

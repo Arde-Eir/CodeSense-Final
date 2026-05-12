@@ -30,15 +30,14 @@ router.post('/analyze', (req, res) => {
     return res.status(400).json({
       success: false,
       errors: [{ type: 'semantic', severity: 'error', message: 'No source code provided.', line: 0 }],
+      warnings: [],
       explanations: ['❌ **Status:** No source code received.'],
-      tokens: [], ast: null, safetyChecks: [], cfg: { nodes: [], edges: [] },
-      cognitiveComplexity: 0, symbolicExecution: [],
-      gamification: { xpEarned: 0, qualityBonus: 0 },
+      tokens: [], ast: null, symbolTable: {}, safetyChecks: [], cfg: { nodes: [], edges: [] },
+      cognitiveComplexity: 0, cyclomaticComplexity: { score: 0, rating: 'low', interpretation: '' },
+      symbolicExecution: [], logs: [],
+      gamification: { xpEarned: 0, qualityBonus: 0, levelTitle: 'Squire' },
     });
   }
-
-  console.log('\n--- [DEBUG] New Analysis Request ---');
-  console.log('Source Snippet:', sourceCode.substring(0, 60).replace(/\n/g, ' '));
 
   // ─── PHASE 0: Unsupported Feature Detection ───────────────────────────────
   const UNSUPPORTED_PATTERNS: Array<{ re: RegExp; msg: string }> = [
@@ -80,12 +79,16 @@ router.post('/analyze', (req, res) => {
       errors: lexResult.errors.map(err => ({
         ...err, type: 'lexical', severity: 'error',
       })),
+      warnings: [],
       ast: null,
+      symbolTable: {},
       safetyChecks: [],
       cfg: { nodes: [], edges: [] },
       cognitiveComplexity: 0,
-      gamification: { xpEarned: 0, qualityBonus: 0 },
+      cyclomaticComplexity: { score: 0, rating: 'low', interpretation: '' },
       symbolicExecution: [],
+      logs: [],
+      gamification: { xpEarned: 0, qualityBonus: 0, levelTitle: 'Squire' },
       explanations: [
         '❌ **Status:** Lexical Analysis Failed.',
         ...lexResult.errors.map(e => `🔤 **Lexical Error (L${e.line}:C${e.column}):** ${e.message}`),
@@ -116,11 +119,15 @@ router.post('/analyze', (req, res) => {
         },
         ...unsupportedWarnings,
       ],
+      warnings: [],
+      symbolTable: {},
       safetyChecks: [],
       cfg: { nodes: [], edges: [] },
       cognitiveComplexity: 0,
-      gamification: { xpEarned: 0, qualityBonus: 0 },
+      cyclomaticComplexity: { score: 0, rating: 'low', interpretation: '' },
       symbolicExecution: [],
+      logs: [],
+      gamification: { xpEarned: 0, qualityBonus: 0, levelTitle: 'Squire' },
       explanations: [
         `❌ **Status:** Syntax Error Detected`,
         `🔧 **Line ${syntaxErr.location?.start.line || '?'}:** ${syntaxErr.message}`,
@@ -206,12 +213,15 @@ router.post('/analyze', (req, res) => {
         tokens: lexResult.tokens,
         ast,
         errors: depErrors,
+        warnings: [],
+        symbolTable: {},
         safetyChecks: [],
         cfg: { nodes: [], edges: [] },
         cognitiveComplexity: 0,
         cyclomaticComplexity: { score: 0, rating: 'low', interpretation: '' },
-        gamification: { xpEarned: 0, qualityBonus: 0 },
         symbolicExecution: [],
+        logs: [],
+        gamification: { xpEarned: 0, qualityBonus: 0, levelTitle: 'Squire' },
         explanations: ['❌ **Status:** Strict Dependency Check Failed.', ...depErrors.map(e => `🔗 ${e.message}`)],
       });
     }
@@ -260,8 +270,10 @@ router.post('/analyze', (req, res) => {
         safetyChecks: [],
         cfg: partialCfg,
         cognitiveComplexity: 0,
-        gamification: { xpEarned: 0, qualityBonus: 0 },
+        cyclomaticComplexity: { score: 0, rating: 'low', interpretation: '' },
         symbolicExecution: [],
+        logs: [],
+        gamification: { xpEarned: 0, qualityBonus: 0, levelTitle: 'Squire' },
         explanations: [
           '❌ **Status:** Semantic Analysis Failed',
           ...semanticErrors.map(e => `🚨 **Error (L${e.line}):** ${e.message}`),
@@ -325,15 +337,16 @@ router.post('/analyze', (req, res) => {
     // ─── PHASE 10: Gamification ──────────────────────────────────────────────
      const gameEngine = new GameEngine();
      const rawLevel = req.body.currentLevel;
-      const currentLevel: 1 | 2 | 3 | 4 =
+      const currentLevel: 1 | 2 | 3 | 4 | 5 =
     rawLevel === 2 ? 2
     : rawLevel === 3 ? 3
     : rawLevel === 4 ? 4
+    : rawLevel === 5 ? 5
     : 1;  // caller sends actual user level
     const reward = gameEngine.calculateReward(
       {
         cognitiveComplexity: complexityScore,
-        cyclomaticComplexity: cyclomaticResult.score,
+        cyclomaticComplexity: cyclomaticResult,
         errors: [],
         safetyChecks,
       } as any,
@@ -385,12 +398,15 @@ router.post('/analyze', (req, res) => {
         message: `Internal Engine Error: ${criticalErr.message}`,
         line: 0,
       }],
+      warnings: [],
+      symbolTable: {},
       safetyChecks: [],
       cfg: { nodes: [], edges: [] },
       cognitiveComplexity: 0,
-      gamification: { xpEarned: 0, qualityBonus: 0 },
+      cyclomaticComplexity: { score: 0, rating: 'low', interpretation: '' },
       symbolicExecution: [],
-      // Explicit Status ensures the LogTab updates to FAIL mode
+      logs: [],
+      gamification: { xpEarned: 0, qualityBonus: 0, levelTitle: 'Squire' },
       explanations: [
         '❌ **Status:** The analysis engine encountered an unexpected error.',
         `🚨 **Critical Error:** ${criticalErr.message}`

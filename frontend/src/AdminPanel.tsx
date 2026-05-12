@@ -8,6 +8,30 @@ import type { ExplorerProfile } from './types'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
+/** Subset of the quests table returned by fetchExistingQuests */
+interface ExistingQuest {
+  id: string
+  title: string
+  level: 1 | 2 | 3 | null
+  difficulty: string | null
+  basexp: number
+  requiredxp?: number
+  sortorder: number
+  isactive: boolean
+  phase: string | null
+  question_type: string | null
+  description: string | null
+  tutorial_title: string | null
+  tutorial_body: string | null
+  theory_sections: unknown[] | null
+  objectives: string[] | null
+  mc_questions: unknown[] | null
+  game_items: unknown[] | null
+  drop_zones: unknown[] | null
+  ordering_items: unknown[] | null
+  code_fill_items: unknown[] | null
+}
+
 interface AdminUser {
   id: string
   playername: string
@@ -49,7 +73,7 @@ type Tab = 'dashboard' | 'users' | 'audit' | 'maintenance' | 'announcements' | '
 
 // ─── Quest form types ─────────────────────────────────────────────────────────
 
-interface QFormTheory    { id: string; type: string; heading: string; body: string; code: string; language: string }
+interface QFormTheory    { id: string; type: string; heading: string; body: string; code: string; language: string; table_headers: string[]; table_rows: string[][] }
 interface QFormMCQ       { id: string; question: string; options: [string,string,string,string]; correct: number; explanation: string }
 interface QFormDragItem  { id: string; label: string; color: string }
 interface QFormDropZone  { id: string; label: string; accepted: string }
@@ -57,8 +81,6 @@ interface QFormCodeFill  { id: string; code_lines: string; language: string; ans
 
 // Multi-problem types
 interface QFormDragProblem  { id: string; question: string; items: QFormDragItem[]; drop_zones: QFormDropZone[] }
-interface QFormBalloonItem  { id: string; label: string; color: string; is_correct: boolean }
-interface QFormBalloonProblem { id: string; question: string; items: QFormBalloonItem[] }
 interface QFormOrderItem    { id: string; label: string; description: string }
 interface QFormOrderProblem { id: string; question: string; items: QFormOrderItem[] }
 
@@ -70,8 +92,8 @@ interface QuestFormState {
   theory_sections: QFormTheory[]; objectives: string[]
   act_mc: boolean; act_drag: boolean; act_balloon: boolean; act_ordering: boolean; act_codefill: boolean
   mc_questions: QFormMCQ[]
+  balloon_questions: QFormMCQ[]
   drag_problems: QFormDragProblem[]
-  balloon_problems: QFormBalloonProblem[]
   ordering_problems: QFormOrderProblem[]
   code_fill_items: QFormCodeFill[]
   // legacy flat fields kept for DB compat — built from problems on save
@@ -80,9 +102,6 @@ interface QuestFormState {
 
 const newDragProblem = (): QFormDragProblem => ({
   id: `dp_${Date.now()}`, question: '', items: [], drop_zones: [],
-})
-const newBalloonProblem = (): QFormBalloonProblem => ({
-  id: `bp_${Date.now()}`, question: '', items: [],
 })
 const newOrderProblem = (): QFormOrderProblem => ({
   id: `op_${Date.now()}`, question: '', items: [],
@@ -95,8 +114,8 @@ const defaultQF = (): QuestFormState => ({
   theory_sections: [], objectives: [''],
   act_mc: true, act_drag: false, act_balloon: false, act_ordering: false, act_codefill: false,
   mc_questions: [{ id: '1', question: '', options: ['', '', '', ''], correct: 0, explanation: '' }],
+  balloon_questions: [{ id: 'b1', question: '', options: ['', '', '', ''], correct: 0, explanation: '' }],
   drag_problems: [newDragProblem()],
-  balloon_problems: [newBalloonProblem()],
   ordering_problems: [newOrderProblem()],
   code_fill_items: [],
   game_items: [], drop_zones: [],
@@ -147,7 +166,7 @@ export const AdminPanel: React.FC = () => {
 
   // Quest generator
   const [questForm,      setQuestForm]      = useState<QuestFormState>(defaultQF)
-  const [existingQuests, setExistingQuests] = useState<any[]>([])
+  const [existingQuests, setExistingQuests] = useState<ExistingQuest[]>([])
   const [replaceTarget,  setReplaceTarget]  = useState('')
   const [questSaving,    setQuestSaving]    = useState(false)
   const [questSubTab,    setQuestSubTab]    = useState<'create' | 'manage'>('create')
@@ -493,10 +512,10 @@ export const AdminPanel: React.FC = () => {
     if (!user || !questForm.title.trim()) { showToast('Title is required', 'error'); return }
     const phase = questForm.level === 1 ? 'beginner' : questForm.level === 2 ? 'intermediate' : 'advanced'
     const qTypeMap: Record<string, string> = {
-      act_mc: 'multiple_choice', act_drag: 'drag_drop', act_balloon: 'pop_balloon',
+      act_drag: 'drag_drop', act_balloon: 'pop_balloon', act_mc: 'multiple_choice',
       act_ordering: 'ordering', act_codefill: 'code_fill',
     }
-    const firstActive = (['act_mc', 'act_drag', 'act_balloon', 'act_ordering', 'act_codefill'] as const)
+    const firstActive = (['act_drag', 'act_balloon', 'act_mc', 'act_ordering', 'act_codefill'] as const)
       .find(k => questForm[k])
     const question_type = firstActive ? qTypeMap[firstActive] : null
 
@@ -507,29 +526,29 @@ export const AdminPanel: React.FC = () => {
         body: s.body || undefined,
         code: s.code || undefined,
         language: s.language || undefined,
+        table_headers: s.table_headers?.length ? s.table_headers : undefined,
+        table_rows: s.table_rows?.length ? s.table_rows : undefined,
       }))
-      .filter(s => s.body || s.code)
+      .filter(s => s.body || s.code || (s.type === 'table' && s.table_headers?.length))
 
-    const mc_questions = questForm.act_mc && questForm.mc_questions.length > 0
-      ? questForm.mc_questions.map((q, i) => ({
+    const mc_questions_arr = [
+      ...(questForm.act_mc ? questForm.mc_questions.map((q, i) => ({
           id: `mc_${i + 1}`, question: q.question, options: q.options,
-          correct: q.correct, explanation: q.explanation,
-        }))
-      : null
+          correct: q.correct, explanation: q.explanation, mode: 'mc' as const,
+        })) : []),
+      ...(questForm.act_balloon ? questForm.balloon_questions.map((q, i) => ({
+          id: `bp_${i + 1}`, question: q.question, options: q.options,
+          correct: q.correct, explanation: q.explanation, mode: 'balloon' as const,
+        })) : []),
+    ]
+    const mc_questions = mc_questions_arr.length > 0 ? mc_questions_arr : null
 
-    // Drag & Drop: flatten problems → game_items carries problem_id+question; drop_zones same
+    // Drag & Drop only (balloon no longer uses game_items)
     const game_items = (() => {
       if (questForm.act_drag && questForm.drag_problems.length > 0) {
         const all: any[] = []
         questForm.drag_problems.forEach(p =>
           p.items.forEach(g => all.push({ id: g.id, label: g.label, color: g.color, problem_id: p.id, question: p.question }))
-        )
-        return all.length > 0 ? all : null
-      }
-      if (questForm.act_balloon && questForm.balloon_problems.length > 0) {
-        const all: any[] = []
-        questForm.balloon_problems.forEach(p =>
-          p.items.forEach(g => all.push({ id: g.id, label: g.label, color: g.color, is_correct: g.is_correct, problem_id: p.id, question: p.question }))
         )
         return all.length > 0 ? all : null
       }
@@ -606,11 +625,22 @@ export const AdminPanel: React.FC = () => {
     setQuestSaving(false)
   }
 
+  // q is typed as any because the function body uses internal casts against
+  // the DB shape, which diverges from the ExistingQuest interface in places.
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const loadQuestForEdit = (q: any) => {
-    // Use question_type as the authoritative signal; fall back to structural heuristic for
-    // legacy rows that pre-date the question_type column.
-    const isDrag    = q.question_type ? q.question_type === 'drag_drop'    : !!(q.game_items?.length && q.drop_zones?.length)
-    const isBalloon = q.question_type ? q.question_type === 'pop_balloon'  : !!(q.game_items?.length && !q.drop_zones?.length)
+    const isDrag = q.question_type === 'drag_drop' || !!(q.game_items?.length && q.drop_zones?.length)
+
+    // Split mc_questions into balloon and MC buckets.
+    // New rows have a `mode` field; legacy rows without mode use question_type.
+    const allMCQs: any[] = q.mc_questions ?? []
+    const hasMode = allMCQs.some(m => m.mode === 'balloon' || m.mode === 'mc')
+    const balloonQsDB = hasMode
+      ? allMCQs.filter(m => m.mode === 'balloon')
+      : q.question_type === 'pop_balloon' ? allMCQs : []
+    const mcQsDB = hasMode
+      ? allMCQs.filter(m => m.mode !== 'balloon')
+      : q.question_type === 'pop_balloon' ? [] : allMCQs
 
     // Reconstruct drag problems from flat game_items + drop_zones (grouped by problem_id)
     const dragProblems: QFormDragProblem[] = (() => {
@@ -627,18 +657,6 @@ export const AdminPanel: React.FC = () => {
         problemMap.get(pid)!.drop_zones.push({ id: z.id ?? String(Math.random()), label: z.label ?? '', accepted: z.accepted ?? '' })
       })
       return problemMap.size > 0 ? Array.from(problemMap.values()) : [newDragProblem()]
-    })()
-
-    // Reconstruct balloon problems from flat game_items (is_correct field, grouped by problem_id)
-    const balloonProblems: QFormBalloonProblem[] = (() => {
-      if (!isBalloon || !q.game_items?.length) return [newBalloonProblem()]
-      const problemMap = new Map<string, QFormBalloonProblem>()
-      ;(q.game_items as any[]).forEach(g => {
-        const pid = g.problem_id ?? 'default'
-        if (!problemMap.has(pid)) problemMap.set(pid, { id: pid, question: g.question ?? '', items: [] })
-        problemMap.get(pid)!.items.push({ id: g.id ?? String(Math.random()), label: g.label ?? '', color: g.color ?? '#3fb950', is_correct: g.is_correct ?? false })
-      })
-      return problemMap.size > 0 ? Array.from(problemMap.values()) : [newBalloonProblem()]
     })()
 
     // Reconstruct ordering problems from flat ordering_items (grouped by problem_id)
@@ -664,19 +682,23 @@ export const AdminPanel: React.FC = () => {
       theory_sections: (q.theory_sections ?? []).map((s: any, i: number) => ({
         id: String(i), type: s.type ?? 'default', heading: s.heading ?? '',
         body: s.body ?? '', code: s.code ?? '', language: s.language ?? 'c',
+        table_headers: s.table_headers ?? [], table_rows: s.table_rows ?? [[]],
       })),
       objectives: q.objectives?.length ? q.objectives : [''],
-      act_mc:       q.question_type === 'multiple_choice' || !!q.mc_questions?.length,
+      act_mc:       mcQsDB.length > 0,
       act_drag:     isDrag,
-      act_balloon:  isBalloon,
-      act_ordering: q.question_type === 'ordering'        || !!q.ordering_items?.length,
-      act_codefill: q.question_type === 'code_fill'       || !!q.code_fill_items?.length,
-      mc_questions: (q.mc_questions ?? []).map((m: any) => ({
+      act_balloon:  balloonQsDB.length > 0,
+      act_ordering: !!q.ordering_items?.length,
+      act_codefill: !!q.code_fill_items?.length,
+      mc_questions: mcQsDB.length > 0 ? mcQsDB.map((m: any) => ({
         id: m.id ?? String(Math.random()), question: m.question ?? '',
         options: m.options ?? ['', '', '', ''], correct: m.correct ?? 0, explanation: m.explanation ?? '',
-      })),
+      })) : [{ id: '1', question: '', options: ['', '', '', ''], correct: 0, explanation: '' }],
+      balloon_questions: balloonQsDB.length > 0 ? balloonQsDB.map((m: any) => ({
+        id: m.id ?? String(Math.random()), question: m.question ?? '',
+        options: m.options ?? ['', '', '', ''], correct: m.correct ?? 0, explanation: m.explanation ?? '',
+      })) : [{ id: 'b1', question: '', options: ['', '', '', ''], correct: 0, explanation: '' }],
       drag_problems: dragProblems,
-      balloon_problems: balloonProblems,
       ordering_problems: orderingProblems,
       code_fill_items: (q.code_fill_items ?? []).map((c: any) => ({
         id: c.id ?? String(Math.random()),
@@ -1270,7 +1292,7 @@ export const AdminPanel: React.FC = () => {
                             <div className="d-flex justify-content-between align-items-center mb-1">
                               <label className="form-label mb-0" style={{ fontSize: '13px' }}>Theory Sections</label>
                               <button className="btn btn-xs btn-outline-primary" onClick={() => qSet({
-                                theory_sections: [...questForm.theory_sections, { id: Date.now().toString(), type: 'default', heading: '', body: '', code: '', language: 'c' }]
+                                theory_sections: [...questForm.theory_sections, { id: Date.now().toString(), type: 'default', heading: '', body: '', code: '', language: 'c', table_headers: [], table_rows: [[]] }]
                               })}>+ Add Section</button>
                             </div>
                             {questForm.theory_sections.map((sec, i) => (
@@ -1284,6 +1306,7 @@ export const AdminPanel: React.FC = () => {
                                     <option value="did_you_know">Did You Know</option>
                                     <option value="mistake">Common Mistake</option>
                                     <option value="summary">Summary</option>
+                                    <option value="table">Table</option>
                                   </select>
                                   <button className="btn btn-xs btn-ghost-danger" onClick={() => qSet({ theory_sections: questForm.theory_sections.filter((_, j) => j !== i) })}>✕</button>
                                 </div>
@@ -1296,6 +1319,33 @@ export const AdminPanel: React.FC = () => {
                                     <input className="form-control form-control-sm" placeholder="Language (c, cpp, python…)" value={sec.language}
                                       onChange={e => { const s = [...questForm.theory_sections]; s[i] = { ...s[i], language: e.target.value }; qSet({ theory_sections: s }) }} />
                                   </>
+                                ) : sec.type === 'table' ? (
+                                  <div>
+                                    {/* Column headers */}
+                                    <div className="d-flex align-items-center gap-1 mb-1" style={{ flexWrap: 'wrap' }}>
+                                      {sec.table_headers.map((h, ci) => (
+                                        <div key={ci} className="d-flex align-items-center gap-1">
+                                          <input className="form-control form-control-sm" style={{ width: '100px' }} placeholder={`Col ${ci + 1}`} value={h}
+                                            onChange={e => { const s = [...questForm.theory_sections]; const hds = [...s[i].table_headers]; hds[ci] = e.target.value; s[i] = { ...s[i], table_headers: hds }; qSet({ theory_sections: s }) }} />
+                                          <button className="btn btn-xs btn-ghost-danger" onClick={() => { const s = [...questForm.theory_sections]; const hds = s[i].table_headers.filter((_, j) => j !== ci); const rws = s[i].table_rows.map(r => r.filter((_, j) => j !== ci)); s[i] = { ...s[i], table_headers: hds, table_rows: rws }; qSet({ theory_sections: s }) }}>✕</button>
+                                        </div>
+                                      ))}
+                                      <button className="btn btn-xs btn-outline-secondary" onClick={() => { const s = [...questForm.theory_sections]; s[i] = { ...s[i], table_headers: [...s[i].table_headers, ''], table_rows: s[i].table_rows.map(r => [...r, '']) }; qSet({ theory_sections: s }) }}>+ Col</button>
+                                    </div>
+                                    {/* Data rows */}
+                                    {sec.table_rows.map((row, ri) => (
+                                      <div key={ri} className="d-flex align-items-center gap-1 mb-1" style={{ flexWrap: 'wrap' }}>
+                                        {row.map((cell, ci) => (
+                                          <input key={ci} className="form-control form-control-sm" style={{ width: '100px' }} placeholder={sec.table_headers[ci] ?? `Col ${ci + 1}`} value={cell}
+                                            onChange={e => { const s = [...questForm.theory_sections]; const rws = s[i].table_rows.map((r, j) => j === ri ? r.map((c, k) => k === ci ? e.target.value : c) : r); s[i] = { ...s[i], table_rows: rws }; qSet({ theory_sections: s }) }} />
+                                        ))}
+                                        <button className="btn btn-xs btn-ghost-danger" onClick={() => { const s = [...questForm.theory_sections]; s[i] = { ...s[i], table_rows: s[i].table_rows.filter((_, j) => j !== ri) }; qSet({ theory_sections: s }) }}>✕</button>
+                                      </div>
+                                    ))}
+                                    <button className="btn btn-xs btn-outline-secondary" onClick={() => { const s = [...questForm.theory_sections]; s[i] = { ...s[i], table_rows: [...s[i].table_rows, s[i].table_headers.map(() => '')] }; qSet({ theory_sections: s }) }}>+ Row</button>
+                                    <textarea className="form-control form-control-sm mt-1" rows={1} placeholder="Caption (optional)" value={sec.body}
+                                      onChange={e => { const s = [...questForm.theory_sections]; s[i] = { ...s[i], body: e.target.value }; qSet({ theory_sections: s }) }} />
+                                  </div>
                                 ) : (
                                   <textarea className="form-control form-control-sm" rows={2} placeholder="Section content"
                                     value={sec.body} onChange={e => { const s = [...questForm.theory_sections]; s[i] = { ...s[i], body: e.target.value }; qSet({ theory_sections: s }) }} />
@@ -1471,50 +1521,38 @@ export const AdminPanel: React.FC = () => {
                         {questForm.act_balloon && (
                           <div className="card mb-3">
                             <div className="card-header d-flex justify-content-between align-items-center">
-                              <h3 className="card-title mb-0">🎈 Balloon Pop Problems</h3>
-                              <button className="btn btn-xs btn-outline-primary" onClick={() => qSet({ balloon_problems: [...questForm.balloon_problems, newBalloonProblem()] })}>+ Add Problem</button>
+                              <h3 className="card-title mb-0">🎈 Balloon Pop Questions</h3>
+                              <button className="btn btn-xs btn-outline-primary" onClick={() => qSet({
+                                balloon_questions: [...questForm.balloon_questions, { id: Date.now().toString(), question: '', options: ['', '', '', ''], correct: 0, explanation: '' }]
+                              })}>+ Add Q</button>
                             </div>
-                            <div className="card-body" style={{ maxHeight: '500px', overflowY: 'auto' }}>
-                              <div className="text-muted mb-2" style={{ fontSize: '11px' }}>Each problem has a question. Mark balloons ✓ correct (should be popped) or ✗ incorrect (should not).</div>
-                              {questForm.balloon_problems.map((prob, pi) => (
-                                <div key={prob.id} className="border rounded p-2 mb-3" style={{ background: '#f8fafc' }}>
-                                  <div className="d-flex justify-content-between align-items-center mb-2">
-                                    <strong style={{ fontSize: '12px', color: '#374151' }}>Problem {pi + 1}</strong>
-                                    {questForm.balloon_problems.length > 1 && (
-                                      <button className="btn btn-xs btn-ghost-danger" onClick={() => qSet({ balloon_problems: questForm.balloon_problems.filter((_, j) => j !== pi) })}>✕ Remove</button>
-                                    )}
+                            <div className="card-body" style={{ maxHeight: '380px', overflowY: 'auto' }}>
+                              <div className="text-muted mb-2" style={{ fontSize: '11px' }}>4 options per question — select the correct one (radio). Keep option text short (under 25 chars) so it fits on balloons.</div>
+                              {questForm.balloon_questions.map((bq, qi) => (
+                                <div key={bq.id} className="border rounded p-2 mb-2" style={{ fontSize: '12px' }}>
+                                  <div className="d-flex justify-content-between mb-1">
+                                    <strong style={{ fontSize: '11px', color: '#6b7280' }}>Q{qi + 1}</strong>
+                                    <button className="btn btn-xs btn-ghost-danger" onClick={() => qSet({ balloon_questions: questForm.balloon_questions.filter((_, j) => j !== qi) })}>✕</button>
                                   </div>
-                                  <div className="mb-2">
-                                    <input className="form-control form-control-sm" placeholder="Question (e.g. Pop all valid C variable names)" value={prob.question}
-                                      onChange={e => { const bp = [...questForm.balloon_problems]; bp[pi] = { ...bp[pi], question: e.target.value }; qSet({ balloon_problems: bp }) }} />
-                                  </div>
-                                  <div className="d-flex justify-content-between align-items-center mb-1">
-                                    <label className="form-label mb-0" style={{ fontSize: '11px', fontWeight: 600 }}>Balloons</label>
-                                    <button className="btn btn-xs btn-outline-secondary" onClick={() => {
-                                      const bp = [...questForm.balloon_problems]
-                                      bp[pi] = { ...bp[pi], items: [...bp[pi].items, { id: `b_${Date.now()}`, label: '', color: '#3fb950', is_correct: true }] }
-                                      qSet({ balloon_problems: bp })
-                                    }}>+ Add Balloon</button>
-                                  </div>
-                                  {prob.items.map((item, ii) => (
-                                    <div key={item.id} className="d-flex gap-1 mb-1 align-items-center">
-                                      <input type="color" value={item.color} style={{ width: '28px', padding: '1px 2px', border: '1px solid #ddd', borderRadius: '4px', cursor: 'pointer' }}
-                                        onChange={e => { const bp = [...questForm.balloon_problems]; bp[pi].items[ii] = { ...bp[pi].items[ii], color: e.target.value }; qSet({ balloon_problems: bp }) }} />
-                                      <input className="form-control form-control-sm" placeholder={`Balloon ${ii + 1} label`} value={item.label}
-                                        onChange={e => { const bp = [...questForm.balloon_problems]; bp[pi].items[ii] = { ...bp[pi].items[ii], label: e.target.value }; qSet({ balloon_problems: bp }) }} />
-                                      <button
-                                        title={item.is_correct ? 'Correct (pop this)' : 'Incorrect (do not pop)'}
-                                        className={`btn btn-xs ${item.is_correct ? 'btn-success' : 'btn-outline-danger'}`}
-                                        style={{ minWidth: '28px', fontSize: '11px' }}
-                                        onClick={() => { const bp = [...questForm.balloon_problems]; bp[pi].items[ii] = { ...bp[pi].items[ii], is_correct: !bp[pi].items[ii].is_correct }; qSet({ balloon_problems: bp }) }}>
-                                        {item.is_correct ? '✓' : '✗'}
-                                      </button>
-                                      <button className="btn btn-xs btn-ghost-danger" onClick={() => { const bp = [...questForm.balloon_problems]; bp[pi].items = bp[pi].items.filter((_, j) => j !== ii); qSet({ balloon_problems: bp }) }}>✕</button>
+                                  <textarea className="form-control form-control-sm mb-1" rows={2} placeholder="Question text (e.g. Pop the correct data type for a decimal number)" value={bq.question}
+                                    onChange={e => { const qs = [...questForm.balloon_questions]; qs[qi] = { ...qs[qi], question: e.target.value }; qSet({ balloon_questions: qs }) }} />
+                                  {bq.options.map((opt, oi) => (
+                                    <div key={oi} className="d-flex align-items-center gap-1 mb-1">
+                                      <input type="radio" name={`balloon_correct_${bq.id}`} checked={bq.correct === oi} title="Mark as correct"
+                                        onChange={() => { const qs = [...questForm.balloon_questions]; qs[qi] = { ...qs[qi], correct: oi }; qSet({ balloon_questions: qs }) }} />
+                                      <input className="form-control form-control-sm" placeholder={`Option ${oi + 1} (keep short!)`} value={opt}
+                                        onChange={e => {
+                                          const qs = [...questForm.balloon_questions]
+                                          const opts = [...qs[qi].options] as [string,string,string,string]
+                                          opts[oi] = e.target.value; qs[qi] = { ...qs[qi], options: opts }; qSet({ balloon_questions: qs })
+                                        }} />
                                     </div>
                                   ))}
-                                  {prob.items.length === 0 && <div className="text-muted" style={{ fontSize: '11px' }}>No balloons yet</div>}
+                                  <input className="form-control form-control-sm" placeholder="Explanation (shown after pop)" value={bq.explanation}
+                                    onChange={e => { const qs = [...questForm.balloon_questions]; qs[qi] = { ...qs[qi], explanation: e.target.value }; qSet({ balloon_questions: qs }) }} />
                                 </div>
                               ))}
+                              {questForm.balloon_questions.length === 0 && <div className="text-muted" style={{ fontSize: '12px' }}>No questions yet</div>}
                             </div>
                           </div>
                         )}

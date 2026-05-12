@@ -145,6 +145,9 @@ export const LandingPage: React.FC = () => {
           letter-spacing: 0.6px;
           font-weight: 600;
         }
+        @media (max-width: 1024px) and (min-width: 769px) {
+          .feature-grid { grid-template-columns: repeat(2, 1fr); }
+        }
         @media (max-width: 768px) {
           .landing-root { padding: 40px 16px; }
           .feature-grid { grid-template-columns: 1fr; gap: 12px; margin-bottom: 28px; }

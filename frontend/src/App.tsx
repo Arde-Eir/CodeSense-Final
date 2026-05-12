@@ -156,7 +156,6 @@ export const App: React.FC = () => {
 
           {/* Admin Route — only accessible to users with is_admin = true */}
           <Route path="/admin" element={<AdminRoute><AdminPanel /></AdminRoute>} />
-          <Route path="/admin/*" element={<AdminRoute><AdminPanel /></AdminRoute>} />
 
           {/* Redirects */}
           <Route path="/settings" element={<Navigate to="/home" replace />} />

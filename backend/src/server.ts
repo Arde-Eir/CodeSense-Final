@@ -57,9 +57,11 @@ app.use(bodyParser.json({ limit: '1mb' }));
  */
 app.use((req: Request, _res: Response, next: NextFunction) => {
     if (req.path === '/api/analyze') {
-        const snippet = req.body.sourceCode?.substring(0, 40).replace(/\n/g, ' ');
+        const rawSrc = req.body?.sourceCode;
+        const src = typeof rawSrc === 'string' ? rawSrc : '';
+        const snippet = src.substring(0, 40).replace(/\n/g, ' ');
         console.log(`\n--- [DEBUG] New Analysis Request ---`);
-        console.log(`Source Snippet: ${snippet}${req.body.sourceCode?.length > 40 ? '...' : ''}`);
+        console.log(`Source Snippet: ${snippet}${src.length > 40 ? '...' : ''}`);
     }
     next();
 });

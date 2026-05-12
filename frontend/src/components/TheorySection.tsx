@@ -1,6 +1,6 @@
 // frontend/src/components/TheorySection.tsx
 // Renders one theory_sections[] entry. Handles every documented `type`:
-//   default · code · did_you_know · mistake · tip · diagram · summary
+//   default · code · did_you_know · mistake · tip · diagram · summary · table
 // Each type has its own visual signature so the lesson reads like a
 // well-organized study guide rather than a wall of text.
 
@@ -115,6 +115,44 @@ export const TheorySectionBlock: React.FC<{ sec: TheorySection }> = ({ sec }) =>
       )}
     </div>
   );
+
+  // ── Table ────────────────────────────────────────────────────────────────
+  if (type === 'table') {
+    const headers = sec.table_headers ?? [];
+    const rows    = sec.table_rows    ?? [];
+    return (
+      <div style={{ marginBottom: 16, borderRadius: 10, overflow: 'hidden', border: '1px solid #30363d' }}>
+        {sec.heading && (
+          <div style={{ background: '#161b22', padding: '10px 14px', fontSize: 13, fontWeight: 700, color: '#e6edf3', fontFamily: 'Inter,sans-serif', borderBottom: '1px solid #30363d' }}>
+            {sec.heading}
+          </div>
+        )}
+        <div style={{ overflowX: 'auto' }}>
+          <table style={{ width: '100%', borderCollapse: 'collapse', fontFamily: 'Inter,sans-serif' }}>
+            {headers.length > 0 && (
+              <thead>
+                <tr style={{ background: '#161b22' }}>
+                  {headers.map((h, i) => (
+                    <th key={i} style={{ padding: '9px 14px', fontSize: 11, fontWeight: 700, color: '#58a6ff', textTransform: 'uppercase', letterSpacing: '0.8px', textAlign: 'left', borderBottom: '1px solid #30363d', whiteSpace: 'nowrap' }}>{h}</th>
+                  ))}
+                </tr>
+              </thead>
+            )}
+            <tbody>
+              {rows.map((row, ri) => (
+                <tr key={ri} style={{ background: ri % 2 === 0 ? 'rgba(255,255,255,0.02)' : 'transparent' }}>
+                  {row.map((cell, ci) => (
+                    <td key={ci} style={{ padding: '8px 14px', fontSize: 13, color: ci === 0 ? '#c9d1d9' : '#8b949e', borderBottom: '1px solid rgba(255,255,255,0.04)', fontFamily: ci === 0 ? "'JetBrains Mono',monospace" : 'Inter,sans-serif', lineHeight: 1.6 }}>{cell}</td>
+                  ))}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+        {sec.body && <div style={{ padding: '10px 14px', fontSize: 12, color: '#8b949e', fontFamily: 'Inter,sans-serif', borderTop: '1px solid #30363d', lineHeight: 1.6 }}>{sec.body}</div>}
+      </div>
+    );
+  }
 
   // ── Default — heading + body + bullets + items (term/definition rows) ────
   return (

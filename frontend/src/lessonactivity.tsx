@@ -94,9 +94,14 @@ function computeAvailableTabs(quest: Quest | null): ActivityTab[] {
   if (quest.code_fill_items?.length)                        all.push('code_fill');
   if (quest.ordering_items?.length)                         all.push('ordering');
   if (quest.mc_questions?.length) {
-    // Only add the mc_questions-backed tab that matches question_type.
-    // Never add both — that would require completing the same data twice.
-    all.push(isBalloon ? 'balloon' : 'mc');
+    const hasMode = quest.mc_questions.some(q => q.mode === 'balloon' || q.mode === 'mc');
+    if (hasMode) {
+      if (quest.mc_questions.some(q => q.mode === 'balloon')) all.push('balloon');
+      if (quest.mc_questions.some(q => q.mode !== 'balloon'))  all.push('mc');
+    } else {
+      // Legacy rows without a mode field: route by question_type.
+      all.push(isBalloon ? 'balloon' : 'mc');
+    }
   }
 
   if (all.length === 0) return [];
@@ -432,6 +437,8 @@ export const LessonActivity: React.FC = () => {
   const everCompletedRef       = useRef<ActivityTab[]>([]);  // tabs completed in any prior session
   const cumulativeXPRef        = useRef(0);
   const hintsUsedRef           = useRef(0);
+  const levelXpCapRef          = useRef(0);  // sum of basexp for all quests in this phase
+  const levelXpEarnedRef       = useRef(0);  // total xp_gained for this user in this phase
   const xpToastTimer           = useRef<ReturnType<typeof setTimeout> | null>(null);
   const hintToastTimer         = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -470,6 +477,8 @@ export const LessonActivity: React.FC = () => {
     everCompletedRef.current       = [];
     cumulativeXPRef.current        = 0;
     hintsUsedRef.current           = 0;
+    levelXpCapRef.current          = 0;
+    levelXpEarnedRef.current       = 0;
     setElapsed(0);
     gameStartedAtRef.current       = null;
 
@@ -504,6 +513,23 @@ export const LessonActivity: React.FC = () => {
       } catch (e) {
         console.warn('[LessonActivity] next-quest lookup failed', e);
         setNextQuestId(null);
+      }
+
+      // Fetch level XP cap (sum of basexp for all active phase quests) and how
+      // much XP this user has already earned in the phase, so retakes beyond the
+      // cap award 0 XP.
+      if (quest.phase) {
+        try {
+          const [phQRes, phPRes] = await Promise.all([
+            withTimeout(supabase.from('quests').select('id,basexp').eq('phase', quest.phase).eq('mode', 'campaign').eq('isactive', true)),
+            withTimeout(supabase.from('mission_progress').select('questid,xp_gained').eq('userid', user.id)),
+          ]);
+          const phaseIds = new Set((phQRes.data ?? []).map((r: any) => r.id));
+          levelXpCapRef.current    = (phQRes.data ?? []).reduce((s: number, r: any) => s + (r.basexp ?? 0), 0);
+          levelXpEarnedRef.current = (phPRes.data ?? []).filter((r: any) => phaseIds.has(r.questid)).reduce((s: number, r: any) => s + (r.xp_gained ?? 0), 0);
+        } catch (e) {
+          console.warn('[LessonActivity] level XP cap fetch failed', e);
+        }
       }
 
       // Pick the first available tab for this quest as the default.
@@ -588,6 +614,21 @@ export const LessonActivity: React.FC = () => {
 
   // ── Derived: available tabs + hints scoped to current tab ─────────────
   const availableTabs = useMemo(() => computeAvailableTabs(quest), [quest]);
+
+  const balloonQs = useMemo(() => {
+    if (!quest?.mc_questions?.length) return [];
+    const hasMode = quest.mc_questions.some(q => q.mode === 'balloon' || q.mode === 'mc');
+    if (hasMode) return quest.mc_questions.filter(q => q.mode === 'balloon');
+    return (quest.question_type ?? '').toLowerCase() === 'pop_balloon' ? quest.mc_questions : [];
+  }, [quest?.mc_questions, quest?.question_type]);
+
+  const mcQs = useMemo(() => {
+    if (!quest?.mc_questions?.length) return [];
+    const hasMode = quest.mc_questions.some(q => q.mode === 'balloon' || q.mode === 'mc');
+    if (hasMode) return quest.mc_questions.filter(q => q.mode !== 'balloon');
+    return (quest.question_type ?? '').toLowerCase() === 'pop_balloon' ? [] : quest.mc_questions;
+  }, [quest?.mc_questions, quest?.question_type]);
+
   const tabHints = useMemo(
     () => (quest?.hints ?? []).filter(h => !h.activity || h.activity === activeTab),
     [quest?.hints, activeTab]
@@ -657,17 +698,22 @@ export const LessonActivity: React.FC = () => {
     const ratio = total > 0 ? score / total : 0;
     let xpGainedNow: number;
     if (wasAlreadyDone) {
-      // Retake: small bonus scaled by performance — 0 correct answers = 0 XP.
-      xpGainedNow = ratio > 0
-        ? Math.max(REPEAT_XP_MIN, Math.round(quest.basexp * REPEAT_XP_FRACTION * ratio))
-        : 0;
+      // Retake: small bonus scaled by performance — capped by remaining level XP.
+      const levelRemaining = Math.max(0, levelXpCapRef.current - levelXpEarnedRef.current);
+      xpGainedNow = levelRemaining <= 0 || ratio <= 0
+        ? 0
+        : Math.min(
+            Math.max(REPEAT_XP_MIN, Math.round(quest.basexp * REPEAT_XP_FRACTION * ratio)),
+            levelRemaining
+          );
     } else {
       const xpPerTab    = Math.floor(quest.basexp / Math.max(availableTabs.length, 1));
       const hintPenalty = Math.round(hintsUsedRef.current * XP_PER_HINT / Math.max(availableTabs.length, 1));
       // No floor of 1 — poor performance earns proportionally less, 0 correct earns 0.
       xpGainedNow = Math.max(0, Math.round(xpPerTab * ratio) - hintPenalty);
     }
-    cumulativeXPRef.current += xpGainedNow;
+    cumulativeXPRef.current  += xpGainedNow;
+    levelXpEarnedRef.current += xpGainedNow;
 
     const allDone           = availableTabs.every(t => newFinished.includes(t));
     // True only when this specific handleComplete call is what tips the quest
@@ -1052,9 +1098,9 @@ export const LessonActivity: React.FC = () => {
                   <>
                     {activeTab === 'drag'      && <DragDropGame   items={quest.game_items ?? []} zones={quest.drop_zones ?? []} onComplete={handleComplete} resetSignal={resetSignal} />}
                     {activeTab === 'code_fill' && <CodeFillGame   items={quest.code_fill_items ?? []} onComplete={handleComplete} resetSignal={resetSignal} />}
-                    {activeTab === 'balloon'   && <BalloonPopGame questions={quest.mc_questions ?? []} onComplete={handleComplete} resetSignal={resetSignal} />}
+                    {activeTab === 'balloon'   && <BalloonPopGame questions={balloonQs} onComplete={handleComplete} resetSignal={resetSignal} />}
                     {activeTab === 'ordering'  && <OrderingGame   items={quest.ordering_items ?? []} onComplete={handleComplete} resetSignal={resetSignal} />}
-                    {activeTab === 'mc'        && <MCGame         questions={quest.mc_questions ?? []} onComplete={handleComplete} resetSignal={resetSignal} />}
+                    {activeTab === 'mc'        && <MCGame         questions={mcQs} onComplete={handleComplete} resetSignal={resetSignal} />}
                   </>
                 )}
               </div>

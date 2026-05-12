@@ -41,7 +41,7 @@ export interface HintItem {
 export interface GameItem  { id: string; label: string; color: string; }
 export interface DropZone  { id: string; label: string; accepted: string; }
 export interface OrderItem { id: string; label: string; description?: string; correct_order: number; }
-export interface MCQ       { id: string; question: string; options: string[]; correct: number; explanation: string; }
+export interface MCQ       { id: string; question: string; options: string[]; correct: number; explanation: string; mode?: 'balloon' | 'mc'; }
 
 export interface CodeFillItem {
   id: string;
@@ -56,7 +56,7 @@ export interface CodeFillItem {
 
 // ─── Theory (the lesson's reading material before the games) ───────────────
 export interface TheorySection {
-  type?: 'default' | 'code' | 'did_you_know' | 'mistake' | 'diagram' | 'tip' | 'summary';
+  type?: 'default' | 'code' | 'did_you_know' | 'mistake' | 'diagram' | 'tip' | 'summary' | 'table';
   heading?: string;
   body?: string;
   items?: { term: string; definition: string }[];
@@ -68,6 +68,8 @@ export interface TheorySection {
   mistakes?: { wrong: string; right: string; explanation: string }[];
   tips?: { icon?: string; title: string; body: string }[];
   bullets?: string[];
+  table_headers?: string[];
+  table_rows?: string[][];
 }
 
 // ─── Quest (one row from the `quests` table) ───────────────────────────────
