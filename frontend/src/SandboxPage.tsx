@@ -413,7 +413,9 @@ int main() {
 
     let data: AnalysisResult | null = null;
     try {
-      data = await analyzeCode(code);
+      data = await analyzeCode(code, {
+        currentLevel: liveStats?.currentLevel,
+      });
       setResult(data);
       if (data.success && isGuest) {
         DataIsolationService.saveGuestProgress({ sandboxProgress: { lastCode: code } });
