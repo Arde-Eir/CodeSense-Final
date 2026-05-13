@@ -30,11 +30,13 @@ import { BalloonPopGame } from './games/BalloonPopGame';
 
 import TheorySectionBlock from './components/TheorySection';
 import type { ActivityTab, HintItem, Quest, TheorySection } from './types/campaign';
+import { composeHints } from './campaign/composeHints';
+import {
+  computeActivityXP, persistedXpGained, levelXpCapForPhase,
+  FIRST_COMPLETION_XP, RETAKE_COMPLETION_XP,
+} from './campaign/retakeXp';
 
 // ─── Constants ────────────────────────────────────────────────────────────
-const XP_PER_HINT        = 2;
-const REPEAT_XP_FRACTION = 0.10;
-const REPEAT_XP_MIN      = 1;
 const FETCH_TIMEOUT_MS   = 10_000;
 
 // ─── Tab metadata ─────────────────────────────────────────────────────────
@@ -157,7 +159,7 @@ const XPToast: React.FC<{
 );
 
 // ─── Hint Toast ───────────────────────────────────────────────────────────
-const HintToast: React.FC<{ visible: boolean; hintsUsed: number; xpCost: number }> = ({ visible, hintsUsed, xpCost }) => (
+const HintToast: React.FC<{ visible: boolean; hintsUsed: number }> = ({ visible, hintsUsed }) => (
   <div style={{
     position: 'fixed', top: 68, right: 24,
     transform: `translateX(${visible ? 0 : 20}px)`,
@@ -170,11 +172,11 @@ const HintToast: React.FC<{ visible: boolean; hintsUsed: number; xpCost: number 
       <span style={{ fontSize: 12, fontWeight: 700, color: '#58a6ff', fontFamily: 'Inter,sans-serif' }}>💡 Hint Used</span>
       <span style={{ fontSize: 10, color: '#484f58', fontFamily: 'Inter,sans-serif' }}>#{hintsUsed}</span>
     </div>
-    <div style={{ fontSize: 13, fontWeight: 700, color: '#f85149', marginBottom: 3, fontFamily: 'Inter,sans-serif' }}>
-      −{xpCost} XP deducted
+    <div style={{ fontSize: 13, fontWeight: 700, color: '#58a6ff', marginBottom: 3, fontFamily: 'Inter,sans-serif' }}>
+      Guidance unlocked
     </div>
     <div style={{ fontSize: 12, color: '#8b949e', fontFamily: 'Inter,sans-serif' }}>
-      Hints reduce your final XP reward.
+      Campaign XP is fixed by completion status and level cap.
     </div>
   </div>
 );
@@ -193,12 +195,12 @@ const LockedBanner: React.FC<{
       </div>
       <div style={{ fontSize: 14, color: '#8b949e', fontFamily: 'Inter,sans-serif', lineHeight: 1.6, maxWidth: 340 }}>
         You finished <span style={{ color: '#e6edf3', fontWeight: 700 }}>{title}</span> and earned{' '}
-        <span style={{ color: '#facc15', fontWeight: 700 }}>+{earnedXP} XP</span>.
+          <span style={{ color: '#facc15', fontWeight: 700 }}>+{earnedXP} XP</span>.
       </div>
     </div>
     <div style={{ padding: '14px 24px', borderRadius: 10, background: 'rgba(63,185,80,0.07)', border: '1px solid rgba(63,185,80,0.25)', fontSize: 13, color: '#484f58', fontFamily: 'Inter,sans-serif', lineHeight: 1.7, maxWidth: 380 }}>
       🔒 Full XP was awarded on your first completion.<br />
-      Replaying gives a small bonus only.
+      Replaying gives +{RETAKE_COMPLETION_XP} XP only, until the level cap is reached.
     </div>
     <div style={{ display: 'flex', gap: 12 }}>
       <button onClick={onBack}
@@ -235,6 +237,10 @@ const TutorialLearnPhase: React.FC<{ quest: Quest; onStartGame: () => void }> = 
 // ─── Side Panel (objectives + hints + XP reward) ──────────────────────────
 const GameSidePanel: React.FC<{
   quest:           Quest;
+  /** Hints visible for the current tab + current question. Composed by the
+   *  parent via composeHints() so the panel doesn't refilter — keeps the
+   *  per-question hint in sync with what the player is looking at. */
+  tabHints:        HintItem[];
   hintsUsed:       number;
   maxHints:        number;
   earnedXP:        number;
@@ -246,9 +252,8 @@ const GameSidePanel: React.FC<{
   // in the phase — we still show a button, but it returns to the level page.
   hasNextQuest:    boolean;
   onNextQuest:     () => void;
-}> = ({ quest, hintsUsed, maxHints, earnedXP, isCompleted, onTakeHint, activeTab, hasNextQuest, onNextQuest }) => {
+}> = ({ quest, tabHints, hintsUsed, maxHints, earnedXP, isCompleted, onTakeHint, activeTab: _activeTab, hasNextQuest, onNextQuest }) => {
   const [activeHint, setActiveHint] = useState<number | null>(null);
-  const tabHints = (quest.hints ?? []).filter(h => !h.activity || h.activity === activeTab);
   const noHintsAvailable = tabHints.length === 0;
   const allHintsUsed     = !noHintsAvailable && hintsUsed >= maxHints;
   const buttonDisabled   = noHintsAvailable || allHintsUsed || isCompleted;
@@ -414,9 +419,16 @@ export const LessonActivity: React.FC = () => {
   const [resetSignal,  setResetSignal]  = useState(0);
 
   const [progressId,   setProgressId]   = useState<string | null>(null);
-  const [hintsUsed,    setHintsUsed]    = useState(0);
+  // `hintsUsed` is the UI counter (which reveal cards are open). Resets to 0
+  // when the player moves to a new question — see handleItemChange.
+  const [hintsUsed,           setHintsUsed]           = useState(0);
   const [isCompleted,  setIsCompleted]  = useState(false);
   const [earnedXP,     setEarnedXP]     = useState(0);
+  // Current item index inside the active tab (0 = first question / item).
+  // Reported up by MCGame / BalloonPopGame / CodeFillGame via onItemChange.
+  // Ordering and DragDrop don't have a meaningful "current item" so they
+  // leave this at 0 and the side panel falls back to the per-tab pool.
+  const [currentItemIdx, setCurrentItemIdx] = useState(0);
 
   // Next quest in the same phase (by sortorder). Used to power the
   // "Next Quest" button that replaces "Take a Hint" once the quest is fully
@@ -435,8 +447,14 @@ export const LessonActivity: React.FC = () => {
   // Refs for values used inside async callbacks (avoid stale closures).
   const completedActivitiesRef = useRef<ActivityTab[]>([]);
   const everCompletedRef       = useRef<ActivityTab[]>([]);  // tabs completed in any prior session
-  const cumulativeXPRef        = useRef(0);
   const hintsUsedRef           = useRef(0);
+  // mission_progress.xp_gained as it stood when this quest was loaded. Used
+  // to keep the row monotonic and prevent reloads from reopening phase-cap
+  // headroom.
+  const priorXpGainedRef       = useRef(0);
+  // True once this quest has been fully completed at least once (any session).
+  // Drives celebration suppression on subsequent retakes.
+  const hasEverFullyCompletedRef = useRef(false);
   const levelXpCapRef          = useRef(0);  // sum of basexp for all quests in this phase
   const levelXpEarnedRef       = useRef(0);  // total xp_gained for this user in this phase
   const xpToastTimer           = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -473,9 +491,10 @@ export const LessonActivity: React.FC = () => {
     setProgressId(null);
     setNextQuestId(undefined);
     setAppPhase('tutorial');
-    completedActivitiesRef.current = [];
-    everCompletedRef.current       = [];
-    cumulativeXPRef.current        = 0;
+    completedActivitiesRef.current   = [];
+    everCompletedRef.current         = [];
+    priorXpGainedRef.current         = 0;
+    hasEverFullyCompletedRef.current = false;
     hintsUsedRef.current           = 0;
     levelXpCapRef.current          = 0;
     levelXpEarnedRef.current       = 0;
@@ -503,6 +522,7 @@ export const LessonActivity: React.FC = () => {
             .from('quests')
             .select('id')
             .eq('phase', quest.phase)
+            .eq('mode', 'campaign')
             .eq('isactive', true)
             .gt('sortorder', quest.sortorder ?? 0)
             .order('sortorder', { ascending: true })
@@ -515,17 +535,16 @@ export const LessonActivity: React.FC = () => {
         setNextQuestId(null);
       }
 
-      // Fetch level XP cap (sum of basexp for all active phase quests) and how
-      // much XP this user has already earned in the phase, so retakes beyond the
-      // cap award 0 XP.
+      // Fetch fixed phase XP cap and how much XP this user has already earned
+      // in the phase, so capped levels award 0 XP.
       if (quest.phase) {
         try {
           const [phQRes, phPRes] = await Promise.all([
-            withTimeout(supabase.from('quests').select('id,basexp').eq('phase', quest.phase).eq('mode', 'campaign').eq('isactive', true)),
+            withTimeout(supabase.from('quests').select('id').eq('phase', quest.phase).eq('mode', 'campaign').eq('isactive', true)),
             withTimeout(supabase.from('mission_progress').select('questid,xp_gained').eq('userid', user.id)),
           ]);
           const phaseIds = new Set((phQRes.data ?? []).map((r: any) => r.id));
-          levelXpCapRef.current    = (phQRes.data ?? []).reduce((s: number, r: any) => s + (r.basexp ?? 0), 0);
+          levelXpCapRef.current    = levelXpCapForPhase(quest.phase);
           levelXpEarnedRef.current = (phPRes.data ?? []).filter((r: any) => phaseIds.has(r.questid)).reduce((s: number, r: any) => s + (r.xp_gained ?? 0), 0);
         } catch (e) {
           console.warn('[LessonActivity] level XP cap fetch failed', e);
@@ -553,9 +572,16 @@ export const LessonActivity: React.FC = () => {
 
         const done = (Array.isArray(ex.completed_activities) ? ex.completed_activities : []) as ActivityTab[];
         completedActivitiesRef.current = done;
-        everCompletedRef.current       = done;
-        cumulativeXPRef.current        = ex.xp_gained ?? 0;
-
+        // If the quest was fully completed in the past, every available tab
+        // is a retake even when completed_activities is currently partial
+        // because the user reloaded mid-retake.
+        everCompletedRef.current       = ex.first_completed_at ? tabs : done;
+        // Lifetime row max — locked in by persistedXpGained() so retakes can
+        // never push it below this value.
+        priorXpGainedRef.current       = ex.xp_gained ?? 0;
+        // first_completed_at is the durable "ever finished" stamp. If it's
+        // set, this is a retake run — suppress the celebration on completion.
+        hasEverFullyCompletedRef.current = !!ex.first_completed_at;
         if (ex.status === 'completed') {
           setIsCompleted(true);
           setEarnedXP(ex.xp_gained ?? quest.basexp ?? 0);
@@ -575,7 +601,8 @@ export const LessonActivity: React.FC = () => {
             .single()
         );
         if (ins) setProgressId(ins.id);
-        cumulativeXPRef.current = 0;
+        priorXpGainedRef.current         = 0;
+        hasEverFullyCompletedRef.current = false;
       }
     } catch (err) {
       const msg = err instanceof Error ? err.message : 'Failed to load lesson';
@@ -629,9 +656,20 @@ export const LessonActivity: React.FC = () => {
     return (quest.question_type ?? '').toLowerCase() === 'pop_balloon' ? [] : quest.mc_questions;
   }, [quest?.mc_questions, quest?.question_type]);
 
+  // Per-question hint for the active item (MC / balloon / code-fill only).
+  // Ordering and DragDrop don't surface a current-item index — their hint
+  // is always undefined so the side panel falls back to the per-tab pool.
+  const currentItemHint = useMemo<string | undefined>(() => {
+    if (!quest) return undefined;
+    if (activeTab === 'mc')        return mcQs[currentItemIdx]?.hint ?? undefined;
+    if (activeTab === 'balloon')   return balloonQs[currentItemIdx]?.hint ?? undefined;
+    if (activeTab === 'code_fill') return quest.code_fill_items?.[currentItemIdx]?.hint ?? undefined;
+    return undefined;
+  }, [quest, activeTab, currentItemIdx, mcQs, balloonQs]);
+
   const tabHints = useMemo(
-    () => (quest?.hints ?? []).filter(h => !h.activity || h.activity === activeTab),
-    [quest?.hints, activeTab]
+    () => composeHints(quest?.hints, activeTab, currentItemHint),
+    [quest?.hints, activeTab, currentItemHint]
   );
   // Was: Math.max(tabHints.length, 1) — that floor let users click "Take a
   // hint" on a tab with zero hints, charging XP and revealing nothing. The
@@ -642,12 +680,23 @@ export const LessonActivity: React.FC = () => {
   const isRepeatTab = everCompletedRef.current.includes(activeTab);
 
   // Display XP for the side panel (best estimate of what'll be awarded next).
-  const baseXP = quest?.basexp ?? 0;
+  const levelRemaining = Math.max(0, levelXpCapRef.current - levelXpEarnedRef.current);
   const displayXP = isCompleted
     ? earnedXP
     : isRepeatTab
-      ? Math.max(REPEAT_XP_MIN, Math.round(baseXP * REPEAT_XP_FRACTION))
-      : Math.max(1, baseXP - hintsUsed * XP_PER_HINT);
+      ? Math.min(RETAKE_COMPLETION_XP, levelRemaining)
+      : Math.min(FIRST_COMPLETION_XP, levelRemaining);
+
+  // ── Active item index reported by MC / Balloon / CodeFill games ─────────
+  // Resets `hintsUsed` to 0 on every item transition so each question has
+  // its own reveal budget. hintsUsedRef remains cumulative for analytics.
+  const handleItemChange = useCallback((idx: number) => {
+    setCurrentItemIdx(prev => {
+      if (prev === idx) return prev;       // same item — no reset
+      setHintsUsed(0);                     // collapse reveals for the new question
+      return idx;
+    });
+  }, []);
 
   // ── Navigate to next quest (or back to phase page if this was the last) ─
   const handleNextQuest = useCallback(() => {
@@ -667,14 +716,15 @@ export const LessonActivity: React.FC = () => {
     if (!user?.id || !quest || !progressId || isCompleted) return;
     if (hintsUsed >= maxHints) return;
 
-    const next = hintsUsed + 1;
-    setHintsUsed(next);
-    hintsUsedRef.current = next;
+    const nextPerQ        = hintsUsed + 1;
+    const nextCumulative  = hintsUsedRef.current + 1;
+    setHintsUsed(nextPerQ);
+    hintsUsedRef.current = nextCumulative;
 
-    // Best-effort persist (we don't block on it — toast is instant).
+    // Best-effort persist of the cumulative count for analytics/progress UI.
     supabase
       .from('mission_progress')
-      .update({ hintsused: next })
+      .update({ hintsused: nextCumulative })
       .eq('id', progressId)
       .then(({ error }) => { if (error) console.warn('hintsused update failed', error); });
 
@@ -684,7 +734,7 @@ export const LessonActivity: React.FC = () => {
   }, [user?.id, quest, progressId, isCompleted, hintsUsed, maxHints]);
 
   // ── Complete current activity ────────────────────────────────────────
-  const handleComplete = useCallback(async (score: number, total: number) => {
+  const handleComplete = useCallback(async (_score: number, _total: number) => {
     if (!user?.id || !quest) return;
     // Ignore re-completion of a tab already finished IN THIS SESSION.
     if (completedActivitiesRef.current.includes(activeTab)) return;
@@ -693,29 +743,29 @@ export const LessonActivity: React.FC = () => {
     const newFinished    = [...new Set([...completedActivitiesRef.current, activeTab])] as ActivityTab[];
     completedActivitiesRef.current = newFinished;
 
-    // XP for this event — scaled by score ratio so incorrect answers earn less.
-    // ratio = 0 means 0 XP regardless of first-take or retake.
-    const ratio = total > 0 ? score / total : 0;
-    let xpGainedNow: number;
-    if (wasAlreadyDone) {
-      // Retake: small bonus scaled by performance — capped by remaining level XP.
-      const levelRemaining = Math.max(0, levelXpCapRef.current - levelXpEarnedRef.current);
-      xpGainedNow = levelRemaining <= 0 || ratio <= 0
-        ? 0
-        : Math.min(
-            Math.max(REPEAT_XP_MIN, Math.round(quest.basexp * REPEAT_XP_FRACTION * ratio)),
-            levelRemaining
-          );
-    } else {
-      const xpPerTab    = Math.floor(quest.basexp / Math.max(availableTabs.length, 1));
-      const hintPenalty = Math.round(hintsUsedRef.current * XP_PER_HINT / Math.max(availableTabs.length, 1));
-      // No floor of 1 — poor performance earns proportionally less, 0 correct earns 0.
-      xpGainedNow = Math.max(0, Math.round(xpPerTab * ratio) - hintPenalty);
-    }
-    cumulativeXPRef.current  += xpGainedNow;
+    const allDone = availableTabs.every(t => newFinished.includes(t));
+    // XP is only awarded on full quest completion. Use the durable
+    // is-completed flag (`first_completed_at` loaded into this ref) to choose
+    // 200 XP first-time vs 20 XP retake, then clamp by the fixed level cap.
+    const xpGainedNow = computeActivityXP({
+      isCompleted:    hasEverFullyCompletedRef.current,
+      isFullCompletion: allDone,
+      levelRemaining,
+    });
     levelXpEarnedRef.current += xpGainedNow;
 
-    const allDone           = availableTabs.every(t => newFinished.includes(t));
+    // What we'll write to mission_progress.xp_gained. This row is the durable
+    // cap-accounting source and must be monotonic.
+    const xpRowValue     = persistedXpGained({
+      levelCap:      levelXpCapRef.current,
+      priorXpGained: priorXpGainedRef.current,
+      xpDelta:       xpGainedNow,
+    });
+
+    // Snapshot the "is this the lifetime-first full completion" flag BEFORE
+    // we later flip hasEverFullyCompletedRef. Drives celebration suppression
+    // (level-up flash + activity log) on the XP toast far below.
+    const isLifetimeFirstFinish = allDone && !hasEverFullyCompletedRef.current;
     // True only when this specific handleComplete call is what tips the quest
     // to fully done for the first time. isCompleted is the React state from
     // the previous render — still false here if we haven't called setIsCompleted yet.
@@ -726,7 +776,7 @@ export const LessonActivity: React.FC = () => {
       const { data, error: rpcErr } = await supabase.rpc('complete_campaign_quest', {
         p_userid:               user.id,
         p_questid:              quest.id,
-        p_xp_gained:            cumulativeXPRef.current,
+        p_xp_gained:            xpRowValue,
         p_xp_delta:             xpGainedNow,
         p_completed_activities: newFinished,
         p_hintsused:            hintsUsedRef.current,
@@ -750,7 +800,7 @@ export const LessonActivity: React.FC = () => {
             userid:               user.id,
             questid:              quest.id,
             status:               allDone ? 'completed' : 'active',
-            xp_gained:            cumulativeXPRef.current,
+            xp_gained:            xpRowValue,
             completed_activities: newFinished,
             hintsused:            hintsUsedRef.current,
             completedat:          allDone ? firstCompletedAt : null,
@@ -815,22 +865,33 @@ export const LessonActivity: React.FC = () => {
         // RPC already set status='completed' and first_completed_at on first
         // full completion. Reflect locally.
         setIsCompleted(true);
-        setEarnedXP(cumulativeXPRef.current);
+        // Show the durable row value in the post-completion banner, not the
+        // smaller retake event delta.
+        setEarnedXP(xpRowValue);
+        priorXpGainedRef.current = xpRowValue;
         // Add tabs that we just completed to the everCompleted list so the
         // post-retake UI knows what was historically done.
         everCompletedRef.current = [...new Set([...everCompletedRef.current, ...newFinished])];
 
-        // Fire-and-forget: write to activity_log for the activity feed.
-        supabase.from('activity_log').insert({
-          userid:      user.id,
-          type:        'quest_completed',
-          title:       `Quest completed: ${quest.title}`,
-          description: hintsUsedRef.current > 0
-            ? `${hintsUsedRef.current} hint${hintsUsedRef.current > 1 ? 's' : ''} used`
-            : 'No hints used',
-          xp_gained:   cumulativeXPRef.current,
-          meta:        { questid: quest.id, phase: quest.phase },
-        }).then(({ error }) => { if (error) console.warn('activity_log write failed', error); });
+        // Skip activity-feed spam and level-up flashes on retakes — the
+        // first full completion is the milestone. We still mark the quest
+        // completed locally; the retake just earns a small XP toast.
+        if (!hasEverFullyCompletedRef.current) {
+          // Fire-and-forget: write to activity_log for the activity feed.
+          supabase.from('activity_log').insert({
+            userid:      user.id,
+            type:        'quest_completed',
+            title:       `Quest completed: ${quest.title}`,
+            description: hintsUsedRef.current > 0
+              ? `${hintsUsedRef.current} hint${hintsUsedRef.current > 1 ? 's' : ''} used`
+              : 'No hints used',
+            xp_gained:   xpRowValue,
+            meta:        { questid: quest.id, phase: quest.phase },
+          }).then(({ error }) => { if (error) console.warn('activity_log write failed', error); });
+        }
+        // From this point on within the session, any further completions
+        // (retakes triggered without leaving the page) are retake runs.
+        hasEverFullyCompletedRef.current = true;
 
         // Fire-and-forget: record how long the user took to finish the quest.
         if (gameStartedAtRef.current !== null) {
@@ -845,13 +906,16 @@ export const LessonActivity: React.FC = () => {
       }
 
       // XP toast — only show when XP was actually earned.
+      // Level-up flash is suppressed on retakes (isLifetimeFirstFinish=false)
+      // so a small retake bonus that happens to cross a level threshold
+      // doesn't re-trigger the celebration the user already saw.
       if (xpGainedNow > 0) {
         setXpToast({
           visible:  true,
           amount:   xpGainedNow,
           repeat:   wasAlreadyDone,
-          levelUp:  levelledUp && isFirstFullFinish,
-          newLevel: levelledUp && isFirstFullFinish ? newLevel : undefined,
+          levelUp:  levelledUp && isFirstFullFinish && isLifetimeFirstFinish,
+          newLevel: levelledUp && isFirstFullFinish && isLifetimeFirstFinish ? newLevel : undefined,
         });
         if (xpToastTimer.current) clearTimeout(xpToastTimer.current);
         xpToastTimer.current = setTimeout(() => setXpToast(t => ({ ...t, visible: false })), 4500);
@@ -860,11 +924,11 @@ export const LessonActivity: React.FC = () => {
     } catch (err) {
       // Roll back local state on failure.
       completedActivitiesRef.current = completedActivitiesRef.current.filter(g => g !== activeTab);
-      cumulativeXPRef.current        -= xpGainedNow;
+      levelXpEarnedRef.current       -= xpGainedNow;
       console.error('complete_campaign_quest failed', err);
       setFetchError(err instanceof Error ? err.message : 'Could not save your progress');
     }
-  }, [user?.id, quest, activeTab, availableTabs, isCompleted]);
+  }, [user?.id, quest, activeTab, availableTabs, isCompleted, levelRemaining]);
 
   // ── Quest-level stopwatch ─────────────────────────────────────────────
   // Counts up from when the user first enters the game phase. Stops when
@@ -883,11 +947,15 @@ export const LessonActivity: React.FC = () => {
   const handleRetake = useCallback(async () => {
     if (!user?.id || !quest) return;
     try {
+      // IMPORTANT: do NOT reset xp_gained here. It is the durable amount of
+      // campaign XP already credited for this quest and drives phase-cap
+      // accounting across reloads. persistedXpGained() keeps it monotonic.
+      // We also preserve first_completed_at so the campaign-gating UI
+      // doesn't briefly think this quest is locked again mid-retake.
       const resetPayload = {
         status: 'active',
         completedat: null,
         completed_activities: [],
-        xp_gained: 0,
         hintsused: 0,
         updatedat: new Date().toISOString(),
       };
@@ -931,10 +999,14 @@ export const LessonActivity: React.FC = () => {
 
     // Local reset. Note: everCompletedRef is preserved (used for replay-XP
     // detection). first_completed_at on the row is also preserved by the RPC,
-    // so the next quest stays unlocked.
-    everCompletedRef.current       = [...completedActivitiesRef.current];
-    completedActivitiesRef.current = [];
-    cumulativeXPRef.current        = 0;
+    // so the next quest stays unlocked. priorXpGainedRef is also preserved —
+    // it carries the lifetime row max forward so the next complete writes
+    // max(prior, session) and never drops xp_gained below its lock.
+    everCompletedRef.current         = [...completedActivitiesRef.current];
+    completedActivitiesRef.current   = [];
+    // The user just finished this quest at least once — every subsequent
+    // completion in this session is a retake. Suppress the celebration.
+    hasEverFullyCompletedRef.current = true;
     setIsCompleted(false);
     setHintsUsed(0);
     hintsUsedRef.current = 0;
@@ -1039,7 +1111,15 @@ export const LessonActivity: React.FC = () => {
                     const isSelected = activeTab === t;
                     return (
                       <button key={t}
-                        onClick={() => setActiveTab(t)}
+                        onClick={() => {
+                          if (t === activeTab) return;
+                          // Reset the per-question index + hint reveals so the
+                          // side panel doesn't carry a stale "Q3" hint into a
+                          // tab whose first item is index 0.
+                          setActiveTab(t);
+                          setCurrentItemIdx(0);
+                          setHintsUsed(0);
+                        }}
                         style={{
                           padding: '9px 14px', borderRadius: '8px 8px 0 0',
                           border: 'none', borderBottom: `2px solid ${isSelected ? '#facc15' : 'transparent'}`,
@@ -1097,10 +1177,10 @@ export const LessonActivity: React.FC = () => {
                 ) : (
                   <>
                     {activeTab === 'drag'      && <DragDropGame   items={quest.game_items ?? []} zones={quest.drop_zones ?? []} onComplete={handleComplete} resetSignal={resetSignal} />}
-                    {activeTab === 'code_fill' && <CodeFillGame   items={quest.code_fill_items ?? []} onComplete={handleComplete} resetSignal={resetSignal} />}
-                    {activeTab === 'balloon'   && <BalloonPopGame questions={balloonQs} onComplete={handleComplete} resetSignal={resetSignal} />}
+                    {activeTab === 'code_fill' && <CodeFillGame   items={quest.code_fill_items ?? []} onComplete={handleComplete} resetSignal={resetSignal} onItemChange={handleItemChange} />}
+                    {activeTab === 'balloon'   && <BalloonPopGame questions={balloonQs} onComplete={handleComplete} resetSignal={resetSignal} onItemChange={handleItemChange} />}
                     {activeTab === 'ordering'  && <OrderingGame   items={quest.ordering_items ?? []} onComplete={handleComplete} resetSignal={resetSignal} />}
-                    {activeTab === 'mc'        && <MCGame         questions={mcQs} onComplete={handleComplete} resetSignal={resetSignal} />}
+                    {activeTab === 'mc'        && <MCGame         questions={mcQs} onComplete={handleComplete} resetSignal={resetSignal} onItemChange={handleItemChange} />}
                   </>
                 )}
               </div>
@@ -1140,6 +1220,7 @@ export const LessonActivity: React.FC = () => {
             <div className={`la-side-panel${mobilePanelOpen ? ' open' : ''}`} style={{ width: sidePanelWidth, flexShrink: 0, minHeight: 0, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
               <GameSidePanel
                 quest={quest}
+                tabHints={tabHints}
                 hintsUsed={hintsUsed}
                 maxHints={maxHints}
                 earnedXP={displayXP}
@@ -1163,7 +1244,7 @@ export const LessonActivity: React.FC = () => {
         levelledUp={xpToast.levelUp}
         newLevel={xpToast.newLevel}
       />
-      <HintToast visible={hintToast.visible} hintsUsed={hintsUsed} xpCost={XP_PER_HINT} />
+      <HintToast visible={hintToast.visible} hintsUsed={hintsUsed} />
     </div>
   );
 };

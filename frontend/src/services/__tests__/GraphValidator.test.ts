@@ -16,7 +16,7 @@ function makeEdge(id: string, source: string, target: string, label?: string): E
 function minimalGraph(): { nodes: Node[]; edges: Edge[] } {
   const nodes = [
     makeNode('s', 'terminator', 'Start'),
-    makeNode('p', 'process', 'Process'),
+    makeNode('p', 'process', 'Process', { code: 'x = 1;' }),
     makeNode('e', 'terminator', 'End'),
   ];
   const edges = [
@@ -288,6 +288,38 @@ describe('validateGraph', () => {
     expect(issue.edgeIds).toContain('e2');
   });
 
+  it('reports SELF_LOOP_EDGES for edges that target their own source node', () => {
+    const nodes = [
+      makeNode('s', 'terminator', 'Start'),
+      makeNode('p', 'process', 'Process'),
+      makeNode('e', 'terminator', 'End'),
+    ];
+    const edges = [
+      makeEdge('e1', 's', 'p'),
+      makeEdge('e2', 'p', 'p'),
+      makeEdge('e3', 'p', 'e'),
+    ];
+    const result = validateGraph(nodes, edges);
+    expect(result.errors.some(err => err.code === 'SELF_LOOP_EDGES')).toBe(true);
+    expect(result.errors.find(err => err.code === 'SELF_LOOP_EDGES')?.edgeIds).toContain('e2');
+  });
+
+  it('reports DUPLICATE_EDGES for repeated identical flow lines', () => {
+    const nodes = [
+      makeNode('s', 'terminator', 'Start'),
+      makeNode('p', 'process', 'Process'),
+      makeNode('e', 'terminator', 'End'),
+    ];
+    const edges = [
+      makeEdge('e1', 's', 'p'),
+      makeEdge('e2', 'p', 'e'),
+      makeEdge('e3', 'p', 'e'),
+    ];
+    const result = validateGraph(nodes, edges);
+    expect(result.errors.some(err => err.code === 'DUPLICATE_EDGES')).toBe(true);
+    expect(result.errors.find(err => err.code === 'DUPLICATE_EDGES')?.edgeIds).toEqual(expect.arrayContaining(['e2', 'e3']));
+  });
+
   // Rule 10b — Junction nodes
   it('reports JUNCTION_INCOMPLETE when junction has no incoming edge', () => {
     const nodes = [
@@ -343,8 +375,25 @@ describe('validateGraph', () => {
     expect(result.errors.some(err => err.code === 'LINEAR_NODE_MULTIPLE_OUTGOING')).toBe(true);
   });
 
-  // Rule 11 — Placeholder nodes
-  it('emits PLACEHOLDER_NODES warning for nodes with default label and no code', () => {
+  it('reports DECISION_EMPTY_CONDITION for malformed decision text', () => {
+    const nodes = [
+      makeNode('s', 'terminator', 'Start'),
+      makeNode('d', 'decision', "hp > 0 or 'i < n"),
+      makeNode('p', 'process', 'A', { code: 'hp--;' }),
+      makeNode('e', 'terminator', 'End'),
+    ];
+    const edges = [
+      makeEdge('e1', 's', 'd'),
+      makeEdge('e2', 'd', 'p', 'true'),
+      makeEdge('e3', 'd', 'e', 'false'),
+      makeEdge('e4', 'p', 'e'),
+    ];
+    const result = validateGraph(nodes, edges);
+    expect(result.errors.some(err => err.code === 'DECISION_EMPTY_CONDITION')).toBe(true);
+  });
+
+  // Rule 11 — Required executable node code
+  it('emits MISSING_NODE_CODE error for executable nodes with default label and no code', () => {
     const nodes = [
       makeNode('s', 'terminator', 'Start'),
       makeNode('p', 'process',    'Process'),  // default placeholder label
@@ -355,7 +404,7 @@ describe('validateGraph', () => {
       makeEdge('e2', 'p', 'e'),
     ];
     const result = validateGraph(nodes, edges);
-    expect(result.warnings.some(w => w.code === 'PLACEHOLDER_NODES')).toBe(true);
+    expect(result.errors.some(w => w.code === 'MISSING_NODE_CODE')).toBe(true);
   });
 
   // Happy path

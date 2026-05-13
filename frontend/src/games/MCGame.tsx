@@ -9,10 +9,17 @@ interface Props {
   questions:   MCQ[];
   onComplete:  (score: number, total: number) => void;
   resetSignal: number;
+  /** Notifies the parent of the current question index so it can show the
+   *  per-question hint in the side panel. Optional — older callers omit. */
+  onItemChange?: (index: number) => void;
 }
 
-const MCGameInner: React.FC<{ questions: MCQ[]; onComplete: (score: number, total: number) => void }> = ({ questions, onComplete }) => {
+const MCGameInner: React.FC<{ questions: MCQ[]; onComplete: (score: number, total: number) => void; onItemChange?: (index: number) => void }> = ({ questions, onComplete, onItemChange }) => {
   const [qIdx,     setQIdx]     = React.useState(0);
+
+  // Notify on mount + on every index change (including the initial 0).
+  React.useEffect(() => { onItemChange?.(qIdx); }, [qIdx, onItemChange]);
+
   const [selected, setSelected] = React.useState<number | null>(null);
   const [revealed, setRevealed] = React.useState(false);
   const [done,     setDone]     = React.useState(false);
@@ -175,8 +182,8 @@ const MCGameInner: React.FC<{ questions: MCQ[]; onComplete: (score: number, tota
   );
 };
 
-export const MCGame: React.FC<Props> = ({ questions, onComplete, resetSignal }) => {
-  return <MCGameInner key={resetSignal} questions={questions} onComplete={onComplete} />;
+export const MCGame: React.FC<Props> = ({ questions, onComplete, resetSignal, onItemChange }) => {
+  return <MCGameInner key={resetSignal} questions={questions} onComplete={onComplete} onItemChange={onItemChange} />;
 };
 
 export default MCGame;

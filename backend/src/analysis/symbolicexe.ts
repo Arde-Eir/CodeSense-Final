@@ -44,6 +44,7 @@ interface Constraint {
 
 interface SymbolicState {
   variables: Map<string, SymbolicValue>;
+  aliases: Map<string, string>;
   pathConditions: Constraint[];
   initialized: Set<string>;
   allocatedPointers: Map<string, { line: number; freed: boolean; size?: number; varName: string }>;
@@ -74,6 +75,7 @@ export class SymbolicExecutor {
   private resetState(): void {
     this.state = {
       variables: new Map(),
+      aliases: new Map(),
       pathConditions: [],
       initialized: new Set(),
       allocatedPointers: new Map(),
@@ -149,7 +151,7 @@ export class SymbolicExecutor {
     // Grammar's Identifier rule returns a raw string (not an object).
     // Treat any bare string as an identifier lookup against state.variables.
     if (typeof node === 'string') {
-      const val = this.state.variables.get(node);
+      const val = this.state.variables.get(this.resolveStorageName(node));
       return val ?? { type: 'unknown' as const };
     }
 
@@ -286,6 +288,7 @@ export class SymbolicExecutor {
     if (targetName) {
       // Treat the reference as a pointer to the target variable's name
       val = { type: 'pointer', target: targetName, offset: 0 };
+      this.state.aliases.set(node.name, this.resolveStorageName(targetName));
     }
   }
 
@@ -314,6 +317,9 @@ export class SymbolicExecutor {
 
   // 6. Update state
   this.state.variables.set(node.name, finalVal);
+  if (allDims.length > 0 && (node.value as any)?.type === 'InitializerList') {
+    this.writeInitializerListElements(node.name, allDims, node.value as InitializerListNode);
+  }
   
   // References are always considered initialized at declaration in C++
   if (isReference || node.value) {
@@ -351,17 +357,18 @@ export class SymbolicExecutor {
     const value = this.visit(node.value);
 
     if (typeof node.target === 'string') {
+      const targetName = this.resolveStorageName(node.target);
       if (node.operator !== '=') {
-        const current = this.state.variables.get(node.target);
+        const current = this.state.variables.get(targetName);
         if (current?.type === 'concrete' && value.type === 'concrete') {
           const computed = this.applyCompoundOp(node.operator, current.value, value.value);
-          this.state.variables.set(node.target, computed);
-          this.state.initialized.add(node.target);
+          this.state.variables.set(targetName, computed);
+          this.state.initialized.add(targetName);
           return computed;
         }
       }
-      this.state.variables.set(node.target, value);
-      this.state.initialized.add(node.target);
+      this.state.variables.set(targetName, value);
+      this.state.initialized.add(targetName);
 
       // Emit concrete assignment to Math tab trace
       if (value.type === 'concrete') {
@@ -374,14 +381,27 @@ export class SymbolicExecutor {
 
       // FIX 12: track new-assigned via assignment (e.g. ptr = new int[n])
       if ((node.value as any)?.type === 'NewExpression') {
-        this.state.allocatedPointers.set(node.target, {
+        this.state.allocatedPointers.set(targetName, {
           line: (node as any).line || 0,
           freed: false,
-          varName: node.target,
+          varName: targetName,
         });
       }
     } else if ((node.target as ASTNode).type === 'ArrayAccess') {
       this.visit(node.target as ASTNode); // triggers bounds check on LHS
+      const key = this.arrayElementKey(node.target as ArrayAccessNode);
+      if (key) {
+        this.state.variables.set(key, value);
+        this.state.initialized.add(key);
+        this.state.initialized.add((node.target as ArrayAccessNode).name);
+        if (value.type === 'concrete') {
+          this.valueTrace.push({
+            expression: `${this.expressionToString(node.target)} ${node.operator} ${this.expressionToString(node.value)}`,
+            value: value.value,
+            line: (node as any).line,
+          });
+        }
+      }
     }
 
     return value;
@@ -888,6 +908,12 @@ export class SymbolicExecutor {
       });
     }
 
+    const key = this.arrayElementKey(node);
+    if (key) {
+      const element = this.state.variables.get(key);
+      if (element) return element;
+    }
+
     return { type: 'unknown' as const };
   }
 
@@ -1096,9 +1122,10 @@ export class SymbolicExecutor {
       return { type: 'nullptr' };
     }
 
-    const val = this.state.variables.get(node.name);
+    const storageName = this.resolveStorageName(node.name);
+    const val = this.state.variables.get(storageName);
 
-    if (!val && !this.state.initialized.has(node.name)) {
+    if (!val && !this.state.initialized.has(storageName)) {
       const stdSymbols = new Set([
         'cout', 'cin', 'endl', 'cerr', 'clog', 'string',
         'true', 'false', 'nullptr',
@@ -1160,6 +1187,7 @@ export class SymbolicExecutor {
     // carry stale variables from a previous branch or iteration.
     const merged: SymbolicState = {
       variables: new Map(),
+      aliases: new Map(),
       pathConditions: [],
       initialized: new Set(),
       allocatedPointers: new Map(),
@@ -1195,6 +1223,10 @@ export class SymbolicExecutor {
           } as SymbolicValue);
         }
       }
+    });
+
+    s1.aliases.forEach((target, alias) => {
+      if (s2.aliases.get(alias) === target) merged.aliases.set(alias, target);
     });
 
     // Union path conditions from both branches
@@ -1464,11 +1496,68 @@ export class SymbolicExecutor {
     s.allocatedPointers.forEach((v, k) => clonedPtrs.set(k, { ...v }));
     return {
       variables:         new Map(s.variables),
+      aliases:           new Map(s.aliases),
       pathConditions:    [...s.pathConditions],
       initialized:       new Set(s.initialized),
       allocatedPointers: clonedPtrs,
       freedPointers:     new Set(s.freedPointers),
     };
+  }
+
+  private resolveStorageName(name: string): string {
+    let current = name;
+    const seen = new Set<string>();
+    while (this.state.aliases.has(current) && !seen.has(current)) {
+      seen.add(current);
+      current = this.state.aliases.get(current)!;
+    }
+    return current;
+  }
+
+  private arrayElementKey(node: ArrayAccessNode): string | null {
+    const indices: number[] = [];
+    for (const indexNode of node.indices || []) {
+      const resolved = this.visit(indexNode);
+      if (resolved.type !== 'concrete') return null;
+      indices.push(resolved.value);
+    }
+    return `${this.resolveStorageName(node.name)}${indices.map(i => `[${i}]`).join('')}`;
+  }
+
+  private writeInitializerListElements(name: string, dimensions: number[], list: InitializerListNode): void {
+    const values = this.flattenInitializerValues(list);
+    values.forEach((expr, linearIndex) => {
+      const indices = this.linearIndexToIndices(linearIndex, dimensions);
+      if (indices.length === 0) return;
+      const value = this.visit(expr);
+      const key = `${name}${indices.map(i => `[${i}]`).join('')}`;
+      this.state.variables.set(key, value);
+      this.state.initialized.add(key);
+    });
+  }
+
+  private flattenInitializerValues(list: InitializerListNode): ASTNode[] {
+    const out: ASTNode[] = [];
+    const walk = (node: ASTNode) => {
+      if ((node as any)?.type === 'InitializerList') {
+        ((node as InitializerListNode).values || []).forEach(walk);
+      } else {
+        out.push(node);
+      }
+    };
+    walk(list);
+    return out;
+  }
+
+  private linearIndexToIndices(index: number, dimensions: number[]): number[] {
+    if (dimensions.length === 0) return [];
+    const safeDims = dimensions.map(d => d > 0 ? d : 1);
+    const indices = new Array(safeDims.length).fill(0);
+    for (let i = safeDims.length - 1; i >= 0; i--) {
+      indices[i] = index % safeDims[i];
+      index = Math.floor(index / safeDims[i]);
+    }
+    return indices;
   }
 
   private addSafetyCheck(

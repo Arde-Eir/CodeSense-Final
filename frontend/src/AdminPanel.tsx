@@ -5,6 +5,12 @@ import { useNavigate } from 'react-router-dom'
 import { useAuth } from './components/AuthScreen'
 import { supabase } from './services/supabase'
 import type { ExplorerProfile } from './types'
+import {
+  computeUserStats, filterUsers, levelToPhase,
+  patchMCQuestions, parseCodeFillAnswers,
+  loadHintsForEdit, serializeHints, HINT_ACTIVITY_OPTIONS,
+  type HintFormRow,
+} from './admin/adminHelpers'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -25,6 +31,7 @@ interface ExistingQuest {
   tutorial_body: string | null
   theory_sections: unknown[] | null
   objectives: string[] | null
+  hints: unknown[] | null
   mc_questions: unknown[] | null
   game_items: unknown[] | null
   drop_zones: unknown[] | null
@@ -74,7 +81,7 @@ type Tab = 'dashboard' | 'users' | 'audit' | 'maintenance' | 'announcements' | '
 // ─── Quest form types ─────────────────────────────────────────────────────────
 
 interface QFormTheory    { id: string; type: string; heading: string; body: string; code: string; language: string; table_headers: string[]; table_rows: string[][] }
-interface QFormMCQ       { id: string; question: string; options: [string,string,string,string]; correct: number; explanation: string }
+interface QFormMCQ       { id: string; question: string; options: [string,string,string,string]; correct: number; explanation: string; hint: string }
 interface QFormDragItem  { id: string; label: string; color: string }
 interface QFormDropZone  { id: string; label: string; accepted: string }
 interface QFormCodeFill  { id: string; code_lines: string; language: string; answers: string; hint: string; caption: string }
@@ -96,6 +103,9 @@ interface QuestFormState {
   drag_problems: QFormDragProblem[]
   ordering_problems: QFormOrderProblem[]
   code_fill_items: QFormCodeFill[]
+  // Dynamic hints — round-tripped from quests.hints JSONB. Preserves
+  // SQL-authored extras (e.g. `image: true`) via each row's `_extra`.
+  hints: HintFormRow[]
   // legacy flat fields kept for DB compat — built from problems on save
   game_items: QFormDragItem[]; drop_zones: QFormDropZone[]
 }
@@ -113,11 +123,12 @@ const defaultQF = (): QuestFormState => ({
   tutorial_title: '', tutorial_body: '',
   theory_sections: [], objectives: [''],
   act_mc: true, act_drag: false, act_balloon: false, act_ordering: false, act_codefill: false,
-  mc_questions: [{ id: '1', question: '', options: ['', '', '', ''], correct: 0, explanation: '' }],
-  balloon_questions: [{ id: 'b1', question: '', options: ['', '', '', ''], correct: 0, explanation: '' }],
+  mc_questions: [{ id: '1', question: '', options: ['', '', '', ''], correct: 0, explanation: '', hint: '' }],
+  balloon_questions: [{ id: 'b1', question: '', options: ['', '', '', ''], correct: 0, explanation: '', hint: '' }],
   drag_problems: [newDragProblem()],
   ordering_problems: [newOrderProblem()],
   code_fill_items: [],
+  hints: [],
   game_items: [], drop_zones: [],
 })
 
@@ -169,7 +180,13 @@ export const AdminPanel: React.FC = () => {
   const [existingQuests, setExistingQuests] = useState<ExistingQuest[]>([])
   const [replaceTarget,  setReplaceTarget]  = useState('')
   const [questSaving,    setQuestSaving]    = useState(false)
-  const [questSubTab,    setQuestSubTab]    = useState<'create' | 'manage'>('create')
+  const [questSubTab,    setQuestSubTab]    = useState<'create' | 'manage' | 'hints'>('create')
+  // Hints subtab state: which quest's hints are being edited, plus the
+  // current draft. Empty string = no quest selected.
+  const [hintsQuestId,   setHintsQuestId]   = useState('')
+  const [hintsDraft,     setHintsDraft]     = useState<HintFormRow[]>([])
+  const [hintsSaving,    setHintsSaving]    = useState(false)
+  const [hintsDirty,     setHintsDirty]     = useState(false)
   const [fixingPop,      setFixingPop]      = useState(false)
   const [fixPopResult,   setFixPopResult]   = useState<string | null>(null)
   const qSet = (patch: Partial<QuestFormState>) => setQuestForm(p => ({ ...p, ...patch }))
@@ -215,12 +232,7 @@ export const AdminPanel: React.FC = () => {
     }
     if (data) {
       setUsers(data as AdminUser[])
-      setStats({
-        total:   data.length,
-        active:  data.filter(u => !u.is_banned).length,
-        banned:  data.filter(u => u.is_banned).length,
-        admins:  data.filter(u => u.is_admin).length,
-      })
+      setStats(computeUserStats(data as AdminUser[]))
     }
   }, [])
 
@@ -283,7 +295,7 @@ export const AdminPanel: React.FC = () => {
   const fetchExistingQuests = useCallback(async () => {
     const { data, error } = await supabase
       .from('quests')
-      .select('id, title, level, difficulty, basexp, sortorder, isactive, phase, question_type, description, tutorial_title, tutorial_body, theory_sections, objectives, mc_questions, game_items, drop_zones, ordering_items, code_fill_items')
+      .select('id, title, level, difficulty, basexp, sortorder, isactive, phase, question_type, description, tutorial_title, tutorial_body, theory_sections, objectives, hints, mc_questions, game_items, drop_zones, ordering_items, code_fill_items')
       .eq('mode', 'campaign')
       .order('level', { ascending: true })
       .order('sortorder', { ascending: true })
@@ -306,15 +318,7 @@ export const AdminPanel: React.FC = () => {
 
   // ── User filtering ─────────────────────────────────────────────────────────
   useEffect(() => {
-    let list = users
-    if (userFilter === 'active')  list = list.filter(u => !u.is_banned)
-    if (userFilter === 'banned')  list = list.filter(u => u.is_banned)
-    if (userFilter === 'admin')   list = list.filter(u => u.is_admin)
-    if (userSearch.trim()) {
-      const q = userSearch.toLowerCase()
-      list = list.filter(u => u.playername.toLowerCase().includes(q) || u.email?.toLowerCase().includes(q))
-    }
-    setFilteredUsers(list)
+    setFilteredUsers(filterUsers(users, userFilter, userSearch))
   }, [users, userFilter, userSearch])
 
   // ── Actions ────────────────────────────────────────────────────────────────
@@ -459,6 +463,66 @@ export const AdminPanel: React.FC = () => {
   // ── Quest actions ──────────────────────────────────────────────────────────
   const resetQuestForm = () => { setQuestForm(defaultQF()); setReplaceTarget('') }
 
+  // ── Hints subtab actions ─────────────────────────────────────────────────
+  // Loads a quest's hints into the draft when the user picks one from the
+  // dropdown. Works on the existingQuests list so we don't refetch.
+  const loadHintsForQuest = (questId: string) => {
+    setHintsQuestId(questId)
+    setHintsDirty(false)
+    if (!questId) { setHintsDraft([]); return }
+    const q = existingQuests.find(x => x.id === questId) as any
+    setHintsDraft(loadHintsForEdit(q?.hints))
+  }
+
+  const addHintRow = () => {
+    setHintsDraft(prev => [...prev, {
+      id: `h_${Date.now()}_${Math.random().toString(36).slice(2,6)}`,
+      title: '', body: '', icon: '', activity: 'all', _extra: {},
+    }])
+    setHintsDirty(true)
+  }
+
+  const updateHintRow = (i: number, patch: Partial<HintFormRow>) => {
+    setHintsDraft(prev => prev.map((h, j) => j === i ? { ...h, ...patch } : h))
+    setHintsDirty(true)
+  }
+
+  const removeHintRow = (i: number) => {
+    setHintsDraft(prev => prev.filter((_, j) => j !== i))
+    setHintsDirty(true)
+  }
+
+  const moveHintRow = (i: number, dir: -1 | 1) => {
+    setHintsDraft(prev => {
+      const j = i + dir
+      if (j < 0 || j >= prev.length) return prev
+      const copy = [...prev]
+      ;[copy[i], copy[j]] = [copy[j], copy[i]]
+      return copy
+    })
+    setHintsDirty(true)
+  }
+
+  const saveHints = async () => {
+    if (!user || !hintsQuestId) return
+    setHintsSaving(true)
+    try {
+      const payload = serializeHints(hintsDraft)
+      const { error } = await supabase.from('quests').update({ hints: payload }).eq('id', hintsQuestId)
+      if (error) throw error
+      const q = existingQuests.find(x => x.id === hintsQuestId)
+      await writeAuditLog(user.id, 'quest_hints_update', undefined, {
+        title: q?.title, id: hintsQuestId, count: payload?.length ?? 0,
+      })
+      showToast('Hints saved')
+      setHintsDirty(false)
+      await fetchExistingQuests()
+    } catch (err: any) {
+      showToast(`Failed: ${err.message}`, 'error')
+    }
+    setHintsSaving(false)
+  }
+
   const fixPopLanguage = async () => {
     if (!user) return
     if (!window.confirm(
@@ -480,16 +544,9 @@ export const AdminPanel: React.FC = () => {
       let fixedQs = 0
       for (const quest of data) {
         if (!Array.isArray(quest.mc_questions) || quest.mc_questions.length === 0) continue
-        const patched = quest.mc_questions.map((q: any) => {
-          const orig: string = q.question ?? ''
-          const updated = orig
-            .replace(/^Pop the item(s)? that\b/gi, 'Which item$1')
-            .replace(/^Pop the item(s)?\s+/gi,     'Select the item$1 ')
-            .replace(/^Pop\s+/gi,                   'Select ')
-          if (updated !== orig) fixedQs++
-          return updated !== orig ? { ...q, question: updated } : q
-        })
-        if (JSON.stringify(patched) !== JSON.stringify(quest.mc_questions)) {
+        const { patched, changed } = patchMCQuestions(quest.mc_questions)
+        fixedQs += changed
+        if (changed > 0) {
           const { error: ue } = await supabase.from('quests').update({ mc_questions: patched }).eq('id', quest.id)
           if (!ue) fixedQuests++
         }
@@ -510,7 +567,7 @@ export const AdminPanel: React.FC = () => {
 
   const saveQuest = async (replaceId?: string) => {
     if (!user || !questForm.title.trim()) { showToast('Title is required', 'error'); return }
-    const phase = questForm.level === 1 ? 'beginner' : questForm.level === 2 ? 'intermediate' : 'advanced'
+    const phase = levelToPhase(questForm.level)
     const qTypeMap: Record<string, string> = {
       act_drag: 'drag_drop', act_balloon: 'pop_balloon', act_mc: 'multiple_choice',
       act_ordering: 'ordering', act_codefill: 'code_fill',
@@ -531,14 +588,18 @@ export const AdminPanel: React.FC = () => {
       }))
       .filter(s => s.body || s.code || (s.type === 'table' && s.table_headers?.length))
 
+    // Per-question hint is dropped from the payload when blank so JSONB stays
+    // clean. Empty-string `hint` would otherwise pollute every MC row.
     const mc_questions_arr = [
       ...(questForm.act_mc ? questForm.mc_questions.map((q, i) => ({
           id: `mc_${i + 1}`, question: q.question, options: q.options,
           correct: q.correct, explanation: q.explanation, mode: 'mc' as const,
+          ...(q.hint.trim() ? { hint: q.hint.trim() } : {}),
         })) : []),
       ...(questForm.act_balloon ? questForm.balloon_questions.map((q, i) => ({
           id: `bp_${i + 1}`, question: q.question, options: q.options,
           correct: q.correct, explanation: q.explanation, mode: 'balloon' as const,
+          ...(q.hint.trim() ? { hint: q.hint.trim() } : {}),
         })) : []),
     ]
     const mc_questions = mc_questions_arr.length > 0 ? mc_questions_arr : null
@@ -583,7 +644,7 @@ export const AdminPanel: React.FC = () => {
           id: c.id,
           code_lines: c.code_lines.split('\n'),
           language: c.language || 'c',
-          answers: c.answers.split(',').map((a: string) => a.trim()).filter(Boolean),
+          answers: parseCodeFillAnswers(c.answers),
           hint: c.hint || undefined,
           caption: c.caption || undefined,
         }))
@@ -596,7 +657,7 @@ export const AdminPanel: React.FC = () => {
       sortorder: questForm.sortorder, isactive: questForm.isactive,
       question_type,
       objectives: questForm.objectives.filter(Boolean).length > 0 ? questForm.objectives.filter(Boolean) : null,
-      hints: null,
+      hints: serializeHints(questForm.hints),
       tutorial_title: questForm.tutorial_title.trim() || null,
       tutorial_body: questForm.tutorial_body.trim() || null,
       tutorial_image: null,
@@ -693,11 +754,13 @@ export const AdminPanel: React.FC = () => {
       mc_questions: mcQsDB.length > 0 ? mcQsDB.map((m: any) => ({
         id: m.id ?? String(Math.random()), question: m.question ?? '',
         options: m.options ?? ['', '', '', ''], correct: m.correct ?? 0, explanation: m.explanation ?? '',
-      })) : [{ id: '1', question: '', options: ['', '', '', ''], correct: 0, explanation: '' }],
+        hint: m.hint ?? '',
+      })) : [{ id: '1', question: '', options: ['', '', '', ''], correct: 0, explanation: '', hint: '' }],
       balloon_questions: balloonQsDB.length > 0 ? balloonQsDB.map((m: any) => ({
         id: m.id ?? String(Math.random()), question: m.question ?? '',
         options: m.options ?? ['', '', '', ''], correct: m.correct ?? 0, explanation: m.explanation ?? '',
-      })) : [{ id: 'b1', question: '', options: ['', '', '', ''], correct: 0, explanation: '' }],
+        hint: m.hint ?? '',
+      })) : [{ id: 'b1', question: '', options: ['', '', '', ''], correct: 0, explanation: '', hint: '' }],
       drag_problems: dragProblems,
       ordering_problems: orderingProblems,
       code_fill_items: (q.code_fill_items ?? []).map((c: any) => ({
@@ -707,6 +770,7 @@ export const AdminPanel: React.FC = () => {
         answers: Array.isArray(c.answers) ? c.answers.join(', ') : (c.answers ?? ''),
         hint: c.hint ?? '', caption: c.caption ?? '',
       })),
+      hints: loadHintsForEdit(q.hints),
       game_items: [], drop_zones: [],
     })
     setReplaceTarget(q.id)
@@ -1218,6 +1282,8 @@ export const AdminPanel: React.FC = () => {
                       onClick={() => setQuestSubTab('create')}>+ Create / Edit Quest</button>
                     <button className={`btn btn-sm ${questSubTab === 'manage' ? 'btn-primary' : 'btn-outline-secondary'}`}
                       onClick={() => setQuestSubTab('manage')}>Manage Existing</button>
+                    <button className={`btn btn-sm ${questSubTab === 'hints' ? 'btn-primary' : 'btn-outline-secondary'}`}
+                      onClick={() => setQuestSubTab('hints')}>💡 Hints</button>
                   </div>
 
                   {questSubTab === 'create' && (
@@ -1409,7 +1475,7 @@ export const AdminPanel: React.FC = () => {
                             <div className="card-header d-flex justify-content-between align-items-center">
                               <h3 className="card-title mb-0">Multiple Choice Questions</h3>
                               <button className="btn btn-xs btn-outline-primary" onClick={() => qSet({
-                                mc_questions: [...questForm.mc_questions, { id: Date.now().toString(), question: '', options: ['', '', '', ''], correct: 0, explanation: '' }]
+                                mc_questions: [...questForm.mc_questions, { id: Date.now().toString(), question: '', options: ['', '', '', ''], correct: 0, explanation: '', hint: '' }]
                               })}>+ Add Q</button>
                             </div>
                             <div className="card-body" style={{ maxHeight: '380px', overflowY: 'auto' }}>
@@ -1435,6 +1501,8 @@ export const AdminPanel: React.FC = () => {
                                   ))}
                                   <input className="form-control form-control-sm" placeholder="Explanation (shown after answer)" value={q.explanation}
                                     onChange={e => { const qs = [...questForm.mc_questions]; qs[qi] = { ...qs[qi], explanation: e.target.value }; qSet({ mc_questions: qs }) }} />
+                                  <input className="form-control form-control-sm mt-1" placeholder="💡 Per-question hint (optional, shown in side panel while answering)" value={q.hint}
+                                    onChange={e => { const qs = [...questForm.mc_questions]; qs[qi] = { ...qs[qi], hint: e.target.value }; qSet({ mc_questions: qs }) }} />
                                 </div>
                               ))}
                               {questForm.mc_questions.length === 0 && <div className="text-muted" style={{ fontSize: '12px' }}>No questions yet</div>}
@@ -1523,7 +1591,7 @@ export const AdminPanel: React.FC = () => {
                             <div className="card-header d-flex justify-content-between align-items-center">
                               <h3 className="card-title mb-0">🎈 Balloon Pop Questions</h3>
                               <button className="btn btn-xs btn-outline-primary" onClick={() => qSet({
-                                balloon_questions: [...questForm.balloon_questions, { id: Date.now().toString(), question: '', options: ['', '', '', ''], correct: 0, explanation: '' }]
+                                balloon_questions: [...questForm.balloon_questions, { id: Date.now().toString(), question: '', options: ['', '', '', ''], correct: 0, explanation: '', hint: '' }]
                               })}>+ Add Q</button>
                             </div>
                             <div className="card-body" style={{ maxHeight: '380px', overflowY: 'auto' }}>
@@ -1550,6 +1618,8 @@ export const AdminPanel: React.FC = () => {
                                   ))}
                                   <input className="form-control form-control-sm" placeholder="Explanation (shown after pop)" value={bq.explanation}
                                     onChange={e => { const qs = [...questForm.balloon_questions]; qs[qi] = { ...qs[qi], explanation: e.target.value }; qSet({ balloon_questions: qs }) }} />
+                                  <input className="form-control form-control-sm mt-1" placeholder="💡 Per-question hint (optional, shown in side panel while answering)" value={bq.hint}
+                                    onChange={e => { const qs = [...questForm.balloon_questions]; qs[qi] = { ...qs[qi], hint: e.target.value }; qSet({ balloon_questions: qs }) }} />
                                 </div>
                               ))}
                               {questForm.balloon_questions.length === 0 && <div className="text-muted" style={{ fontSize: '12px' }}>No questions yet</div>}
@@ -1690,6 +1760,152 @@ export const AdminPanel: React.FC = () => {
                         </div>
                       </div>
                     </div>
+                  )}
+
+                  {/* ── Hints subtab ────────────────────────────────────────
+                     Authoring path #2 for hints. Authoring path #1 is the
+                     full quest form on the Create/Edit subtab. Authoring
+                     path #3 is direct SQL on quests.hints — preserved here
+                     via each row's `_extra` (see loadHintsForEdit). */}
+                  {questSubTab === 'hints' && (
+                    <>
+                      <div className="card mb-3">
+                        <div className="card-header">
+                          <h3 className="card-title">💡 Quest Hints</h3>
+                          <span className="card-subtitle ms-2 text-muted" style={{ fontSize: '11px' }}>
+                            Authored hints appear in the per-tab side panel during play. Untagged hints show on every tab.
+                          </span>
+                        </div>
+                        <div className="card-body">
+                          <div className="mb-3">
+                            <label className="form-label">Quest</label>
+                            <select
+                              className="form-select"
+                              value={hintsQuestId}
+                              onChange={e => loadHintsForQuest(e.target.value)}
+                            >
+                              <option value="">— Select a quest —</option>
+                              {[1, 2, 3].map(lvl => (
+                                <optgroup key={lvl} label={`Level ${lvl}`}>
+                                  {existingQuests
+                                    .filter(q => q.level === lvl)
+                                    .map(q => (
+                                      <option key={q.id} value={q.id}>
+                                        {q.title} {q.isactive ? '' : '(inactive)'}
+                                      </option>
+                                    ))}
+                                </optgroup>
+                              ))}
+                            </select>
+                            <div className="form-text text-muted" style={{ fontSize: '11px' }}>
+                              Editing here updates only the <code>hints</code> column. Other quest fields are untouched.
+                            </div>
+                          </div>
+
+                          {hintsQuestId && (
+                            <>
+                              <div className="d-flex align-items-center justify-content-between mb-2">
+                                <div style={{ fontSize: '12px', color: '#8b949e' }}>
+                                  <strong>{hintsDraft.length}</strong> hint{hintsDraft.length === 1 ? '' : 's'}
+                                  {hintsDirty && <span className="text-warning ms-2">● unsaved changes</span>}
+                                </div>
+                                <button className="btn btn-sm btn-outline-primary" onClick={addHintRow}>
+                                  + Add Hint
+                                </button>
+                              </div>
+
+                              {hintsDraft.length === 0 && (
+                                <div className="alert alert-info py-2" style={{ fontSize: '12px' }}>
+                                  No hints yet. Click <strong>+ Add Hint</strong> above, or run an SQL update on this quest's <code>hints</code> column.
+                                </div>
+                              )}
+
+                              {hintsDraft.map((h, i) => (
+                                <div key={h.id} className="card mb-2" style={{ border: '1px solid rgba(88,166,255,0.2)' }}>
+                                  <div className="card-body" style={{ padding: '12px' }}>
+                                    <div className="d-flex align-items-center gap-2 mb-2">
+                                      <span className="badge bg-blue-lt">#{i + 1}</span>
+                                      <input
+                                        className="form-control form-control-sm"
+                                        style={{ maxWidth: 60, textAlign: 'center' }}
+                                        placeholder="💡"
+                                        value={h.icon}
+                                        onChange={e => updateHintRow(i, { icon: e.target.value })}
+                                        title="Emoji icon (optional)"
+                                      />
+                                      <select
+                                        className="form-select form-select-sm"
+                                        style={{ maxWidth: 200 }}
+                                        value={h.activity}
+                                        onChange={e => updateHintRow(i, { activity: e.target.value as HintFormRow['activity'] })}
+                                      >
+                                        {HINT_ACTIVITY_OPTIONS.map(opt => (
+                                          <option key={opt.value} value={opt.value}>{opt.label}</option>
+                                        ))}
+                                      </select>
+                                      <div className="ms-auto d-flex gap-1">
+                                        <button
+                                          className="btn btn-xs btn-ghost-secondary"
+                                          disabled={i === 0}
+                                          onClick={() => moveHintRow(i, -1)}
+                                          title="Move up"
+                                        >▲</button>
+                                        <button
+                                          className="btn btn-xs btn-ghost-secondary"
+                                          disabled={i === hintsDraft.length - 1}
+                                          onClick={() => moveHintRow(i, 1)}
+                                          title="Move down"
+                                        >▼</button>
+                                        <button
+                                          className="btn btn-xs btn-ghost-danger"
+                                          onClick={() => removeHintRow(i)}
+                                          title="Remove"
+                                        >✕</button>
+                                      </div>
+                                    </div>
+                                    <input
+                                      className="form-control form-control-sm mb-2"
+                                      placeholder="Hint title (e.g. 'Think about the loop boundary')"
+                                      value={h.title}
+                                      onChange={e => updateHintRow(i, { title: e.target.value })}
+                                    />
+                                    <textarea
+                                      className="form-control form-control-sm"
+                                      placeholder="Hint body — what the player sees when they reveal this hint."
+                                      rows={2}
+                                      value={h.body}
+                                      onChange={e => updateHintRow(i, { body: e.target.value })}
+                                    />
+                                    {Object.keys(h._extra).length > 0 && (
+                                      <div className="text-muted mt-1" style={{ fontSize: '10px' }}>
+                                        Extra fields preserved from SQL: <code>{Object.keys(h._extra).join(', ')}</code>
+                                      </div>
+                                    )}
+                                  </div>
+                                </div>
+                              ))}
+
+                              <div className="d-flex gap-2 mt-3">
+                                <button
+                                  className="btn btn-primary"
+                                  disabled={hintsSaving || !hintsDirty}
+                                  onClick={saveHints}
+                                >
+                                  {hintsSaving ? 'Saving…' : '💾 Save Hints'}
+                                </button>
+                                <button
+                                  className="btn btn-outline-secondary"
+                                  disabled={hintsSaving || !hintsDirty}
+                                  onClick={() => loadHintsForQuest(hintsQuestId)}
+                                >
+                                  Discard Changes
+                                </button>
+                              </div>
+                            </>
+                          )}
+                        </div>
+                      </div>
+                    </>
                   )}
 
                   {/* Manage tab */}

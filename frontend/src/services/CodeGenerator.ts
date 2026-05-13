@@ -110,12 +110,17 @@ const INCLUDE_ORDER = [
 
 const str = (v: unknown): string => String(v ?? '').trim();
 
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
 function detectIncludes(allCode: string[]): string[] {
   const needed = new Set<string>(['iostream']);
   const combined = allCode.join(' ');
 
   for (const [keyword, header] of Object.entries(CPP_INCLUDES)) {
-    if (combined.includes(keyword)) needed.add(header);
+    const tokenPattern = new RegExp(`(?:^|[^A-Za-z0-9_])(?:std::)?${escapeRegExp(keyword)}(?:$|[^A-Za-z0-9_])`);
+    if (tokenPattern.test(combined)) needed.add(header);
   }
   if (/\bvector\s*</.test(combined))   needed.add('vector');
   if (/\bmap\s*</.test(combined))      needed.add('map');
@@ -220,6 +225,14 @@ function normalizeStatement(code: string): string {
   return s + ';';
 }
 
+function normalizeCondition(code: string): string {
+  return code
+    .replace(/^[({[\s]+|[)}\]\s]+$/g, '')
+    .replace(/\band\b/g, '&&')
+    .replace(/\bor\b/g, '||')
+    .trim() || '/* condition */';
+}
+
 // ─── Node-type specific code emitters ────────────────────────────────────────
 // Each matches the grammar construct for that ISO 5807 shape.
 
@@ -243,8 +256,9 @@ function emitIO(label: string, code: string): string {
     return normalizeStatement(c);
   }
   if (l.includes('output') || l.includes('print') || l.includes('display') || l.includes('write')) {
-    const val = c.includes('"') ? c : `${c} << endl`;
-    return `cout << ${val};`;
+    const value = c.replace(/;$/, '').trim();
+    if (value.includes('<<')) return `cout << ${value};`;
+    return `cout << ${value} << endl;`;
   }
   if (l.includes('input') || l.includes('read') || l.includes('enter')) {
     return `cin >> ${c};`;
@@ -539,9 +553,7 @@ function traverse(
     // ── Decision → IfStatement or WhileLoop ──────────────────────────────────
     if (node.type === 'decision') {
       const rawCondition = resolveCode(node);
-      const condition = rawCondition
-        .replace(/^[({[\s]+|[)}\]\s]+$/g, '')
-        .trim() || '/* condition */';
+      const condition = normalizeCondition(rawCondition);
 
       const trueEdge = outEdges.find(e => {
         const l = str(e.label).toLowerCase();

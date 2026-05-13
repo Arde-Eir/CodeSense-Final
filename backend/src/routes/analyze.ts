@@ -97,6 +97,38 @@ router.post('/analyze', (req, res) => {
     });
   }
 
+  const unsupportedFatal = unsupportedWarnings.some(w =>
+    /Templates|STL containers|STL headers|Lambda expressions|concepts|Coroutines/.test(w.message)
+  );
+  if (unsupportedFatal) {
+    return res.status(200).json({
+      success: false,
+      tokens: lexResult.tokens,
+      errors: unsupportedWarnings.map(w => ({
+        type: 'semantic' as const,
+        severity: 'error' as const,
+        message: w.message,
+        line: w.line,
+        column: w.column,
+      })),
+      warnings: [],
+      ast: null,
+      symbolTable: {},
+      safetyChecks: [],
+      cfg: { nodes: [], edges: [] },
+      cognitiveComplexity: 0,
+      cyclomaticComplexity: { score: 0, rating: 'low', interpretation: '' },
+      symbolicExecution: [],
+      logs: [],
+      gamification: { xpEarned: 0, qualityBonus: 0, levelTitle: 'Squire' },
+      explanations: [
+        '❌ **Status:** Unsupported C++ Feature',
+        ...unsupportedWarnings.map(w => `⚠️ **Unsupported Feature:** ${w.message}`),
+        '💡 **Tip:** This analyzer supports intro/intermediate C++: functions, arrays, pointers, loops, conditionals, basic I/O, math, and file streams.',
+      ],
+    });
+  }
+
   // ─── PHASE 2: Syntactic Analysis ──────────────────────────────────────────
   let ast: any = null;
   try {
@@ -293,10 +325,10 @@ router.post('/analyze', (req, res) => {
       console.error('⚠️ Symbolic Executor Crashed:', execErr?.message);
       executorCrashMsg = execErr?.message ?? 'unknown error';
       safetyChecks = [{
-        type: 'runtime',
-        severity: 'warning',
-        message: `Safety analyzer stopped early: ${executorCrashMsg}`,
         line: 0,
+        operation: 'Safety analyzer',
+        status: 'WARNING',
+        message: `Safety analyzer stopped early: ${executorCrashMsg}`,
       }];
     }
 

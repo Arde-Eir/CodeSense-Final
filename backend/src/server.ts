@@ -87,13 +87,16 @@ app.use((req: Request, res: Response) => {
       message: `Route not found: ${req.method} ${req.path}`,
       line: 0
     }],
+    warnings: [],
     tokens: [],
     ast: null,
     safetyChecks: [],
     cfg: { nodes: [], edges: [] },
     cognitiveComplexity: 0,
+    cyclomaticComplexity: { score: 0, rating: 'low', interpretation: '' },
     gamification: { xpEarned: 0, qualityBonus: 0 },
     symbolicExecution: [],
+    logs: [],
     explanations: ['❌ **Status:** API route not found.']
   });
 });
@@ -108,21 +111,33 @@ app.use((err: any, _req: Request, res: Response, _next: NextFunction) => {
         success: false,
         errors: [{
             type: isSyntactic ? 'syntactic' : 'semantic',
+            severity: 'error',
             message: err.message,
             line: err.location?.start?.line || 0
         }],
+        warnings: [],
+        tokens: [],
+        ast: null,
         safetyChecks: [],
         cfg: { nodes: [], edges: [] },
+        cognitiveComplexity: 0,
+        cyclomaticComplexity: { score: 0, rating: 'low', interpretation: '' },
+        gamification: { xpEarned: 0, qualityBonus: 0, levelTitle: 'Squire' },
+        symbolicExecution: [],
+        logs: [],
         explanations: ["The engine encountered an unexpected structure and stopped."]
     });
 });
 
 /**
  * 5. SERVER EXECUTION LOGIC
- * Only run app.listen locally to avoid conflict with Vercel's serverless wrapper.
+ * Only run app.listen when this file is executed directly. Serverless hosts can
+ * import the Express app without binding a second listener.
  */
-app.listen(PORT, () => {
-    console.log(`✅ CodeSense Backend is running on port ${PORT}`);
-});
+if (require.main === module) {
+    app.listen(PORT, () => {
+        console.log(`✅ CodeSense Backend is running on port ${PORT}`);
+    });
+}
 
 export default app;

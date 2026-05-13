@@ -189,7 +189,7 @@ export const ValidationPanel: React.FC<{
             }}>
               Fix all errors above before generating code.
               Warnings are non-blocking but may cause incorrect output.
-              Offset/Junction nodes are routing-only; use Decision nodes for branching logic.
+              Junction nodes are routing-only merge points; use Decision nodes for branching logic.
             </div>
           )}
         </div>

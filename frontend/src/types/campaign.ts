@@ -40,8 +40,8 @@ export interface HintItem {
 // ─── Mini-game data shapes (one per ActivityTab) ───────────────────────────
 export interface GameItem  { id: string; label: string; color: string; }
 export interface DropZone  { id: string; label: string; accepted: string; }
-export interface OrderItem { id: string; label: string; description?: string; correct_order: number; }
-export interface MCQ       { id: string; question: string; options: string[]; correct: number; explanation: string; mode?: 'balloon' | 'mc'; }
+export interface OrderItem { id: string; label: string; description?: string; correct_order: number; /** Optional per-item hint shown in the side panel when this item is the active one. */ hint?: string; }
+export interface MCQ       { id: string; question: string; options: string[]; correct: number; explanation: string; mode?: 'balloon' | 'mc'; /** Optional per-question hint shown in the side panel when this question is active. */ hint?: string; }
 
 export interface CodeFillItem {
   id: string;

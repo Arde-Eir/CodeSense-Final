@@ -28,6 +28,11 @@ describe('TokenDrawer', () => {
     expect(screen.getByText('Lexical Analysis')).toBeInTheDocument();
   });
 
+  it('renders above the fixed app header layer', () => {
+    render(<TokenDrawer tokens={TOKENS} isOpen={true} onClose={vi.fn()} />);
+    expect(screen.getByRole('dialog', { name: /lexical analysis token drawer/i })).toHaveStyle({ zIndex: '5001' });
+  });
+
   it('shows total token count', () => {
     render(<TokenDrawer tokens={TOKENS} isOpen={true} onClose={vi.fn()} />);
     expect(screen.getByText(`${TOKENS.length} total tokens`)).toBeInTheDocument();

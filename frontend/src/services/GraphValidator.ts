@@ -38,6 +38,23 @@ const isTrueLabel  = (l: string) => l === 'true'  || l === 'yes';
 const isFalseLabel = (l: string) => l === 'false' || l === 'no';
 const isBranchLabel = (l: string) => isTrueLabel(l) || isFalseLabel(l);
 
+const CONDITION_PLACEHOLDERS = new Set(['condition', 'if condition', 'decision']);
+
+function hasOddCount(value: string, needle: string): boolean {
+  return value.split(needle).length % 2 === 0;
+}
+
+function isInvalidCondition(value: string): boolean {
+  const condition = str(value);
+  if (!condition) return true;
+  const lowered = condition.toLowerCase();
+  if (CONDITION_PLACEHOLDERS.has(lowered)) return true;
+  if (lowered.includes('e.g.') || lowered.includes('example')) return true;
+  if (hasOddCount(condition, "'") || hasOddCount(condition, '"')) return true;
+  if (/[{};]/.test(condition)) return true;
+  return false;
+}
+
 const LINEAR_NODE_TYPES = new Set([
   'process',
   'io',
@@ -95,6 +112,27 @@ export function validateGraph(nodes: Node[], edges: Edge[]): ValidationResult {
   for (const e of edges) {
     if (!inEdges.has(e.target)) inEdges.set(e.target, []);
     inEdges.get(e.target)!.push(e);
+  }
+
+  const selfLoops = edges.filter(e => e.source === e.target);
+  if (selfLoops.length > 0) {
+    push('error', 'SELF_LOOP_EDGES',
+      `${selfLoops.length} edge(s) loop directly back to the same node. Flowchart steps must connect to a different next step; use a Decision node with a loop branch for repetition.`,
+      { nodeIds: [...new Set(selfLoops.map(e => e.source))], edgeIds: selfLoops.map(e => e.id) });
+  }
+
+  const seenConnections = new Map<string, Edge[]>();
+  for (const e of edges) {
+    const key = `${e.source}->${e.target}:${str(e.label).toLowerCase()}`;
+    const matches = seenConnections.get(key) ?? [];
+    matches.push(e);
+    seenConnections.set(key, matches);
+  }
+  const duplicateEdges = [...seenConnections.values()].filter(matches => matches.length > 1).flat();
+  if (duplicateEdges.length > 0) {
+    push('error', 'DUPLICATE_EDGES',
+      `${duplicateEdges.length} duplicate edge(s) repeat the same connection and label. Delete duplicate flow lines so code generation follows one clear path.`,
+      { edgeIds: duplicateEdges.map(e => e.id) });
   }
 
   // ── 1. Empty canvas ────────────────────────────────────────────────────────
@@ -261,10 +299,10 @@ export function validateGraph(nodes: Node[], edges: Edge[]): ValidationResult {
     // label as "Condition", that is fine — the code field is what gets emitted.
     const dCode  = str(d.data?.code);
     const dLabel = str(d.data?.label);
-    const hasRealCondition = dCode || (dLabel && dLabel !== 'Condition');
-    if (!hasRealCondition) {
+    const condition = dCode || dLabel;
+    if (isInvalidCondition(condition)) {
       push('error', 'DECISION_EMPTY_CONDITION',
-        'Decision node has no condition set. Double-click it and enter a C++ condition like "hp > 0" or "i < n".',
+        'Decision node needs a valid C++ condition. Double-click it and enter only the expression, for example: hp > 0 || i < n.',
         { nodeIds: [d.id] });
     }
   }
@@ -337,17 +375,16 @@ export function validateGraph(nodes: Node[], edges: Edge[]): ValidationResult {
   }
 
   // ── 11. Placeholder nodes with no real code ───────────────────────────────
-  const PLACEHOLDERS = new Set(['Process', 'Output', 'Function Call', 'Input',
-                                 'Delay', 'Data Store', 'Document', 'Condition']);
-  const placeholder = nodes.filter(n => {
-    if (['terminator', 'connector', 'off_page_connector', 'junction', 'decision'].includes(n.type ?? '')) return false;
-    return PLACEHOLDERS.has(str(n.data?.label)) && !str(n.data?.code);
+  const REQUIRED_CODE_NODE_TYPES = new Set(['process', 'io', 'manual_input', 'predefined',
+                                            'delay', 'database', 'document']);
+  const missingCode = nodes.filter(n => {
+    if (!REQUIRED_CODE_NODE_TYPES.has(String(n.type ?? ''))) return false;
+    return !str(n.data?.code);
   });
-  if (placeholder.length > 0) {
-    push('warning', 'PLACEHOLDER_NODES',
-      `${placeholder.length} node(s) still have default labels and no C++ code — ` +
-      '"// TODO" comments will appear in the output. Double-click them to add real code.',
-      { nodeIds: placeholder.map(n => n.id) });
+  if (missingCode.length > 0) {
+    push('error', 'MISSING_NODE_CODE',
+      `${missingCode.length} executable node(s) have no C++ code. Double-click each highlighted node and add the statement/expression it should generate.`,
+      { nodeIds: missingCode.map(n => n.id) });
   }
 
   return finish(issues);

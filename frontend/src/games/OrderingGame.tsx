@@ -10,7 +10,7 @@ interface Props {
   resetSignal: number;
 }
 
-const OrderingGameInner: React.FC<{ rawItems: OrderItem[]; onComplete: (score: number, total: number) => void; resetSignal: number }> = ({ rawItems, onComplete, resetSignal }) => {
+const OrderingGameInner: React.FC<{ rawItems: OrderItem[]; onComplete: (score: number, total: number) => void; resetSignal: number; question?: string }> = ({ rawItems, onComplete, resetSignal, question }) => {
   const [shuffleSeed, setShuffleSeed] = React.useState(0);
   const seededShuffle = React.useCallback((items: OrderItem[], seed: number) => {
     if (items.length <= 1) return [...items];
@@ -80,7 +80,7 @@ const OrderingGameInner: React.FC<{ rawItems: OrderItem[]; onComplete: (score: n
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
       <div style={{ background: 'rgba(163,113,247,0.08)', border: '1px solid rgba(163,113,247,0.25)', borderRadius: 8, padding: '10px 14px', fontSize: 13, color: '#8b949e', fontFamily: 'Inter,sans-serif' }}>
-        🔢 Drag the steps into the correct order
+        🔢 {question?.trim() || 'Drag the steps into the correct order'}
       </div>
       {order.map((item, i) => {
         const rowCorrect = checked ? item.correct_order === i + 1 : null;
@@ -119,15 +119,74 @@ const OrderingGameInner: React.FC<{ rawItems: OrderItem[]; onComplete: (score: n
   );
 };
 
-export const OrderingGame: React.FC<Props> = ({ items: rawItems, onComplete, resetSignal }) => {
+interface OrderProblem {
+  id: string;
+  question?: string;
+  items: OrderItem[];
+}
+
+function buildOrderProblems(items: OrderItem[]): OrderProblem[] {
+  const map = new Map<string, OrderProblem>();
+  for (const item of items as Array<OrderItem & { problem_id?: string; question?: string }>) {
+    const id = item.problem_id ?? 'default';
+    const problem = map.get(id) ?? { id, question: item.question, items: [] };
+    if (!problem.question && item.question) problem.question = item.question;
+    problem.items.push(item);
+    map.set(id, problem);
+  }
+  return Array.from(map.values()).map(problem => ({
+    ...problem,
+    items: [...problem.items].sort((a, b) => (a.correct_order ?? 0) - (b.correct_order ?? 0)),
+  }));
+}
+
+const MultiProblemOrderingGame: React.FC<Props> = ({ items, onComplete, resetSignal }) => {
+  const problems = React.useMemo(() => buildOrderProblems(items), [items]);
+  const [idx, setIdx] = React.useState(0);
+  const scoreRef = React.useRef(0);
+
+  React.useEffect(() => {
+    setIdx(0);
+    scoreRef.current = 0;
+  }, [resetSignal, problems.length]);
+
+  const current = problems[idx];
+  if (!current) {
+    return <OrderingGameInner rawItems={[]} onComplete={onComplete} resetSignal={resetSignal} />;
+  }
+
+  const completeProblem = (score: number) => {
+    scoreRef.current += score;
+    if (idx >= problems.length - 1) {
+      onComplete(scoreRef.current, problems.length);
+    } else {
+      setIdx(i => i + 1);
+    }
+  };
+
   return (
-    <OrderingGameInner
-      key={resetSignal}
-      rawItems={rawItems}
-      onComplete={onComplete}
-      resetSignal={resetSignal}
-    />
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+      {problems.length > 1 && (
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+          <div style={{ flex: 1, height: 5, background: '#21262d', borderRadius: 3, overflow: 'hidden' }}>
+            <div style={{ width: `${(idx / problems.length) * 100}%`, height: '100%', background: '#a371f7', transition: 'width .25s ease' }} />
+          </div>
+          <span style={{ fontSize: 11, color: '#484f58', fontFamily: "'JetBrains Mono',monospace" }}>
+            {idx + 1}/{problems.length}
+          </span>
+        </div>
+      )}
+      <OrderingGameInner
+        key={`${current.id}-${resetSignal}`}
+        rawItems={current.items}
+        question={current.question}
+        onComplete={completeProblem}
+        resetSignal={resetSignal}
+      />
+    </div>
   );
 };
+
+export const OrderingGame: React.FC<Props> = (props) => <MultiProblemOrderingGame {...props} />;
 
 export default OrderingGame;

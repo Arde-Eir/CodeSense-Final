@@ -44,6 +44,7 @@ interface ExtendedSymbolInfo extends SymbolInfo {
   paramCount?: number;
   minParamCount?: number; // params without default values (minimum required)
   paramTypes?: string[];  // declared type of each param, for call-site checking
+  paramDimensions?: number[][];
 }
 
 export class TypeChecker {
@@ -88,6 +89,7 @@ export class TypeChecker {
     this.initializeStandardLibrary();
     this.preScanFunctions(ast);
     this.visit(ast);
+    this.validateCalledFunctionDefinitions();
     this.performDeadCodeAnalysis();
 
     return { symbolTable: this.symbolTable, errors: this.errors };
@@ -210,8 +212,8 @@ export class TypeChecker {
     const prog = ast as any;
     const scanBody = (nodes: any[]) => {
       for (const node of nodes) {
-        if (node?.type !== 'FunctionDecl') continue;
-        const func = node as FunctionDeclNode;
+        if (node?.type !== 'FunctionDecl' && node?.type !== 'FunctionPrototype') continue;
+        const func = node as FunctionDeclNode | FunctionPrototypeNode;
         const key = `global::${func.name}`;
         if (this.symbolTable[key]) continue; // already registered by stdlib
         const entry: ExtendedSymbolInfo = {
@@ -225,6 +227,7 @@ export class TypeChecker {
           paramCount:    func.params.length,
           minParamCount: func.params.filter((p: ParameterNode) => !p.defaultValue).length,
           paramTypes:    func.params.map((p: ParameterNode) => p.varType),
+          paramDimensions: func.params.map((p: ParameterNode) => this.getDimensionSizes(p.dimensions)),
         };
         this.symbolTable[key] = entry as SymbolInfo;
       }
@@ -305,7 +308,12 @@ export class TypeChecker {
       this.addSymbol(proto.name, proto.returnType, proto.line || 0, true, undefined, false, 'function');
     }
     const entry = this.symbolTable[key] as ExtendedSymbolInfo;
-    if (entry) entry.paramCount = proto.params.length;
+    if (entry) {
+      entry.paramCount = proto.params.length;
+      entry.minParamCount = proto.params.filter((p: ParameterNode) => !p.defaultValue).length;
+      entry.paramTypes = proto.params.map((p: ParameterNode) => p.varType);
+      entry.paramDimensions = proto.params.map((p: ParameterNode) => this.getDimensionSizes(p.dimensions));
+    }
     return proto.returnType;
   }
 
@@ -340,6 +348,30 @@ export class TypeChecker {
           'error',
         );
       }
+      const definitionParamTypes = func.params.map((p: ParameterNode) => p.varType);
+      const definitionParamDimensions = func.params.map((p: ParameterNode) => this.getDimensionSizes(p.dimensions));
+      (existing.paramTypes || []).forEach((paramType, i) => {
+        if (definitionParamTypes[i] && paramType !== definitionParamTypes[i]) {
+          this.addError(
+            node,
+            `Function '${func.name}': parameter ${i + 1} type '${definitionParamTypes[i]}' does not match prototype '${paramType}'`,
+            'error',
+          );
+        }
+      });
+      (existing.paramDimensions || []).forEach((paramDims, i) => {
+        const defDims = definitionParamDimensions[i] || [];
+        if (!this.arrayDimensionsCompatible(paramDims, defDims, true)) {
+          this.addError(
+            node,
+            `Function '${func.name}': parameter ${i + 1} array dimensions do not match prototype`,
+            'error',
+          );
+        }
+      });
+      existing.paramTypes = definitionParamTypes;
+      existing.paramDimensions = definitionParamDimensions;
+      existing.minParamCount = func.params.filter((p: ParameterNode) => !p.defaultValue).length;
       existing.isDefined = true;
     } else {
       this.addSymbol(func.name, func.returnType, func.line || 0, true, undefined, true, 'function');
@@ -348,6 +380,7 @@ export class TypeChecker {
         newEntry.paramCount    = func.params.length;
         newEntry.minParamCount = func.params.filter((p: ParameterNode) => !p.defaultValue).length;
         newEntry.paramTypes    = func.params.map((p: ParameterNode) => p.varType);
+        newEntry.paramDimensions = func.params.map((p: ParameterNode) => this.getDimensionSizes(p.dimensions));
       }
     }
 
@@ -364,7 +397,7 @@ export class TypeChecker {
   }
 
   // 1. Register the symbol as a parameter
-  this.addSymbol(param.name, param.varType, param.line || 0, true, undefined, true, 'parameter');
+  this.addSymbol(param.name, param.varType, param.line || 0, true, this.getDimensionSizes(param.dimensions), true, 'parameter');
 
   // 2. Track the initial "Write" from the caller. 
   // We don't call markRead yet because the function body hasn't actually used it.
@@ -526,7 +559,7 @@ export class TypeChecker {
         this.addError(idxNode, `Array index must be an integer, got '${idxType}'`);
       }
       const idxAny = idxNode as any;
-      if (idxAny.type === 'Integer' && symbol.dimensions && symbol.dimensions[i] !== undefined) {
+      if (idxAny.type === 'Integer' && symbol.dimensions && symbol.dimensions[i] !== undefined && symbol.dimensions[i] > 0) {
         if (idxAny.value < 0) {
           this.addError(idxNode, `Array index ${idxAny.value} is negative`);
         } else if (idxAny.value >= symbol.dimensions[i]) {
@@ -937,6 +970,7 @@ export class TypeChecker {
           if (!arg) return;
           const argType = argTypes[i];
           const normParam = paramType.replace(/\s+/g, '');
+          const paramDims = ext.paramDimensions?.[i] || [];
 
           // Pass-by-non-const-reference: arg must be an lvalue
           const isNonConstRef = normParam.includes('&') && !normParam.startsWith('const');
@@ -957,6 +991,22 @@ export class TypeChecker {
             if (arg.type !== 'AddressOf') {
               this.addError(arg,
                 `Argument ${i + 1} to '${call.name}': expected pointer '${paramType}' but got '${argType}' — did you mean '&${typeof arg === 'string' ? arg : arg.name ?? 'var'}'?`, 'error');
+            }
+          }
+
+          if (paramDims.length > 0) {
+            const argName = typeof arg === 'string'
+              ? arg
+              : arg?.type === 'Identifier'
+              ? arg.name
+              : '';
+            const argSymbol = argName ? this.lookupSymbol(argName) : null;
+            if (!argSymbol?.dimensions?.length) {
+              this.addError(arg,
+                `Argument ${i + 1} to '${call.name}': expected array parameter but got '${argType ?? 'unknown'}'.`, 'error');
+            } else if (!this.arrayDimensionsCompatible(paramDims, argSymbol.dimensions, false)) {
+              this.addError(arg,
+                `Argument ${i + 1} to '${call.name}': array dimensions [${argSymbol.dimensions.join('][')}] are incompatible with parameter [${paramDims.join('][')}].`, 'error');
             }
           }
         });
@@ -1126,7 +1176,11 @@ export class TypeChecker {
       targetType = symbol.type;
     } else {
       targetType = this.visit(assign.target);
-      if ((assign.target as any).name) targetName = (assign.target as any).name;
+      if ((assign.target as any).name) {
+        targetName = (assign.target as any).name;
+        const targetSymbol = this.lookupSymbol(targetName) as ExtendedSymbolInfo | null;
+        if (targetSymbol) targetSymbol.initialized = true;
+      }
     }
 
     const valueType = this.visit(assign.value);
@@ -1609,6 +1663,21 @@ if (['&', '|', '^', '<<', '>>'].includes(bin.operator)) {
     });
   }
 
+  private validateCalledFunctionDefinitions(): void {
+    Object.entries(this.symbolTable).forEach(([fullName, symbol]) => {
+      if (symbol.kind !== 'function') return;
+      if (symbol.name === 'main') return;
+      if ((symbol as ExtendedSymbolInfo).isDefined !== false) return;
+      const uses = this.usageTracker.get(fullName) || 0;
+      if (uses === 0) return;
+      this.addError(
+        { line: symbol.line } as any,
+        `Function '${symbol.name}' is declared as a prototype but has no definition.`,
+        'error',
+      );
+    });
+  }
+
   private getFullyScopedName(name: string): string | null {
   for (let i = this.scopeStack.length - 1; i >= 0; i--) {
     const scope = this.scopeStack.slice(0, i + 1).join('::');
@@ -1688,6 +1757,26 @@ if (['&', '|', '^', '<<', '>>'].includes(bin.operator)) {
       initialized, dimensions, isDefined, kind, isConst,
     };
     this.symbolTable[scopedName] = entry as SymbolInfo;
+  }
+
+  private getDimensionSizes(dimensions?: ASTNode[]): number[] {
+    if (!Array.isArray(dimensions)) return [];
+    return dimensions.map((dim: any) => {
+      if (!dim) return 0;
+      if (typeof dim.value === 'number') return dim.value;
+      const literal = Number(dim.value);
+      return Number.isFinite(literal) ? literal : 0;
+    });
+  }
+
+  private arrayDimensionsCompatible(expected: number[], actual: number[], definitionCheck: boolean): boolean {
+    if (expected.length !== actual.length) return false;
+    return expected.every((expectedSize, index) => {
+      const actualSize = actual[index] ?? 0;
+      if (expectedSize === 0 || actualSize === 0) return true;
+      if (!definitionCheck && index === 0) return true;
+      return expectedSize === actualSize;
+    });
   }
 
   private lookupSymbol(name: string): SymbolInfo | null {

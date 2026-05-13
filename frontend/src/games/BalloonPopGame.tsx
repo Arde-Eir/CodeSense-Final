@@ -98,9 +98,12 @@ interface Props {
   questions:    MCQ[];
   onComplete:   (score: number, total: number) => void;
   resetSignal?: number;
+  /** Notifies the parent of the active question index so the side panel can
+   *  show this question's per-item hint. */
+  onItemChange?: (index: number) => void;
 }
 
-export const BalloonPopGame: React.FC<Props> = ({ questions, onComplete, resetSignal }) => {
+export const BalloonPopGame: React.FC<Props> = ({ questions, onComplete, resetSignal, onItemChange }) => {
   const canvasRef    = useRef<HTMLCanvasElement>(null);
   const rafRef       = useRef<number>(0);
   const t0Ref        = useRef<number>(0);
@@ -130,6 +133,10 @@ export const BalloonPopGame: React.FC<Props> = ({ questions, onComplete, resetSi
     explanation:  '',
     correctLabel: '',
   });
+
+  // Notify parent of the active question so the side panel can show the
+  // per-question hint. Fires on mount and every qIdx transition.
+  useEffect(() => { onItemChange?.(ui.qIdx); }, [ui.qIdx, onItemChange]);
 
   const syncUi = useCallback(() => {
     const g = gs.current;

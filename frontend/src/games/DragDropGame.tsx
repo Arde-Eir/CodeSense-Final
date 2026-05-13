@@ -26,7 +26,8 @@ const DragDropGameInner: React.FC<{
   items:      GameItem[];
   zones:      DropZone[];
   onComplete: (score: number, total: number) => void;
-}> = ({ items, zones, onComplete }) => {
+  question?:  string;
+}> = ({ items, zones, onComplete, question }) => {
   const [dropped,       setDropped]       = React.useState<Record<string, string>>({});
   const [dragOver,      setDragOver]      = React.useState<string | null>(null);
   const [dragging,      setDragging]      = React.useState<string | null>(null);
@@ -74,7 +75,7 @@ const DragDropGameInner: React.FC<{
         borderRadius: 8, padding: '10px 14px',
         fontSize: 13, color: '#8b949e', fontFamily: 'Inter,sans-serif',
       }}>
-        🧩 Drag each term to its matching description
+        🧩 {question?.trim() || 'Drag each term to its matching description'}
       </div>
 
       {/* Column headers */}
@@ -287,13 +288,82 @@ const DragDropGameInner: React.FC<{
   );
 };
 
-export const DragDropGame: React.FC<Props> = ({ items, zones, onComplete, resetSignal }) => (
-  <DragDropGameInner
-    key={resetSignal}
-    items={items}
-    zones={zones}
-    onComplete={onComplete}
-  />
-);
+interface DragProblem {
+  id: string;
+  question?: string;
+  items: GameItem[];
+  zones: DropZone[];
+}
+
+function buildDragProblems(items: GameItem[], zones: DropZone[]): DragProblem[] {
+  const ids = new Set<string>();
+  for (const item of items as Array<GameItem & { problem_id?: string }>) ids.add(item.problem_id ?? 'default');
+  for (const zone of zones as Array<DropZone & { problem_id?: string }>) ids.add(zone.problem_id ?? 'default');
+
+  return Array.from(ids).map(id => {
+    const problemItems = (items as Array<GameItem & { problem_id?: string; question?: string }>)
+      .filter(item => (item.problem_id ?? 'default') === id);
+    const problemZones = (zones as Array<DropZone & { problem_id?: string }>)
+      .filter(zone => (zone.problem_id ?? 'default') === id);
+    return {
+      id,
+      question: problemItems.find(item => item.question)?.question,
+      items: problemItems,
+      zones: problemZones,
+    };
+  }).filter(problem => problem.items.length > 0 || problem.zones.length > 0);
+}
+
+const MultiProblemDragDropGame: React.FC<Props> = ({ items, zones, onComplete, resetSignal }) => {
+  const problems = React.useMemo(() => buildDragProblems(items, zones), [items, zones]);
+  const [idx, setIdx] = React.useState(0);
+  const scoreRef = React.useRef(0);
+  const totalRef = React.useRef(0);
+
+  React.useEffect(() => {
+    setIdx(0);
+    scoreRef.current = 0;
+    totalRef.current = 0;
+  }, [resetSignal, problems.length]);
+
+  const current = problems[idx];
+  if (!current) {
+    return <DragDropGameInner items={[]} zones={[]} onComplete={onComplete} />;
+  }
+
+  const completeProblem = (score: number, total: number) => {
+    scoreRef.current += score;
+    totalRef.current += total;
+    if (idx >= problems.length - 1) {
+      onComplete(scoreRef.current, totalRef.current);
+    } else {
+      setIdx(i => i + 1);
+    }
+  };
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+      {problems.length > 1 && (
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+          <div style={{ flex: 1, height: 5, background: '#21262d', borderRadius: 3, overflow: 'hidden' }}>
+            <div style={{ width: `${(idx / problems.length) * 100}%`, height: '100%', background: '#58a6ff', transition: 'width .25s ease' }} />
+          </div>
+          <span style={{ fontSize: 11, color: '#484f58', fontFamily: "'JetBrains Mono',monospace" }}>
+            {idx + 1}/{problems.length}
+          </span>
+        </div>
+      )}
+      <DragDropGameInner
+        key={`${current.id}-${resetSignal}`}
+        items={current.items}
+        zones={current.zones}
+        question={current.question}
+        onComplete={completeProblem}
+      />
+    </div>
+  );
+};
+
+export const DragDropGame: React.FC<Props> = (props) => <MultiProblemDragDropGame {...props} />;
 
 export default DragDropGame;

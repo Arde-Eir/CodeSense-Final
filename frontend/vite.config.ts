@@ -15,7 +15,19 @@ export default defineConfig({
     },
   },
   build: {
-    // This helps with the large chunk warning you saw earlier
     chunkSizeWarningLimit: 1000,
+    rollupOptions: {
+      output: {
+        manualChunks(id) {
+          if (!id.includes('node_modules')) return undefined
+          if (id.includes('monaco-editor') || id.includes('@monaco-editor')) return 'vendor-monaco'
+          if (id.includes('@xyflow') || id.includes('elkjs') || id.includes('d3')) return 'vendor-visualizer'
+          if (id.includes('@supabase')) return 'vendor-supabase'
+          if (id.includes('framer-motion')) return 'vendor-motion'
+          if (id.includes('react') || id.includes('react-dom') || id.includes('react-router-dom')) return 'vendor-react'
+          return undefined
+        },
+      },
+    },
   }
 })

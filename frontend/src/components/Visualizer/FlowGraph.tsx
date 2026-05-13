@@ -109,7 +109,7 @@ const EDITOR_TITLE: Record<string, string> = {
   manual_input:       'Manual Input (cin)',
   delay:              'Delay / Wait',
   database:           'Database / Data Store',
-  junction:           'Junction (Offset / Merge Point)',
+  junction:           'Junction / Merge Point',
 };
 
 const CODE_PLACEHOLDER: Record<string, string> = {
@@ -125,6 +125,42 @@ const CODE_PLACEHOLDER: Record<string, string> = {
   database:           'e.g.  scores[i]',
   terminator:         '',
   junction:           '',
+};
+
+const NODE_TEMPLATES: Record<string, { label: string; code: string }[]> = {
+  process: [
+    { label: 'Initialize counter', code: 'int i = 0;' },
+    { label: 'Update value', code: 'hp = hp - 10;' },
+    { label: 'Increment counter', code: 'i++;' },
+  ],
+  decision: [
+    { label: 'i < n', code: 'i < n' },
+    { label: 'hp > 0', code: 'hp > 0' },
+    { label: 'score >= passingScore', code: 'score >= passingScore' },
+  ],
+  io: [
+    { label: 'Print value', code: 'value' },
+    { label: 'Print message', code: '"Done"' },
+    { label: 'Print result', code: 'result' },
+  ],
+  manual_input: [
+    { label: 'Read value', code: 'value' },
+    { label: 'Read name', code: 'name' },
+  ],
+  predefined: [
+    { label: 'Call calculate', code: 'calculateResult()' },
+    { label: 'Call validate', code: 'validateInput()' },
+  ],
+  delay: [
+    { label: 'Wait one second', code: 'sleep(1)' },
+  ],
+  database: [
+    { label: 'Create array', code: 'int values[10];' },
+    { label: 'Store score', code: 'scores[i] = score;' },
+  ],
+  document: [
+    { label: 'Write report', code: 'report.txt' },
+  ],
 };
 
 const PALETTE_ITEMS: {
@@ -156,13 +192,11 @@ const PALETTE_ITEMS: {
     ),
   },
   {
-    type: 'predefined', label: 'Function Call', iso: 'ISO: Predefined',
+    type: 'predefined', label: 'Function Call', iso: 'ISO: Predefined Process',
     shape: (
       <div style={{ position: 'relative', width: 48, height: 20, background: 'linear-gradient(135deg,#18091f,#271040)', border: '2px solid #ab47bc', borderRadius: 2, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 7, color: 'white', fontWeight: 700, flexShrink: 0 }}>
-        <div style={{ position: 'absolute', left: 5,  top: 0, bottom: 0, width: 1.5, background: '#ab47bc' }} />
-        <div style={{ position: 'absolute', left: 9,  top: 0, bottom: 0, width: 1.5, background: '#ab47bc' }} />
-        <div style={{ position: 'absolute', right: 5, top: 0, bottom: 0, width: 1.5, background: '#ab47bc' }} />
-        <div style={{ position: 'absolute', right: 9, top: 0, bottom: 0, width: 1.5, background: '#ab47bc' }} />
+        <div style={{ position: 'absolute', left: 8,  top: 0, bottom: 0, width: 1.5, background: '#ab47bc' }} />
+        <div style={{ position: 'absolute', right: 8, top: 0, bottom: 0, width: 1.5, background: '#ab47bc' }} />
         FUNC
       </div>
     ),
@@ -215,11 +249,11 @@ const PALETTE_ITEMS: {
     ),
   },
   {
-    type: 'junction', label: 'Junction (Offset)', iso: 'ISO: Junction / Merge',
+    type: 'junction', label: 'Junction / Merge', iso: 'Routing: merge point',
     shape: (
       <svg width={28} height={28} viewBox="0 0 28 28" style={{ flexShrink: 0 }}>
-        <polygon points="14,3 25,14 14,25 3,14" fill="#1a0820" stroke="#e040fb" strokeWidth="1.5" />
-        <circle cx="14" cy="14" r="3.5" fill="#e040fb" opacity="0.85" />
+        <circle cx="14" cy="14" r="9" fill="#1a0820" stroke="#e040fb" strokeWidth="1.5" />
+        <circle cx="14" cy="14" r="3.5" fill="#e040fb" opacity="0.9" />
       </svg>
     ),
   },
@@ -406,17 +440,14 @@ const IONode = ({ data, selected }: NodeProps<Node<ExtendedNodeData>>) => {
   );
 };
 
-// ── 5. PREDEFINED — rectangle with ISO double side bars ──────────────────────
+// ── 5. PREDEFINED — rectangle with ISO side bars ─────────────────────────────
 const PredefinedNode = ({ data, selected }: NodeProps<Node<ExtendedNodeData>>) => {
   const { color, bg } = useNodeAppearance('predefined', data);
   const background = bg ?? 'linear-gradient(135deg,#18091f,#271040)';
-  const bar = (side: 'left' | 'right', offset: number) => (
-    <div style={{ position: 'absolute', [side]: offset, top: 2, bottom: 2, width: 2, background: color, opacity: 0.9, borderRadius: 1 }} />
-  );
   return (
     <BaseNode data={data} selected={selected} style={{ padding: '14px 30px', minWidth: 160, maxWidth: 210, background, border: `2.5px solid ${color}`, borderRadius: 4, boxShadow: `0 3px 14px ${color}33` }}>
-      {bar('left',  10)} {bar('left',  16)}
-      {bar('right', 10)} {bar('right', 16)}
+      <div style={{ position: 'absolute', left: 16, top: 2, bottom: 2, width: 2, background: color, opacity: 0.9, borderRadius: 1 }} />
+      <div style={{ position: 'absolute', right: 16, top: 2, bottom: 2, width: 2, background: color, opacity: 0.9, borderRadius: 1 }} />
       <EditHint />
       {data.violation && <ViolationBadge />}
       <Handle type="target" position={Position.Top}    style={handleStyle(color)} />
@@ -564,12 +595,11 @@ const DatabaseNode = ({ data, selected }: NodeProps<Node<ExtendedNodeData>>) => 
   );
 };
 
-// ── 11. JUNCTION — small offset diamond (merge / split point) ─────────────────
+// ── 11. JUNCTION — small routing connector / merge point ─────────────────────
 const JunctionNode = ({ data, selected }: NodeProps<Node<ExtendedNodeData>>) => {
   const S = 36;
   const { color } = useNodeAppearance('junction', data);
   const fill = data.violation ? '#2d0820' : data.visited ? '#1a0d2e' : '#1a0820';
-  const points = `${S/2},3 ${S-3},${S/2} ${S/2},${S-3} 3,${S/2}`;
   return (
     <BaseNode
       data={data}
@@ -581,12 +611,13 @@ const JunctionNode = ({ data, selected }: NodeProps<Node<ExtendedNodeData>>) => 
         viewBox={`0 0 ${S} ${S}`}
         style={{ position: 'absolute', inset: 0, filter: `drop-shadow(0 2px 8px ${color}88)` }}
       >
-        <polygon
-          points={points}
+        <circle
+          cx={S / 2}
+          cy={S / 2}
+          r={S / 2 - 4}
           fill={fill}
           stroke={color}
           strokeWidth={selected ? 2.5 : 2}
-          strokeLinejoin="round"
         />
         <circle cx={S/2} cy={S/2} r={4} fill={color} opacity={0.9} />
       </svg>
@@ -1041,6 +1072,7 @@ const NodeEditor: React.FC<{
     editState.type === 'connector'          ? 'e.g. A, B, 1'                  :
     editState.type === 'off_page_connector' ? 'e.g. P2, page-2, 1'             :
     `e.g. ${DEFAULT_LABELS[editState.type as FlowNodeType] ?? 'Label'}`;
+  const templates = NODE_TEMPLATES[editState.type] ?? [];
 
   const inputBase: React.CSSProperties = {
     width: '100%', boxSizing: 'border-box',
@@ -1122,6 +1154,35 @@ const NodeEditor: React.FC<{
                 onFocus={onFocusInput}
                 onBlur={onBlurInput}
               />
+            </div>
+          )}
+
+          {!noCode && templates.length > 0 && (
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 7 }}>
+              {templates.map(template => (
+                <button
+                  key={`${template.label}:${template.code}`}
+                  type="button"
+                  onClick={() => {
+                    setLabel(template.label);
+                    setCode(template.code);
+                  }}
+                  style={{
+                    border: `1px solid ${accent}55`,
+                    background: `${accent}14`,
+                    color: accent,
+                    borderRadius: 7,
+                    padding: '6px 9px',
+                    fontSize: 10,
+                    fontWeight: 700,
+                    cursor: 'pointer',
+                    fontFamily: "'IBM Plex Mono', monospace",
+                  }}
+                  title={`Use ${template.code}`}
+                >
+                  {template.label}
+                </button>
+              ))}
             </div>
           )}
         </div>
@@ -1376,15 +1437,18 @@ const FlowGraphInner: React.FC<Props> = ({
 
   const handleSaveEdgeLabel = useCallback((newLabel: string) => {
     if (!edgeEditState) return;
-    const isTrue  = newLabel === 'true'  || newLabel === 'yes';
-    const isFalse = newLabel === 'false' || newLabel === 'no';
+    const rawLabel = newLabel.trim();
+    const lowerLabel = rawLabel.toLowerCase();
+    const normalizedLabel = ['true', 'yes', 'false', 'no'].includes(lowerLabel) ? lowerLabel : rawLabel;
+    const isTrue  = normalizedLabel === 'true'  || normalizedLabel === 'yes';
+    const isFalse = normalizedLabel === 'false' || normalizedLabel === 'no';
     const edgeColor = isTrue ? '#4caf50' : isFalse ? '#ff4444' : '#64b5f6';
 
     setEdges(current => {
       const next = current.map(e =>
         e.id !== edgeEditState.edgeId ? e : {
           ...e,
-          label: newLabel,
+          label: normalizedLabel,
           labelStyle:   { fill: isTrue ? '#4caf50' : isFalse ? '#ff6b6b' : '#ffffff', fontSize: '11px', fontWeight: '700' },
           style:        { ...e.style, stroke: edgeColor },
           markerEnd:    { type: MarkerType.ArrowClosed, color: edgeColor },
@@ -1477,7 +1541,16 @@ const FlowGraphInner: React.FC<Props> = ({
   }, [onGraphChange]);
 
   const onConnectHandler = useCallback((params: Connection) => {
+    if (!params.source || !params.target || params.source === params.target) return;
     setEdges(eds => {
+      const alreadyExists = eds.some(edge =>
+        edge.source === params.source &&
+        edge.target === params.target &&
+        (edge.sourceHandle ?? null) === (params.sourceHandle ?? null) &&
+        (edge.targetHandle ?? null) === (params.targetHandle ?? null)
+      );
+      if (alreadyExists) return eds;
+
       const next = addEdge({
         ...params,
         type:           'default',

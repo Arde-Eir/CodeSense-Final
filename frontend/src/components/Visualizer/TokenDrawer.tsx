@@ -11,6 +11,7 @@ export const TokenDrawer: React.FC<TokenDrawerProps> = ({ tokens, isOpen, onClos
   const [searchQuery, setSearchQuery] = useState('');
 
   if (!isOpen) return null;
+  const drawerZIndex = 5001;
 
   // --- 1. DOWNLOAD LOGIC ---
   const handleExportJSON = () => {
@@ -37,21 +38,19 @@ export const TokenDrawer: React.FC<TokenDrawerProps> = ({ tokens, isOpen, onClos
   });
 
   const getLiteralSubtype = (token: Token) => {
-  const type = (token.type || '').toUpperCase();
-  const value = String(token.value || '');
+    const type = (token.type || '').toUpperCase();
+    const value = String(token.value || '');
 
-  // 1. Check based on explicit type first
-  if (type.includes('STRING')) return 'String';
-  if (type.includes('NUMBER') || type.includes('INT') || type.includes('FLOAT')) return 'Numeric';
-  if (type.includes('BOOL')) return 'Boolean';
+    if (type.includes('STRING')) return 'String';
+    if (type.includes('NUMBER') || type.includes('INT') || type.includes('FLOAT')) return 'Numeric';
+    if (type.includes('BOOL')) return 'Boolean';
 
-  // 2. Fallback: Infer from value if type is just "Literal"
-  if (!isNaN(Number(value))) return 'Numeric';
-  if ((value.startsWith('"') && value.endsWith('"')) || (value.startsWith("'") && value.endsWith("'"))) return 'String';
-  if (value === 'true' || value === 'false') return 'Boolean';
+    if (!isNaN(Number(value))) return 'Numeric';
+    if ((value.startsWith('"') && value.endsWith('"')) || (value.startsWith("'") && value.endsWith("'"))) return 'String';
+    if (value === 'true' || value === 'false') return 'Boolean';
 
-  return 'Generic';
-};
+    return 'Generic';
+  };
   const groupedTokens = {
     Keywords: filteredTokens.filter(t => t.type?.toUpperCase().includes('KEYWORD')),
     Identifiers: filteredTokens.filter(t => t.type?.toUpperCase() === 'IDENTIFIER'),
@@ -83,14 +82,15 @@ export const TokenDrawer: React.FC<TokenDrawerProps> = ({ tokens, isOpen, onClos
         onClick={onClose}
         style={{ 
           position: 'fixed', inset: 0, backgroundColor: 'rgba(0,0,0,0.6)', 
-          backdropFilter: 'blur(4px)', zIndex: 100, animation: 'fadeIn 0.3s ease'
+          backdropFilter: 'blur(4px)', zIndex: drawerZIndex - 1, animation: 'fadeIn 0.3s ease'
         }} 
       />
 
       {/* Slide-out Panel */}
-      <div style={{ 
-        position: 'fixed', top: 0, right: 0, height: '100%', width: '420px', 
-        backgroundColor: '#0d1117', color: '#e6edf3', zIndex: 101, 
+      <div role="dialog" aria-modal="true" aria-label="Lexical analysis token drawer" style={{ 
+        position: 'fixed', top: 0, right: 0, bottom: 0, height: '100dvh', width: 'min(420px, 100vw)', 
+        maxWidth: '100vw', boxSizing: 'border-box',
+        backgroundColor: '#0d1117', color: '#e6edf3', zIndex: drawerZIndex, 
         boxShadow: '-10px 0 30px rgba(0,0,0,0.5)', display: 'flex', 
         flexDirection: 'column', borderLeft: '1px solid #30363d',
         animation: 'slideIn 0.3s cubic-bezier(0.4, 0, 0.2, 1)'
@@ -99,7 +99,8 @@ export const TokenDrawer: React.FC<TokenDrawerProps> = ({ tokens, isOpen, onClos
         {/* Header */}
         <div style={{ 
           padding: '24px 24px 12px 24px', display: 'flex', 
-          justifyContent: 'space-between', alignItems: 'center', background: 'rgba(22, 27, 34, 0.8)' 
+          justifyContent: 'space-between', alignItems: 'center', background: 'rgba(22, 27, 34, 0.95)',
+          position: 'relative', zIndex: 1
         }}>
           <div>
             <h2 style={{ margin: 0, fontSize: '1.25rem', fontWeight: 600 }}>Lexical Analysis</h2>
@@ -112,7 +113,7 @@ export const TokenDrawer: React.FC<TokenDrawerProps> = ({ tokens, isOpen, onClos
         </div>
 
         {/* Search Bar Section */}
-        <div style={{ padding: '0 24px 16px 24px', background: 'rgba(22, 27, 34, 0.8)', borderBottom: '1px solid #30363d' }}>
+        <div style={{ padding: '0 24px 16px 24px', background: 'rgba(22, 27, 34, 0.95)', borderBottom: '1px solid #30363d', position: 'relative', zIndex: 1 }}>
           <div style={{ position: 'relative' }}>
             <input 
               type="text"

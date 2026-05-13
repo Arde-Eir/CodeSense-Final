@@ -15,21 +15,6 @@ const ZONES: DropZone[] = [
   { id: 'z2', label: 'Combines object files into executable', accepted: 'i2' },
 ];
 
-// ─── Helpers ──────────────────────────────────────────────────────────────────
-
-/** Simulate drag-and-drop of item onto zone by calling onDragStart + onDrop directly */
-function dragItemToZone(itemLabel: string, zoneLabel: string) {
-  // Trigger dragStart on the item card
-  const itemCard = screen.getByText(itemLabel).closest('[draggable]');
-  fireEvent.dragStart(itemCard!);
-
-  // Trigger dragOver + drop on the zone
-  const zoneEl = screen.getByText(zoneLabel).closest('[ondragover], [onDragOver]') ??
-                 screen.getByText(zoneLabel).parentElement!;
-  fireEvent.dragOver(zoneEl);
-  fireEvent.drop(zoneEl);
-}
-
 // ─── Tests ────────────────────────────────────────────────────────────────────
 
 describe('DragDropGame', () => {

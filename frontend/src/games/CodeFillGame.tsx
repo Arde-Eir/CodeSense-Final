@@ -10,15 +10,20 @@ interface Props {
   items:       CodeFillItem[];
   onComplete:  (score: number, total: number) => void;
   resetSignal: number;
+  /** Notifies the parent of the active code-fill item index. Used by the
+   *  lesson side panel to show this item's per-question hint. */
+  onItemChange?: (index: number) => void;
 }
 
-export const CodeFillGame: React.FC<Props> = ({ items, onComplete, resetSignal }) => {
+export const CodeFillGame: React.FC<Props> = ({ items, onComplete, resetSignal, onItemChange }) => {
   const [idx,     setIdx]     = React.useState(0);
   const [answers, setAnswers] = React.useState<string[]>([]);
   const [checked, setChecked] = React.useState(false);
   const [results, setResults] = React.useState<boolean[]>([]);
 
   const scoreRef = React.useRef(0);
+
+  useEffect(() => { onItemChange?.(idx); }, [idx, onItemChange]);
 
   useEffect(() => {
     if (resetSignal > 0) {

@@ -20,10 +20,12 @@ import { useNavigate, useParams } from 'react-router-dom';
 import { useAuth } from './components/AuthScreen';
 import { supabase } from './services/supabase';
 import type {
-  Phase, Quest, MissionProgress, QuestRow, QuestUIStatus,
+  Phase, Quest, MissionProgress, QuestRow,
   LevelInfo, LevelStats,
 } from './types/campaign';
 import { PHASE_DEFAULTS, PHASE_TO_LEVEL } from './types/campaign';
+import { buildQuests } from './campaign/buildQuests';
+import { FIRST_COMPLETION_XP, RETAKE_COMPLETION_XP, levelXpCapForPhase } from './campaign/retakeXp';
 
 // ─── Visual constants ──────────────────────────────────────────────────────
 const ACTIVITY_ICON: Record<string, string> = {
@@ -56,6 +58,23 @@ const questTypeLabel = (t: string | null): string =>
 const isMultipleChoiceType = (t: string | null | undefined): boolean => {
   const n = String(t ?? '').trim().toLowerCase();
   return n === 'multiple_choice' || n === 'multiple-choice' || n === 'mc' || n === 'mcq' || n === 'quiz';
+};
+
+const activityTypesForQuest = (q: QuestRow): string[] => {
+  const types: string[] = [];
+  if (q.game_items?.length && q.drop_zones?.length) types.push('drag_drop');
+  if (q.code_fill_items?.length)                    types.push('code_fill');
+  if (q.ordering_items?.length)                     types.push('ordering');
+  if (q.mc_questions?.length) {
+    const hasMode = q.mc_questions.some(item => item.mode === 'balloon' || item.mode === 'mc');
+    if (hasMode) {
+      if (q.mc_questions.some(item => item.mode === 'balloon')) types.push('pop_balloon');
+      if (q.mc_questions.some(item => item.mode !== 'balloon'))  types.push('multiple_choice');
+    } else {
+      types.push(isMultipleChoiceType(q.question_type) ? 'multiple_choice' : 'pop_balloon');
+    }
+  }
+  return types;
 };
 
 // ─── Small UI bits ─────────────────────────────────────────────────────────
@@ -122,8 +141,8 @@ const QuestCard: React.FC<{
   const cta = isDone
     ? 'Review / Retake'
     : quest.everCompleted
-      ? `Resume Quest +${quest.basexp} XP`
-      : `Start Quest +${quest.basexp} XP`;
+      ? `Resume Quest +${RETAKE_COMPLETION_XP} XP`
+      : `Start Quest +${FIRST_COMPLETION_XP} XP`;
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', marginBottom: 12, opacity: isLocked ? 0.5 : 1 }}>
@@ -146,7 +165,7 @@ const QuestCard: React.FC<{
         <div style={{ flex: 1, minWidth: 0 }}>
           <div style={{ fontSize: 14, fontWeight: 700, color: '#e6edf3', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{quest.title}</div>
           <div style={{ fontSize: 10, color: '#484f58', textTransform: 'uppercase', letterSpacing: '0.5px', marginTop: 2 }}>
-            {quest.basexp} XP · {questTypeLabel(quest.question_type)}
+            {quest.everCompleted ? RETAKE_COMPLETION_XP : FIRST_COMPLETION_XP} XP · {questTypeLabel(quest.question_type)}
             {quest.everCompleted && !isDone && <span style={{ color: '#3fb950', marginLeft: 8 }}>· FIRST FINISH ✓</span>}
           </div>
         </div>
@@ -199,18 +218,7 @@ const ProgressPanel: React.FC<{ stats: LevelStats; phase: string }> = ({ stats, 
 const ActivityTypesPanel: React.FC<{ quests: QuestRow[] }> = ({ quests }) => {
   const counts: Record<string, number> = {};
   const bump = (k: string) => { counts[k] = (counts[k] ?? 0) + 1; };
-  for (const q of quests) {
-    // Mirror computeAvailableTabs: drag needs BOTH game_items AND drop_zones;
-    // balloon only needs game_items (no drop_zones); mc_questions goes to
-    // balloon or mc depending on question_type.
-    if (q.game_items?.length && q.drop_zones?.length) bump('drag_drop');
-    if (q.code_fill_items?.length)                    bump('code_fill');
-    if (q.ordering_items?.length)                     bump('ordering');
-    if (q.mc_questions?.length) {
-      if (isMultipleChoiceType(q.question_type)) bump('multiple_choice');
-      else                                       bump('pop_balloon');
-    }
-  }
+  for (const q of quests) activityTypesForQuest(q).forEach(bump);
   const ORDER = ['drag_drop', 'code_fill', 'ordering', 'pop_balloon', 'multiple_choice'];
   const present = ORDER.filter(t => counts[t]);
 
@@ -237,16 +245,13 @@ const ActivityTypesPanel: React.FC<{ quests: QuestRow[] }> = ({ quests }) => {
 };
 
 const QuestMixPanel: React.FC<{ quests: QuestRow[] }> = ({ quests }) => {
-  const lessons  = quests.filter(q => !isMultipleChoiceType(q.question_type) && q.question_type !== 'pop_balloon').length;
-  const quizzes  = quests.filter(q => isMultipleChoiceType(q.question_type)).length;
-  const balloons = quests.filter(q => q.question_type === 'pop_balloon').length;
-  const totalXP = quests.reduce((s, q) => s + (q.basexp ?? 0), 0);
+  const lessons  = quests.filter(q => activityTypesForQuest(q).some(t => t === 'drag_drop' || t === 'code_fill' || t === 'ordering')).length;
+  const quizzes  = quests.filter(q => activityTypesForQuest(q).includes('multiple_choice')).length;
+  const balloons = quests.filter(q => activityTypesForQuest(q).includes('pop_balloon')).length;
+  const totalXP = levelXpCapForPhase(quests[0]?.phase);
   const seen    = new Set<string>();
   for (const q of quests) {
-    if (q.game_items?.length)      seen.add('drag_drop');
-    if (q.code_fill_items?.length) seen.add('code_fill');
-    if (q.ordering_items?.length)  seen.add('ordering');
-    if (q.mc_questions?.length)    seen.add(isMultipleChoiceType(q.question_type) ? 'multiple_choice' : 'pop_balloon');
+    activityTypesForQuest(q).forEach(t => seen.add(t));
   }
 
   const Row = ({ icon, label, value }: { icon: string; label: string; value: string | number }) => (
@@ -269,67 +274,9 @@ const QuestMixPanel: React.FC<{ quests: QuestRow[] }> = ({ quests }) => {
   );
 };
 
-// ─── buildQuests + computeStats ──────────────────────────────────────────
-function buildQuests(quests: Quest[], progress: MissionProgress[]): {
-  rows: QuestRow[];
-  stats: LevelStats;
-} {
-  // Dedupe progress (UNIQUE constraint should make this a no-op now, but
-  // keep the safety net for older rows).
-  const pMap: Record<string, MissionProgress> = {};
-  for (const p of progress) {
-    const existing = pMap[p.questid];
-    if (!existing) { pMap[p.questid] = p; continue; }
-    // Prefer rows with first_completed_at set, then latest updatedat.
-    if (!existing.first_completed_at && p.first_completed_at) { pMap[p.questid] = p; continue; }
-    if ((p.updatedat ?? '') > (existing.updatedat ?? '')) pMap[p.questid] = p;
-  }
-
-  const sorted = [...quests].sort((a, b) => (a.sortorder ?? 0) - (b.sortorder ?? 0));
-  let prevEverCompleted = true;  // first quest has no prerequisite
-
-  const rows: QuestRow[] = sorted.map(q => {
-    const p = pMap[q.id];
-    const currentlyCompleted = p?.status === 'completed';
-    const everCompleted      = currentlyCompleted || p?.first_completed_at != null;
-
-    let uiStatus: QuestUIStatus;
-    if (currentlyCompleted)     uiStatus = 'completed';
-    else if (prevEverCompleted) uiStatus = 'active';
-    else                         uiStatus = 'locked';
-
-    // Once we see a quest that has never been finished, the gate closes for
-    // every following quest. Retaken quests (everCompleted=true but not
-    // currentlyCompleted) keep the gate OPEN.
-    if (!everCompleted) prevEverCompleted = false;
-
-    return {
-      ...q,
-      uiStatus,
-      xpGained:           p?.xp_gained ?? 0,
-      everCompleted,
-      currentlyCompleted,
-    };
-  });
-
-  const finished = rows.filter(r => r.everCompleted).length;
-  const xpEarned = rows.reduce((s, r) => s + r.xpGained, 0);
-  const xpTotal  = rows.reduce((s, r) => s + (r.basexp ?? 0), 0);
-
-  // Streak = consecutive ever-completed from the top (in sortorder).
-  let streak = 0;
-  for (const r of rows) {
-    if (r.everCompleted) streak++;
-    else break;
-  }
-
-  return {
-    rows,
-    stats: { finished, total: rows.length, xpEarned, xpTotal, streak },
-  };
-}
-
 // ─── Page ──────────────────────────────────────────────────────────────────
+// Note: pure gating logic (buildQuests) lives in ./campaign/buildQuests.ts so
+// it can be unit-tested without mounting this component.
 export const CampaignInside: React.FC = () => {
   const { phase: phaseParam } = useParams<{ phase: Phase }>();
   const navigate = useNavigate();

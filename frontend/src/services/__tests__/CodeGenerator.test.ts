@@ -81,4 +81,46 @@ describe('generateCppFromGraph', () => {
     expect(code).toContain('// Off-page connector: 1');
     expect(code).not.toContain('1;');
   });
+
+  it('detects includes from real C++ tokens instead of substring matches', () => {
+    const nodes = [
+      makeNode('s', 'terminator', 'Start'),
+      makeNode('p1', 'process', 'assignment', 'maximum = 10;'),
+      makeNode('p2', 'process', 'vector setup', 'vector<int> values;'),
+      makeNode('e', 'terminator', 'End'),
+    ];
+    const edges = [
+      makeEdge('e1', 's', 'p1'),
+      makeEdge('e2', 'p1', 'p2'),
+      makeEdge('e3', 'p2', 'e'),
+    ];
+
+    const code = generateCppFromGraph(nodes, edges);
+
+    expect(code).toContain('#include <vector>');
+    expect(code).not.toContain('#include <algorithm>');
+  });
+
+  it('emits output expressions with endl and normalizes text conditions', () => {
+    const nodes = [
+      makeNode('s', 'terminator', 'Start'),
+      makeNode('d', 'decision', 'hp > 0 or i < n', 'hp > 0 or i < n'),
+      makeNode('t', 'io', 'Print message', '"alive"'),
+      makeNode('f', 'io', 'Print message', '"done"'),
+      makeNode('e', 'terminator', 'End'),
+    ];
+    const edges = [
+      makeEdge('e1', 's', 'd'),
+      makeEdge('e2', 'd', 't', 'true'),
+      makeEdge('e3', 'd', 'f', 'false'),
+      makeEdge('e4', 't', 'e'),
+      makeEdge('e5', 'f', 'e'),
+    ];
+
+    const code = generateCppFromGraph(nodes, edges);
+
+    expect(code).toContain('if (hp > 0 || i < n)');
+    expect(code).toContain('cout << "alive" << endl;');
+    expect(code).toContain('cout << "done" << endl;');
+  });
 });
