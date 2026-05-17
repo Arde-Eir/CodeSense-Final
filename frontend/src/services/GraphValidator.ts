@@ -39,6 +39,15 @@ const isFalseLabel = (l: string) => l === 'false' || l === 'no';
 const isBranchLabel = (l: string) => isTrueLabel(l) || isFalseLabel(l);
 
 const CONDITION_PLACEHOLDERS = new Set(['condition', 'if condition', 'decision']);
+const EXECUTABLE_PLACEHOLDERS = new Set([
+  'process',
+  'output',
+  'input',
+  'function call',
+  'document',
+  'delay',
+  'data store',
+]);
 
 function hasOddCount(value: string, needle: string): boolean {
   return value.split(needle).length % 2 === 0;
@@ -53,6 +62,12 @@ function isInvalidCondition(value: string): boolean {
   if (hasOddCount(condition, "'") || hasOddCount(condition, '"')) return true;
   if (/[{};]/.test(condition)) return true;
   return false;
+}
+
+function hasUsableLabel(node: Node): boolean {
+  const label = str(node.data?.label).toLowerCase();
+  if (!label) return false;
+  return !EXECUTABLE_PLACEHOLDERS.has(label);
 }
 
 const LINEAR_NODE_TYPES = new Set([
@@ -382,9 +397,31 @@ export function validateGraph(nodes: Node[], edges: Edge[]): ValidationResult {
     return !str(n.data?.code);
   });
   if (missingCode.length > 0) {
-    push('error', 'MISSING_NODE_CODE',
-      `${missingCode.length} executable node(s) have no C++ code. Double-click each highlighted node and add the statement/expression it should generate.`,
-      { nodeIds: missingCode.map(n => n.id) });
+    const placeholders = missingCode.filter(n => !hasUsableLabel(n));
+    const labelled = missingCode.filter(n => hasUsableLabel(n));
+
+    if (placeholders.length > 0) {
+      push('warning', 'MISSING_NODE_CODE',
+        `${placeholders.length} executable node(s) still use a placeholder and have no C++ code. The generator will emit a safe comment or default statement; double-click them for better output.`,
+        { nodeIds: placeholders.map(n => n.id) });
+    }
+
+    if (labelled.length > 0) {
+      push('warning', 'NODE_CODE_FROM_LABEL',
+        `${labelled.length} executable node(s) have no code field, so generation will use their labels as the source text. Add explicit C++ code if the label is only descriptive.`,
+        { nodeIds: labelled.map(n => n.id) });
+    }
+  }
+
+  const structuralLabelsOnly = nodes.filter(n => {
+    if (REQUIRED_CODE_NODE_TYPES.has(String(n.type ?? ''))) return false;
+    if (n.type === 'decision' || n.type === 'terminator') return false;
+    return !str(n.data?.code) && hasUsableLabel(n);
+  });
+  if (structuralLabelsOnly.length > 0) {
+    push('warning', 'STRUCTURAL_LABEL_ONLY',
+      `${structuralLabelsOnly.length} routing node(s) have labels but no code. They will be treated as flowchart structure, not C++ statements.`,
+      { nodeIds: structuralLabelsOnly.map(n => n.id) });
   }
 
   return finish(issues);

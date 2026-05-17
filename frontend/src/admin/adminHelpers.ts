@@ -23,6 +23,11 @@ export interface UserStats {
 export interface MCQuestionLite {
   question:    string;
   mode?:       'mc' | 'balloon';
+  options?:    unknown;
+  correct?:    unknown;
+  correctAnswers?: unknown;
+  correct_answers?: unknown;
+  correct_indices?: unknown;
   // extra fields ignored
   [k: string]: unknown;
 }
@@ -119,6 +124,61 @@ export function splitMCQuestions(
     return { mc: [], balloon: all };
   }
   return { mc: all, balloon: [] };
+}
+
+// ─── MC option normalization ───────────────────────────────────────────────
+// Admin forms display up to four option inputs, but a valid question may have
+// only three choices. Before saving or rendering, drop blank choices and move
+// the correct index to the matching non-empty option.
+export function normalizeMCQuestionOptions<T extends MCQuestionLite>(q: T): T {
+  const rawOptions = Array.isArray(q.options) ? q.options : [];
+  const compactOptions = rawOptions
+    .map((option, originalIndex) => ({
+      originalIndex,
+      value: typeof option === 'string' ? option.trim() : String(option ?? '').trim(),
+    }))
+    .filter(option => option.value.length > 0);
+
+  const readIndices = (value: unknown): number[] => {
+    const values = Array.isArray(value) ? value : [value];
+    return values
+      .map(v => typeof v === 'number' ? v : Number(v))
+      .filter(v => Number.isInteger(v) && v >= 0);
+  };
+
+  const rawCorrectIndices = [
+    ...readIndices(q.correctAnswers),
+    ...readIndices(q.correct_answers),
+    ...readIndices(q.correct_indices),
+    ...readIndices(q.correct),
+  ];
+  const uniqueRawCorrectIndices = Array.from(new Set(rawCorrectIndices.length ? rawCorrectIndices : [0]));
+
+  const nextCorrectAnswers = uniqueRawCorrectIndices
+    .map(rawCorrect => {
+      const correctValue = rawOptions[rawCorrect];
+      return compactOptions.findIndex(option =>
+        option.originalIndex === rawCorrect ||
+        option.value === (typeof correctValue === 'string' ? correctValue.trim() : String(correctValue ?? '').trim())
+      );
+    })
+    .filter((idx, pos, arr) => idx >= 0 && arr.indexOf(idx) === pos);
+
+  const fallbackCorrect = compactOptions.length > 0 ? 0 : -1;
+  const correctAnswers = nextCorrectAnswers.length > 0 ? nextCorrectAnswers : (fallbackCorrect >= 0 ? [fallbackCorrect] : []);
+
+  return {
+    ...q,
+    options: compactOptions.map(option => option.value),
+    correct: correctAnswers[0] ?? 0,
+    correctAnswers,
+  };
+}
+
+export function normalizeMCQuestions<T extends MCQuestionLite>(questions: T[]): T[] {
+  return questions
+    .map(normalizeMCQuestionOptions)
+    .filter(q => String(q.question ?? '').trim().length > 0 || (Array.isArray(q.options) && q.options.length > 0));
 }
 
 // ─── Hint editor (admin form ↔ DB JSONB round-trip) ───────────────────────

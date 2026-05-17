@@ -8,6 +8,18 @@ interface NodeData {
   [key: string]: unknown;
 }
 
+export const FLOWCHART_CODE_TOPICS = [
+  'Variables, constants, assignment, and arithmetic',
+  'cin input and cout output',
+  'if / else decisions from true/false branches',
+  'while-style loops from branches that return to a Decision',
+  'arrays and basic indexed storage',
+  'function calls and predefined-process shapes',
+  'file/document placeholders and basic fstream snippets',
+  'raw C++ snippets, including structs/classes/functions above main when entered as complete declarations',
+  'STL declarations and calls when typed as C++ code',
+];
+
 // ─── Grammar-Aligned Reserved Words ──────────────────────────────────────────
 
 const RESERVED_WORDS = new Set([
@@ -112,6 +124,183 @@ const str = (v: unknown): string => String(v ?? '').trim();
 
 function escapeRegExp(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+function toIdentifier(value: string, fallback = 'value'): string {
+  const words = value
+    .trim()
+    .replace(/['"]/g, '')
+    .replace(/[^a-zA-Z0-9_]+/g, ' ')
+    .split(/\s+/)
+    .filter(Boolean)
+    .filter(w => !['a', 'an', 'the', 'variable', 'named', 'called'].includes(w.toLowerCase()));
+
+  const camel = words
+    .map((word, i) => {
+      const clean = word.replace(/^[0-9]+/, '');
+      if (!clean) return '';
+      return i === 0
+        ? clean.charAt(0).toLowerCase() + clean.slice(1)
+        : clean.charAt(0).toUpperCase() + clean.slice(1);
+    })
+    .join('');
+
+  return isValidIdentifier(camel) ? camel : fallback;
+}
+
+function normalizeTypeWord(value: string): string | null {
+  const lower = value.toLowerCase().trim();
+  const typeMap: Record<string, string> = {
+    integer: 'int',
+    int: 'int',
+    number: 'int',
+    whole: 'int',
+    decimal: 'double',
+    double: 'double',
+    float: 'float',
+    text: 'string',
+    string: 'string',
+    word: 'string',
+    sentence: 'string',
+    character: 'char',
+    char: 'char',
+    boolean: 'bool',
+    bool: 'bool',
+  };
+  return typeMap[lower] ?? null;
+}
+
+function looksLikeCpp(code: string): boolean {
+  return /[;{}()]|<<|>>|==|!=|<=|>=|\+\+|--|\b(int|float|double|char|bool|string|auto|return|cout|cin)\b/.test(code);
+}
+
+function quoteIfPlainText(value: string): string {
+  const trimmed = value.trim();
+  if (!trimmed) return '""';
+  if (/^["'].*["']$/.test(trimmed)) return trimmed;
+  if (/^(true|false|nullptr)$/i.test(trimmed)) return trimmed.toLowerCase();
+  if (/^-?\d+(\.\d+)?$/.test(trimmed)) return trimmed;
+  if (/^[a-zA-Z_][a-zA-Z0-9_]*(\s*[-+*/%]\s*[a-zA-Z0-9_]+)*$/.test(trimmed)) return trimmed;
+  return JSON.stringify(trimmed);
+}
+
+function normalizeEnglishExpression(value: string): string {
+  return value
+    .trim()
+    .replace(/\bis equal to\b/gi, '==')
+    .replace(/\bequals\b/gi, '==')
+    .replace(/\bis not equal to\b/gi, '!=')
+    .replace(/\bnot equal to\b/gi, '!=')
+    .replace(/\bis greater than or equal to\b/gi, '>=')
+    .replace(/\bgreater than or equal to\b/gi, '>=')
+    .replace(/\bat least\b/gi, '>=')
+    .replace(/\bis less than or equal to\b/gi, '<=')
+    .replace(/\bless than or equal to\b/gi, '<=')
+    .replace(/\bat most\b/gi, '<=')
+    .replace(/\bis greater than\b/gi, '>')
+    .replace(/\bgreater than\b/gi, '>')
+    .replace(/\bis less than\b/gi, '<')
+    .replace(/\bless than\b/gi, '<')
+    .replace(/\bis above\b/gi, '>')
+    .replace(/\bis below\b/gi, '<')
+    .replace(/\band\b/gi, '&&')
+    .replace(/\bor\b/gi, '||')
+    .replace(/\bplus\b/gi, '+')
+    .replace(/\bminus\b/gi, '-')
+    .replace(/\btimes\b/gi, '*')
+    .replace(/\bmultiplied by\b/gi, '*')
+    .replace(/\bdivided by\b/gi, '/')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function normalizeConditionOperand(value: string): string {
+  const trimmed = value.trim();
+  if (!trimmed || /^(true|false)$/i.test(trimmed) || /^-?\d+(\.\d+)?$/.test(trimmed)) return trimmed;
+  if (/^["'].*["']$/.test(trimmed)) return trimmed;
+  if (/^[a-zA-Z_][a-zA-Z0-9_]*$/.test(trimmed)) return trimmed;
+  return toIdentifier(trimmed);
+}
+
+function normalizeConditionOperands(value: string): string {
+  return value.replace(
+    /([^<>=!&|]+?)\s*(==|!=|>=|<=|>|<)\s*([^&|]+?)(?=\s*(?:&&|\|\||$))/g,
+    (_match, left: string, op: string, right: string) =>
+      `${normalizeConditionOperand(left)} ${op} ${normalizeConditionOperand(right)}`
+  );
+}
+
+function normalizeEnglishCondition(value: string): string | null {
+  const cleaned = value
+    .trim()
+    .replace(/^(if|when|while|check if|decide if)\s+/i, '')
+    .replace(/\?+$/g, '');
+  const normalized = normalizeConditionOperands(normalizeEnglishExpression(cleaned))
+    .replace(/\s*(&&|\|\|)\s*/g, ' $1 ');
+  return /[<>=!]=?|&&|\|\|/.test(normalized) ? normalized : null;
+}
+
+function normalizeHumanStatement(text: string, nodeType = 'process'): string | null {
+  const source = text.trim().replace(/\.$/, '');
+  if (!source || looksLikeCpp(source)) return null;
+
+  const lower = source.toLowerCase();
+
+  const declaration = source.match(/^(?:create|declare|make|initialize|init|set up)\s+(?:a\s+|an\s+|the\s+)?(?:(integer|int|number|whole|decimal|double|float|text|string|word|sentence|character|char|boolean|bool)\s+)?(?:variable\s+)?(?:named\s+|called\s+)?(.+?)(?:\s+(?:equal to|equals|with value|as|to)\s+(.+))?$/i);
+  if (declaration) {
+    const explicitType = normalizeTypeWord(declaration[1] ?? '');
+    const name = toIdentifier(declaration[2]);
+    const rawValue = declaration[3]?.trim();
+    const inferredType = rawValue
+      ? /^["'].*["']$/.test(rawValue) || /\s/.test(rawValue) && !/^[a-zA-Z_][a-zA-Z0-9_]*$/.test(rawValue)
+        ? 'string'
+        : /^(true|false)$/i.test(rawValue)
+        ? 'bool'
+        : /^-?\d+$/.test(rawValue)
+        ? 'int'
+        : /^-?\d+\.\d+$/.test(rawValue)
+        ? 'double'
+        : 'auto'
+      : 'int';
+    const type = explicitType ?? inferredType;
+    const value = rawValue ? ` = ${quoteIfPlainText(normalizeEnglishExpression(rawValue))}` : '';
+    return `${type} ${name}${value};`;
+  }
+
+  const assignment = source.match(/^(?:set|change|update|put)\s+(.+?)\s+(?:to|as|equal to|equals)\s+(.+)$/i);
+  if (assignment) {
+    return `${toIdentifier(assignment[1])} = ${quoteIfPlainText(normalizeEnglishExpression(assignment[2]))};`;
+  }
+
+  const addTo = source.match(/^(?:add|increase)\s+(.+?)\s+by\s+(.+)$/i);
+  if (addTo) return `${toIdentifier(addTo[1])} += ${normalizeEnglishExpression(addTo[2])};`;
+
+  const subtractFrom = source.match(/^(?:subtract|decrease|reduce)\s+(.+?)\s+by\s+(.+)$/i);
+  if (subtractFrom) return `${toIdentifier(subtractFrom[1])} -= ${normalizeEnglishExpression(subtractFrom[2])};`;
+
+  const increment = source.match(/^(?:increment|increase)\s+(.+)$/i);
+  if (increment) return `${toIdentifier(increment[1])}++;`;
+
+  const decrement = source.match(/^(?:decrement|decrease)\s+(.+)$/i);
+  if (decrement) return `${toIdentifier(decrement[1])}--;`;
+
+  const inputMatch = source.match(/^(?:ask for|get|read|input|enter)\s+(.+)$/i);
+  if (inputMatch || nodeType === 'manual_input') {
+    const target = inputMatch ? inputMatch[1] : source;
+    return `cin >> ${toIdentifier(target)};`;
+  }
+
+  const output = source.match(/^(?:print|show|display|output|write)\s+(.+)$/i);
+  if (output || nodeType === 'io') {
+    const target = output ? output[1] : source;
+    return `cout << ${quoteIfPlainText(normalizeEnglishExpression(target))} << endl;`;
+  }
+
+  if (lower.startsWith('return ')) {
+    return `return ${normalizeEnglishExpression(source.replace(/^return\s+/i, ''))};`;
+  }
+
+  return null;
 }
 
 function detectIncludes(allCode: string[]): string[] {
@@ -225,8 +414,22 @@ function normalizeStatement(code: string): string {
   return s + ';';
 }
 
+function isTopLevelDeclaration(code: string): boolean {
+  const s = code.trim();
+  return /^(template\s*<[\s\S]+>\s*)?(class|struct|enum)\s+\w[\s\S]*};?\s*$/.test(s) ||
+         /^[\w:<>,\s*&]+?\s+\w+\s*\([^;]*\)\s*\{[\s\S]*\}\s*$/.test(s);
+}
+
+function normalizeTopLevelDeclaration(code: string): string {
+  const s = code.trim();
+  if (/^(class|struct|enum)\b/.test(s) || /^template\s*</.test(s)) {
+    return s.endsWith(';') ? s : `${s};`;
+  }
+  return s;
+}
+
 function normalizeCondition(code: string): string {
-  return code
+  return (normalizeEnglishCondition(code) ?? code)
     .replace(/^[({[\s]+|[)}\]\s]+$/g, '')
     .replace(/\band\b/g, '&&')
     .replace(/\bor\b/g, '||')
@@ -240,8 +443,10 @@ function normalizeCondition(code: string): string {
 function emitIO(label: string, code: string): string {
   const c = code.trim();
   const l = label.toLowerCase();
+  const human = normalizeHumanStatement(c || label, 'io');
 
   if (!c) {
+    if (human) return human;
     if (l.includes('output') || l.includes('print') || l.includes('display')
      || l.includes('show') || l.includes('write')) {
       return `cout << "" << endl;`;
@@ -251,6 +456,8 @@ function emitIO(label: string, code: string): string {
     }
     return `// I/O: ${label}`;
   }
+
+  if (human) return human;
 
   if (c.includes('cout') || c.includes('cin') || c.includes('printf') || c.includes('scanf')) {
     return normalizeStatement(c);
@@ -270,8 +477,10 @@ function emitIO(label: string, code: string): string {
 function emitManualInput(label: string, code: string): string {
   const c = code.trim();
   const l = label.toLowerCase();
+  const human = normalizeHumanStatement(c || label, 'manual_input');
 
   if (!c) {
+    if (human) return human;
     // Derive variable name from label if possible
     const words = l.replace(/[^a-z0-9\s]/g, '').split(/\s+/).filter(Boolean);
     const varName = words.find(w => !['input', 'enter', 'read', 'get', 'cin', 'the', 'a', 'an'].includes(w)) ?? 'value';
@@ -282,6 +491,8 @@ function emitManualInput(label: string, code: string): string {
   if (c.includes('cin') || c.includes('scanf')) {
     return normalizeStatement(c);
   }
+
+  if (human) return human;
 
   // Treat code as the variable to read into
   return `cin >> ${c.replace(/;$/, '')};`;
@@ -362,8 +573,10 @@ function emitDelay(label: string, code: string): string {
 function emitDatabase(label: string, code: string): string {
   const c = code.trim();
   const l = label.trim();
+  const human = normalizeHumanStatement(c || label, 'database');
 
   if (!c) {
+    if (human) return human;
     // Suggest a vector declaration based on label
     const words = l.replace(/[^a-zA-Z0-9\s]/g, '').split(/\s+/).filter(Boolean);
     const varName = words
@@ -373,6 +586,7 @@ function emitDatabase(label: string, code: string): string {
     return `// Database / Store: ${l}`;
   }
 
+  if (human) return human;
   return normalizeStatement(c);
 }
 
@@ -421,6 +635,21 @@ function collectAllCode(nodes: Node<NodeData>[]): string[] {
     .filter(n => !['terminator', 'connector', 'junction'].includes(String(n.type ?? '')))
     .map(n => resolveCode(n))
     .filter(Boolean);
+}
+
+function collectTopLevelDeclarations(nodes: Node<NodeData>[]): string[] {
+  const seen = new Set<string>();
+  const declarations: string[] = [];
+  for (const node of nodes) {
+    if (node.type === 'terminator' || node.type === 'junction' || node.type === 'connector') continue;
+    const raw = resolveCode(node);
+    if (!isTopLevelDeclaration(raw)) continue;
+    const normalized = normalizeTopLevelDeclaration(raw);
+    if (seen.has(normalized)) continue;
+    seen.add(normalized);
+    declarations.push(normalized);
+  }
+  return declarations;
 }
 
 function findMergeNode(
@@ -656,8 +885,13 @@ function traverse(
     {
       const rawCode = resolveCode(node);
       const label = str(node.data.label);
+      const humanStatement = normalizeHumanStatement(rawCode, 'process');
 
-      if (!rawCode || rawCode === 'Process' || (rawCode === label && !rawCode.includes('=') && !rawCode.includes('('))) {
+      if (isTopLevelDeclaration(rawCode)) {
+        output += `${indent}// Top-level declaration emitted above main: ${label || 'custom C++'}\n`;
+      } else if (humanStatement) {
+        output += `${indent}${humanStatement}\n`;
+      } else if (!rawCode || rawCode === 'Process' || (rawCode === label && !rawCode.includes('=') && !rawCode.includes('('))) {
         if (label && label !== 'Process' && label.length < 80) {
           output += `${indent}// ${label}\n`;
         } else {
@@ -725,9 +959,6 @@ export const generateCppFromGraph = (nodes: Node[], edges: Edge[]): string => {
     ].join('\n');
   }
 
-  const allCode = collectAllCode(typedNodes);
-  const includes = detectIncludes(allCode);
-
   const bodyLines = traverse(
     startNode.id,
     nodeMap,
@@ -736,11 +967,19 @@ export const generateCppFromGraph = (nodes: Node[], edges: Edge[]): string => {
     '    ',
     new Set()
   );
+  const allCode = collectAllCode(typedNodes);
+  const topLevelDeclarations = collectTopLevelDeclarations(typedNodes);
+  const includes = detectIncludes([...allCode, bodyLines]);
 
   return [
     ...includes.map(h => `#include <${h}>`),
     'using namespace std;',
     '',
+    ...(topLevelDeclarations.length
+      ? [
+          ...topLevelDeclarations.flatMap(block => [block, '']),
+        ]
+      : []),
     'int main() {',
     bodyLines.trimEnd() || '    // Empty graph — connect your nodes',
     '    return 0;',

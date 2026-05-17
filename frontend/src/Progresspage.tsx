@@ -1,5 +1,5 @@
 // src/ProgressPage.tsx
-import React, { useEffect, useState, useMemo } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from './components/AuthScreen';
 import { supabase } from './services/supabase';
@@ -18,10 +18,14 @@ interface Report {
 
 interface MissionProgress {
   id: string
+  quest_uuid: string
   status: string
   attempts: number
   hintsused: number
-  completedat: string
+  completedat: string | null
+  first_completed_at: string | null
+  updatedat: string | null
+  xp_gained: number | null
   questid: {
     title: string
     phase: string
@@ -29,11 +33,24 @@ interface MissionProgress {
   } | null
 }
 
+interface MissionProgressRow {
+  id: string
+  questid: string
+  status: string
+  attempts: number
+  hintsused: number
+  completedat: string | null
+  first_completed_at: string | null
+  updatedat: string | null
+  xp_gained: number | null
+}
+
 interface FullStats {
   totalXP: number
   currentLevel: number
   sandboxRuns: number
   questsCompleted: number
+  phaseTotals: Record<'beginner' | 'intermediate' | 'advanced', number>
   levelProgress: number
   xpToNextLevel: number | null
   reports: Report[]
@@ -102,9 +119,10 @@ function getPastWeeklyActivity(reports: Report[], missions: MissionProgress[]) {
       complexity: r.cognitive_complexity ?? 'N/A'
     })),
     ...missions
-      .filter(m => m.status === 'completed' && m.completedat)
+      .filter(isMissionCompleted)
+      .filter(m => Boolean(missionCompletionDate(m)))
       .map(m => ({
-        date: m.completedat, type: 'Quest Completed',
+        date: missionCompletionDate(m)!, type: 'Quest Completed',
         mode: 'campaign', detail: m.questid?.title ?? 'Unknown Quest',
         complexity: 'N/A'
       }))
@@ -227,6 +245,18 @@ function favouriteWeekday(dates: string[]): string {
   return days[counts.indexOf(max)]
 }
 
+function isMissionCompleted(mission: MissionProgress): boolean {
+  return Boolean(mission.first_completed_at || mission.status === 'completed')
+}
+
+function missionCompletionDate(mission: MissionProgress): string | null {
+  return mission.first_completed_at ?? mission.completedat ?? null
+}
+
+function uniqueCompletedQuestCount(missions: MissionProgress[]): number {
+  return new Set(missions.filter(isMissionCompleted).map(m => m.quest_uuid || m.id)).size
+}
+
 // ── Main Component ───────────────────────────────────────────────────────────
 
 export const ProgressPage: React.FC = () => {
@@ -235,12 +265,14 @@ export const ProgressPage: React.FC = () => {
   const [stats, setStats] = useState<FullStats | null>(null)
   const [loading, setLoading] = useState(true)
   const [refreshing, setRefreshing] = useState(false)
+  const [loadError, setLoadError] = useState<string | null>(null)
   const [avatarUrl, setAvatarUrl] = useState<string | null>(null)
   const [activeTab, setActiveTab] = useState<'overview' | 'analyses' | 'campaign' | 'badges'>('overview')
   const [tooltip, setTooltip] = useState<{ cell: { date: string; count: number; times: string[] }; x: number; y: number } | null>(null)
   const [campaignFilter, setCampaignFilter] = useState<'all' | 'beginner' | 'intermediate' | 'advanced'>('all')
   const [campaignSearch, setCampaignSearch] = useState('')
   const [shareMsg, setShareMsg] = useState('')
+  const realtimeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   useEffect(() => {
     const els = [document.documentElement, document.body, document.getElementById('root')]
@@ -251,8 +283,9 @@ export const ProgressPage: React.FC = () => {
   const allActivityDates = useMemo(() => {
     const reportDates = (stats?.reports ?? []).map(r => r.createdat)
     const missionDates = (stats?.missions ?? [])
-      .filter(m => m.status === 'completed' && m.completedat)
-      .map(m => m.completedat)
+      .filter(isMissionCompleted)
+      .map(missionCompletionDate)
+      .filter((date): date is string => Boolean(date))
     return [...reportDates, ...missionDates]
   }, [stats?.reports, stats?.missions])
 
@@ -288,28 +321,66 @@ export const ProgressPage: React.FC = () => {
     return Math.round((nums.reduce((s, x) => s + x, 0) / nums.length) * 10) / 10
   }, [stats?.reports])
 
-  const fetchAll = async (isRefresh = false) => {
+  const fetchAll = useCallback(async (isRefresh = false) => {
     if (!user) return
     if (isRefresh) setRefreshing(true)
     try {
-      const { data: profile } = await supabase
-        .from('users').select('totalxp, currentlevel, sandbox_runs')
-        .eq('id', user.id).single()
+      setLoadError(null)
+      const [profileRes, reportsRes, missionsRes, questsRes] = await Promise.all([
+        supabase
+          .from('users').select('totalxp, currentlevel, sandbox_runs')
+          .eq('id', user.id).single(),
+        supabase
+          .from('reports')
+          .select('id, type, sourcecode, mode_context, cognitive_complexity, createdat')
+          .eq('userid', user.id).order('createdat', { ascending: false }),
+        supabase
+          .from('mission_progress')
+          .select('id, questid, status, attempts, hintsused, completedat, first_completed_at, updatedat, xp_gained')
+          .eq('userid', user.id).order('updatedat', { ascending: false }),
+        supabase
+          .from('quests')
+          .select('id, title, phase, basexp')
+          .eq('isactive', true)
+          .eq('mode', 'campaign')
+      ])
 
-      const { data: reports } = await supabase
-        .from('reports')
-        .select('id, type, sourcecode, mode_context, cognitive_complexity, createdat')
-        .eq('userid', user.id).order('createdat', { ascending: false })
+      if (profileRes.error) throw profileRes.error
+      if (reportsRes.error) throw reportsRes.error
+      if (missionsRes.error) throw missionsRes.error
+      if (questsRes.error) throw questsRes.error
 
-      const { data: missions } = await supabase
-        .from('mission_progress')
-        .select('id, status, attempts, hintsused, completedat, questid(title, phase, basexp)')
-        .eq('userid', user.id).order('completedat', { ascending: false })
+      const profile = profileRes.data
+      const reports = (reportsRes.data ?? []) as Report[]
+      const questMap = new Map(
+        (questsRes.data ?? []).map((quest: any) => [
+          quest.id,
+          { title: quest.title, phase: quest.phase, basexp: quest.basexp ?? 0 }
+        ])
+      )
+      const missions = ((missionsRes.data ?? []) as MissionProgressRow[]).map((mission): MissionProgress => ({
+        id: mission.id,
+        quest_uuid: mission.questid,
+        status: mission.status,
+        attempts: mission.attempts ?? 0,
+        hintsused: mission.hintsused ?? 0,
+        completedat: mission.completedat,
+        first_completed_at: mission.first_completed_at,
+        updatedat: mission.updatedat,
+        xp_gained: mission.xp_gained ?? 0,
+        questid: questMap.get(mission.questid) ?? null,
+      }))
+      const questsCompleted = uniqueCompletedQuestCount(missions)
+      const phaseTotals: FullStats['phaseTotals'] = { beginner: 0, intermediate: 0, advanced: 0 }
+      for (const quest of questsRes.data ?? []) {
+        const phase = quest.phase as keyof FullStats['phaseTotals'] | null
+        if (phase && phase in phaseTotals) phaseTotals[phase]++
+      }
 
-      // Compute leaderboard rank by counting users with more XP
-      const { count: higherRanks } = await supabase
+      const { count: higherRanks, error: rankError } = await supabase
         .from('users').select('*', { count: 'exact', head: true })
         .eq('isactive', true).gt('totalxp', profile?.totalxp ?? 0)
+      if (rankError) throw rankError
 
       const { data: avatarData } = await supabase.storage.from('Avatars')
         .list(user.id, { limit: 1 })
@@ -319,34 +390,59 @@ export const ProgressPage: React.FC = () => {
         setAvatarUrl(urlData.publicUrl)
       }
 
-      const { count: questsCompleted } = await supabase
-        .from('mission_progress').select('*', { count: 'exact', head: true })
-        .eq('userid', user.id).eq('status', 'completed')
-
       const totalXP = profile?.totalxp ?? 0
       setStats({
         totalXP,
         currentLevel: profile?.currentlevel ?? 1,
         sandboxRuns: profile?.sandbox_runs ?? 0,
-        questsCompleted: questsCompleted ?? 0,
+        questsCompleted,
+        phaseTotals,
         levelProgress: getLevelProgress(totalXP),
         xpToNextLevel: getXPToNextLevel(totalXP),
-        reports: (reports ?? []) as Report[],
-        missions: (missions ?? []) as unknown as MissionProgress[],
+        reports,
+        missions,
         leaderboardRank: (higherRanks ?? 0) + 1
       })
     } catch (error) {
       console.error('Failed to fetch progress:', error)
+      setLoadError(error instanceof Error ? error.message : 'Failed to load progress data.')
     } finally {
       setLoading(false)
       setRefreshing(false)
     }
-  }
+  }, [user?.id])
 
   useEffect(() => {
     if (!user) { navigate('/login'); return }
     fetchAll()
-  }, [user?.id])
+  }, [fetchAll, navigate, user?.id])
+
+  useEffect(() => {
+    if (!user) return
+
+    const scheduleRefresh = () => {
+      if (realtimeTimerRef.current) clearTimeout(realtimeTimerRef.current)
+      realtimeTimerRef.current = setTimeout(() => {
+        fetchAll(false)
+      }, 300)
+    }
+
+    const channel = supabase
+      .channel(`progress-live-${user.id}`)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'users', filter: `id=eq.${user.id}` }, scheduleRefresh)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'reports', filter: `userid=eq.${user.id}` }, scheduleRefresh)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'mission_progress', filter: `userid=eq.${user.id}` }, scheduleRefresh)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'quests' }, scheduleRefresh)
+      .subscribe()
+
+    return () => {
+      if (realtimeTimerRef.current) {
+        clearTimeout(realtimeTimerRef.current)
+        realtimeTimerRef.current = null
+      }
+      supabase.removeChannel(channel)
+    }
+  }, [fetchAll, user?.id])
 
   if (loading) {
     return (
@@ -359,7 +455,24 @@ export const ProgressPage: React.FC = () => {
       </div>
     )
   }
-  if (!stats) return null
+  if (!stats) {
+    return (
+      <div style={{ minHeight: '100vh', background: '#0d1117', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#8b949e', padding: 24 }}>
+        <div style={{ maxWidth: 520, width: '100%', background: 'rgba(22,27,34,0.95)', border: '1px solid #30363d', borderRadius: 12, padding: 24, textAlign: 'center' }}>
+          <div style={{ fontSize: 28, marginBottom: 10 }}>📊</div>
+          <h2 style={{ color: '#e6edf3', margin: '0 0 8px', fontSize: 18 }}>Progress could not load</h2>
+          <p style={{ color: '#8b949e', fontSize: 13, margin: '0 0 16px' }}>{loadError ?? 'Please try refreshing the progress data.'}</p>
+          <button onClick={() => fetchAll(true)} disabled={refreshing} style={{
+            background: 'rgba(100,181,246,0.12)', border: '1px solid rgba(100,181,246,0.35)',
+            color: '#64b5f6', borderRadius: 8, padding: '8px 14px', fontSize: 13, fontWeight: 700,
+            cursor: refreshing ? 'not-allowed' : 'pointer',
+          }}>
+            {refreshing ? 'Refreshing...' : 'Try Again'}
+          </button>
+        </div>
+      </div>
+    )
+  }
 
   // Rank from XP, not from stale `currentlevel`. See types/index.ts getRank().
   const levelName = getRank(stats.totalXP ?? 0).name
@@ -397,15 +510,27 @@ export const ProgressPage: React.FC = () => {
     return true
   })
 
-  // Phase progress rings (completed vs attempted per phase)
+  const completedMissionRows = (() => {
+    const byQuest = new Map<string, MissionProgress>()
+    for (const mission of stats.missions.filter(isMissionCompleted)) {
+      const key = mission.quest_uuid || mission.id
+      const current = byQuest.get(key)
+      const currentTime = current ? new Date(current.updatedat ?? missionCompletionDate(current) ?? 0).getTime() : -1
+      const nextTime = new Date(mission.updatedat ?? missionCompletionDate(mission) ?? 0).getTime()
+      if (!current || nextTime >= currentTime) byQuest.set(key, mission)
+    }
+    return Array.from(byQuest.values())
+  })()
+
+  // Phase progress rings (completed vs active campaign quests per phase)
   const phaseProgress = (['beginner','intermediate','advanced'] as const).map(phase => {
-    const total = stats.missions.filter(m => m.questid?.phase === phase).length
-    const done = stats.missions.filter(m => m.questid?.phase === phase && m.status === 'completed').length
+    const total = stats.phaseTotals[phase] ?? stats.missions.filter(m => m.questid?.phase === phase).length
+    const done = completedMissionRows.filter(m => m.questid?.phase === phase).length
     return { phase, done, total, pct: total === 0 ? 0 : Math.round((done / total) * 100) }
   })
 
   const avgHintsUsed = (() => {
-    const completed = stats.missions.filter(m => m.status === 'completed')
+    const completed = completedMissionRows
     if (completed.length === 0) return null
     return (completed.reduce((s, m) => s + (m.hintsused ?? 0), 0) / completed.length).toFixed(1)
   })()
@@ -1018,7 +1143,11 @@ export const ProgressPage: React.FC = () => {
                 const phaseColor = mission.questid?.phase === 'beginner' ? '#4caf50'
                                   : mission.questid?.phase === 'intermediate' ? '#ffa726'
                                   : mission.questid?.phase === 'advanced' ? '#f44336' : '#8b949e'
-                const statusColor = mission.status === 'completed' ? '#4caf50' : '#ffa726'
+                const completed = isMissionCompleted(mission)
+                const completedOn = missionCompletionDate(mission)
+                const statusColor = completed ? '#4caf50' : '#ffa726'
+                const statusLabel = completed ? 'completed' : mission.status
+                const earnedXP = completed ? mission.xp_gained ?? mission.questid?.basexp : mission.questid?.basexp
                 return (
                   <div key={mission.id} style={{
                     background: 'rgba(255,255,255,0.02)', border: '1px solid #21262d',
@@ -1032,9 +1161,9 @@ export const ProgressPage: React.FC = () => {
                       <div style={{ flex: 1, minWidth: 0 }}>
                         <div style={{ color: 'white', fontSize: 14, fontWeight: 600, marginBottom: 6 }}>
                           {mission.questid?.title ?? 'Unknown Quest'}
-                          {mission.questid?.basexp != null && (
+                          {earnedXP != null && (
                             <span style={{ marginLeft: 8, color: '#ffc107', fontSize: 11, fontWeight: 700 }}>
-                              +{mission.questid.basexp} XP
+                              +{earnedXP} XP
                             </span>
                           )}
                         </div>
@@ -1058,11 +1187,11 @@ export const ProgressPage: React.FC = () => {
                           background: statusColor + '20', padding: '3px 10px', borderRadius: 6,
                           textTransform: 'uppercase', letterSpacing: 0.5,
                         }}>
-                          {mission.status}
+                          {statusLabel}
                         </div>
-                        {mission.completedat && (
+                        {completedOn && (
                           <div style={{ color: '#484f58', fontSize: 10, marginTop: 4 }}>
-                            {new Date(mission.completedat).toLocaleDateString()}
+                            {new Date(completedOn).toLocaleDateString()}
                           </div>
                         )}
                       </div>
@@ -1081,16 +1210,19 @@ export const ProgressPage: React.FC = () => {
             {(() => {
               // Badge definition now includes a `progress` function so we show
               // how close the user is to the locked ones.
+              const completedInPhase = (phase: 'beginner' | 'intermediate' | 'advanced') =>
+                stats.missions.filter(m => m.questid?.phase === phase && isMissionCompleted(m)).length
+              const completedWithoutHints = stats.missions.some(m => isMissionCompleted(m) && m.hintsused === 0)
               const allBadges = [
                 { id: 'first_quest',       icon: '⚔️', name: 'First Quest',      desc: 'Complete your first campaign quest',  earned: stats.questsCompleted >= 1,       progress: () => Math.min(1, stats.questsCompleted) / 1, detail: `${Math.min(stats.questsCompleted, 1)}/1` },
-                { id: 'beginner_clear',    icon: '🌱', name: 'Beginner Clear',   desc: 'Complete a beginner quest',           earned: stats.missions.filter(m => m.questid?.phase === 'beginner'    && m.status === 'completed').length >= 1, progress: () => Math.min(1, stats.missions.filter(m => m.questid?.phase === 'beginner'    && m.status === 'completed').length) / 1, detail: '' },
-                { id: 'intermediate_clear',icon: '🔥', name: 'Intermediate Clear',desc: 'Complete an intermediate quest',     earned: stats.missions.filter(m => m.questid?.phase === 'intermediate' && m.status === 'completed').length >= 1, progress: () => Math.min(1, stats.missions.filter(m => m.questid?.phase === 'intermediate' && m.status === 'completed').length) / 1, detail: '' },
-                { id: 'advanced_clear',    icon: '💎', name: 'Advanced Clear',   desc: 'Complete an advanced quest',          earned: stats.missions.filter(m => m.questid?.phase === 'advanced'    && m.status === 'completed').length >= 1, progress: () => Math.min(1, stats.missions.filter(m => m.questid?.phase === 'advanced'    && m.status === 'completed').length) / 1, detail: '' },
+                { id: 'beginner_clear',    icon: '🌱', name: 'Beginner Clear',   desc: 'Complete a beginner quest',           earned: completedInPhase('beginner') >= 1, progress: () => Math.min(1, completedInPhase('beginner')) / 1, detail: '' },
+                { id: 'intermediate_clear',icon: '🔥', name: 'Intermediate Clear',desc: 'Complete an intermediate quest',     earned: completedInPhase('intermediate') >= 1, progress: () => Math.min(1, completedInPhase('intermediate')) / 1, detail: '' },
+                { id: 'advanced_clear',    icon: '💎', name: 'Advanced Clear',   desc: 'Complete an advanced quest',          earned: completedInPhase('advanced') >= 1, progress: () => Math.min(1, completedInPhase('advanced')) / 1, detail: '' },
                 { id: 'knight_rank',       icon: '⚔️', name: 'Knight',           desc: 'Reach Knight rank (5,000 XP)',         earned: stats.totalXP >= 5000,            progress: () => Math.min(1, stats.totalXP / 5000),    detail: `${stats.totalXP.toLocaleString()} / 5,000 XP` },
                 { id: 'lord_rank',         icon: '🌟', name: 'Lord',             desc: 'Reach Lord rank (20,000 XP)',          earned: stats.totalXP >= 20000,           progress: () => Math.min(1, stats.totalXP / 20000),   detail: `${stats.totalXP.toLocaleString()} / 20,000 XP` },
                 { id: 'duke_rank',         icon: '👑', name: 'Duke',             desc: 'Reach Duke rank (75,000 XP)',          earned: stats.totalXP >= 75000,           progress: () => Math.min(1, stats.totalXP / 75000),   detail: `${stats.totalXP.toLocaleString()} / 75,000 XP` },
                 { id: 'king_rank',         icon: '🔱', name: 'King',             desc: 'Reach King rank (250,000 XP)',         earned: stats.totalXP >= 250000,          progress: () => Math.min(1, stats.totalXP / 250000),  detail: `${stats.totalXP.toLocaleString()} / 250,000 XP` },
-                { id: 'no_hints',          icon: '🎯', name: 'Purist',           desc: 'Complete a quest without hints',       earned: stats.missions.some(m => m.status === 'completed' && m.hintsused === 0), progress: () => stats.missions.some(m => m.status === 'completed' && m.hintsused === 0) ? 1 : 0, detail: '' },
+                { id: 'no_hints',          icon: '🎯', name: 'Purist',           desc: 'Complete a quest without hints',       earned: completedWithoutHints, progress: () => completedWithoutHints ? 1 : 0, detail: '' },
                 { id: 'streak_3',          icon: '🔥', name: 'On A Roll',        desc: 'Practice 3 days in a row',             earned: streaks.longest >= 3,             progress: () => Math.min(1, streaks.longest / 3),     detail: `${streaks.longest} / 3 days` },
                 { id: 'streak_7',          icon: '🏆', name: 'Week Warrior',     desc: 'Practice 7 days in a row',             earned: streaks.longest >= 7,             progress: () => Math.min(1, streaks.longest / 7),     detail: `${streaks.longest} / 7 days` },
                 { id: 'analyse_50',        icon: '🔬', name: 'Lab Tech',         desc: 'Run 50 sandbox analyses',              earned: stats.sandboxRuns >= 50,          progress: () => Math.min(1, stats.sandboxRuns / 50),  detail: `${stats.sandboxRuns} / 50` },

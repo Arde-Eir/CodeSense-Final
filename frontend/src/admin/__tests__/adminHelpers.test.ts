@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest';
 import {
   computeUserStats, filterUsers, levelToPhase,
   fixPopLanguageInQuestion, patchMCQuestions, splitMCQuestions,
+  normalizeMCQuestionOptions, normalizeMCQuestions,
   parseCodeFillAnswers,
   loadHintsForEdit, serializeHints,
   type AdminUserLite, type MCQuestionLite, type HintFormRow,
@@ -239,6 +240,67 @@ describe('splitMCQuestions', () => {
 
   it('returns two empty buckets when input array is empty', () => {
     expect(splitMCQuestions([], 'pop_balloon')).toEqual({ mc: [], balloon: [] });
+  });
+});
+
+// ─── normalizeMCQuestionOptions ─────────────────────────────────────────────
+describe('normalizeMCQuestionOptions', () => {
+  it('drops blank options without padding back to four choices', () => {
+    const q = normalizeMCQuestionOptions({
+      question: 'Pick one',
+      options: ['Alpha', 'Beta', 'Gamma', ''],
+      correct: 1,
+    });
+
+    expect(q.options).toEqual(['Alpha', 'Beta', 'Gamma']);
+    expect(q.correct).toBe(1);
+  });
+
+  it('moves the correct index when blanks before the answer are removed', () => {
+    const q = normalizeMCQuestionOptions({
+      question: 'Pick one',
+      options: ['Alpha', '', 'Gamma', 'Delta'],
+      correct: 2,
+    });
+
+    expect(q.options).toEqual(['Alpha', 'Gamma', 'Delta']);
+    expect(q.correct).toBe(1);
+  });
+
+  it('falls back to the first option when the selected correct answer was blank', () => {
+    const q = normalizeMCQuestionOptions({
+      question: 'Pick one',
+      options: ['Alpha', 'Beta', '', ''],
+      correct: 2,
+    });
+
+    expect(q.options).toEqual(['Alpha', 'Beta']);
+    expect(q.correct).toBe(0);
+  });
+
+  it('keeps multiple correct answers and remaps them after blank options are removed', () => {
+    const q = normalizeMCQuestionOptions({
+      question: 'Pick all valid types',
+      options: ['int', '', 'float', 'double'],
+      correct: 0,
+      correctAnswers: [0, 2, 3],
+    });
+
+    expect(q.options).toEqual(['int', 'float', 'double']);
+    expect(q.correct).toBe(0);
+    expect(q.correctAnswers).toEqual([0, 1, 2]);
+  });
+});
+
+describe('normalizeMCQuestions', () => {
+  it('drops completely empty template rows', () => {
+    const qs = normalizeMCQuestions([
+      { question: '', options: ['', '', '', ''], correct: 0 },
+      { question: 'Real question', options: ['A', 'B', 'C', ''], correct: 2 },
+    ]);
+
+    expect(qs).toHaveLength(1);
+    expect(qs[0].options).toEqual(['A', 'B', 'C']);
   });
 });
 

@@ -337,15 +337,45 @@ const SECTIONS: ManualSection[] = [
     id: 'build-mode',
     icon: '🧩',
     title: 'Build Mode — Flowchart → C++',
-    summary: 'Twelve ISO 5807 shapes, eleven validator rules, one compilable output.',
+    summary: 'A canvas-first workspace for drawing logic and generating readable C++.',
     content: (
       <>
         <p>
-          Toggle <b>Build Mode</b> in the Sandbox (top of the editor panel). The
-          right side becomes an empty canvas. Click <b>☰ TOOLS</b> (top-right) to
-          open the shape palette and code generator. Drag shapes onto the canvas,
-          wire them, double-click to add code, then click <b>⚡ GENERATE C++</b>.
+          Toggle <b>Build Flowchart</b> in the Sandbox header. The canvas becomes
+          the main workspace, and the generated output/manual sit in the side
+          rail. Collapse that rail when you want maximum drawing room.
         </p>
+        <Callout color="#58a6ff" icon="?" title="Quick in-canvas help:">
+          Use the <b>? GUIDE</b> button inside the canvas for a small tutorial,
+          sentence examples, and a shape cheat sheet without leaving Build Mode.
+        </Callout>
+
+        <h4 style={{ color: '#e6edf3', fontSize: 14, marginTop: 14, marginBottom: 6 }}>Recommended workflow</h4>
+        <DataTable
+          headers={['STEP', 'ACTION', 'WHY IT HELPS']}
+          rows={[
+            ['1', 'Add Start, then the main steps, then End.', 'The validator needs one clear entry and exit.'],
+            ['2', 'Use Process for variables/math, Input for cin, Output for cout, Decision for conditions.', 'Shape choice tells the generator what kind of C++ to emit.'],
+            ['3', 'Double-click each node and type C++ or a simple sentence.', 'The generator accepts beginner-friendly English for common actions.'],
+            ['4', 'Connect each node in execution order.', 'Code generation follows the connected path from Start.'],
+            ['5', 'Let decision edges auto-label true/false, or double-click an edge to edit it.', 'Branch labels decide which block becomes if and else.'],
+            ['6', 'Click Generate C++, then Load & Analyze.', 'This sends the produced code through the normal analyzer tabs.'],
+          ]}
+        />
+
+        <h4 style={{ color: '#e6edf3', fontSize: 14, marginTop: 18, marginBottom: 6 }}>Human sentences the generator understands</h4>
+        <DataTable
+          headers={['TYPE THIS', 'C++ GENERATED']}
+          rows={[
+            [<code>create integer age equals 18</code>, <code>int age = 18;</code>],
+            [<code>create text full name equals Ada Lovelace</code>, <code>string fullName = "Ada Lovelace";</code>],
+            [<code>set total to price plus tax</code>, <code>total = price + tax;</code>],
+            [<code>increase score by 10</code>, <code>score += 10;</code>],
+            [<code>ask for user age</code>, <code>cin &gt;&gt; userAge;</code>],
+            [<code>print too young</code>, <code>cout &lt;&lt; "too young" &lt;&lt; endl;</code>],
+            [<code>if user age is greater than 17</code>, <code>if (userAge &gt; 17)</code>],
+          ]}
+        />
 
         <h4 style={{ color: '#e6edf3', fontSize: 14, marginTop: 14, marginBottom: 6 }}>The twelve ISO 5807 shapes</h4>
         <DataTable
@@ -368,8 +398,9 @@ const SECTIONS: ManualSection[] = [
 
         <h4 style={{ color: '#e6edf3', fontSize: 14, marginTop: 18, marginBottom: 6 }}>Validator rules (all 11)</h4>
         <p style={{ color: '#8b949e', fontSize: 12 }}>
-          Run <b>before</b> code generation. Any error blocks emit; warnings are
-          cosmetic.
+          The validator runs before code generation. Errors block output because
+          the graph structure is ambiguous. Warnings still allow generation and
+          usually mean the generator will use a label, default, or safe comment.
         </p>
         <DataTable
           headers={['CODE', 'SEVERITY', 'TRIGGER']}
@@ -385,7 +416,8 @@ const SECTIONS: ManualSection[] = [
             ['DECISION_NO_EDGES / SINGLE / UNLABELLED / DUPLICATE', 'error', 'Decision missing both branches, or labels not "true" / "false".'],
             ['DEAD_END_NODES',            'error',   'Non-terminator node with no outgoing edge — execution stuck.'],
             ['DANGLING_EDGES',            'error',   'Edge points to a node that was deleted.'],
-            ['DECISION_EMPTY_CONDITION / PLACEHOLDER_NODES', 'warning', 'Default labels with no code — emit // TODO.'],
+            ['DECISION_EMPTY_CONDITION', 'error', 'Decision text is empty, placeholder, or malformed.'],
+            ['MISSING_NODE_CODE / NODE_CODE_FROM_LABEL', 'warning', 'Executable node has no code field; generation uses the label, default statement, or safe comment.'],
           ]}
         />
       </>
@@ -843,7 +875,7 @@ export const UserManualPage: React.FC = () => {
         borderBottom: '1px solid #21262d', position: 'sticky', top: 0, zIndex: 10,
         backdropFilter: 'blur(8px)',
       }}>
-        <button onClick={() => navigate('/home')} style={{ background: 'transparent', border: 'none', color: '#8b949e', cursor: 'pointer', fontSize: 14 }}>
+        <button onClick={() => navigate(isAuthenticated || isGuest ? '/home' : '/')} style={{ background: 'transparent', border: 'none', color: '#8b949e', cursor: 'pointer', fontSize: 14 }}>
           ← Back
         </button>
         <div className="um-header-title" style={{ display: 'flex', alignItems: 'center', gap: 10 }}>

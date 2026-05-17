@@ -4,6 +4,7 @@
 // Contract:
 //   • First full quest completion: 200 XP.
 //   • Retake full quest completion: 20 XP.
+//   • Hints cost 25 XP each, capped at half the completion reward.
 //   • Partial activity completion: 0 XP. This prevents tab-by-tab farming.
 //   • Phase XP caps are fixed per tier and clamp rewards to 0 once full.
 //   • `isCompleted` is the durable "has this quest ever been completed"
@@ -13,6 +14,8 @@ import type { ActivityTab, Phase } from '../types/campaign';
 
 export const FIRST_COMPLETION_XP = 200;
 export const RETAKE_COMPLETION_XP = 20;
+export const HINT_XP_COST = 25;
+export const HINT_PENALTY_CAP_RATIO = 0.5;
 
 export const LEVEL_XP_CAP_BY_PHASE: Record<Phase, number> = {
   beginner: 1000,
@@ -31,12 +34,33 @@ export interface RetakeXpInputs {
   isFullCompletion: boolean;
   /** Remaining headroom on the phase's XP cap. 0 means cap is hit. */
   levelRemaining:   number;
+  /** Cumulative hints revealed during this attempt. */
+  hintsUsed?:        number;
+}
+
+export function computeHintPenalty(inp: Pick<RetakeXpInputs, 'isCompleted' | 'hintsUsed'>): {
+  baseReward: number;
+  penalty: number;
+  maxPenalty: number;
+  capped: boolean;
+} {
+  const baseReward = inp.isCompleted ? RETAKE_COMPLETION_XP : FIRST_COMPLETION_XP;
+  const maxHintPenalty = Math.floor(baseReward * HINT_PENALTY_CAP_RATIO);
+  const rawPenalty = Math.max(0, inp.hintsUsed ?? 0) * HINT_XP_COST;
+  const hintPenalty = Math.min(rawPenalty, maxHintPenalty);
+  return {
+    baseReward,
+    penalty: hintPenalty,
+    maxPenalty: maxHintPenalty,
+    capped: rawPenalty >= maxHintPenalty && maxHintPenalty > 0,
+  };
 }
 
 /** XP for the current completion event. */
 export function computeActivityXP(inp: RetakeXpInputs): number {
   if (!inp.isFullCompletion || inp.levelRemaining <= 0) return 0;
-  const reward = inp.isCompleted ? RETAKE_COMPLETION_XP : FIRST_COMPLETION_XP;
+  const { baseReward, penalty: hintPenalty } = computeHintPenalty(inp);
+  const reward = Math.max(0, baseReward - hintPenalty);
   return Math.min(reward, inp.levelRemaining);
 }
 

@@ -4,6 +4,7 @@
 
 import React from 'react';
 import type { MCQ } from '../types/campaign';
+import { normalizeMCQList } from './normalizeMCQ';
 
 interface Props {
   questions:   MCQ[];
@@ -183,7 +184,8 @@ const MCGameInner: React.FC<{ questions: MCQ[]; onComplete: (score: number, tota
 };
 
 export const MCGame: React.FC<Props> = ({ questions, onComplete, resetSignal, onItemChange }) => {
-  return <MCGameInner key={resetSignal} questions={questions} onComplete={onComplete} onItemChange={onItemChange} />;
+  const playableQuestions = React.useMemo(() => normalizeMCQList(questions), [questions]);
+  return <MCGameInner key={resetSignal} questions={playableQuestions} onComplete={onComplete} onItemChange={onItemChange} />;
 };
 
 export default MCGame;

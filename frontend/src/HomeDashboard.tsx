@@ -6,6 +6,15 @@ import { supabase } from './services/supabase';
 import { getLevelProgress, getXPToNextLevel, getRank } from './types'
 import { PlayerDetailModal } from './components/PlayerDetailModal'
 
+const isCompletedMissionRow = (row: { first_completed_at?: string | null; status?: string | null }) =>
+  Boolean(row.first_completed_at || row.status === 'completed')
+
+const missionDoneAt = (row: { first_completed_at?: string | null; completedat?: string | null }) =>
+  row.first_completed_at ?? row.completedat ?? null
+
+const countUniqueCompletedQuests = (rows: { questid?: string | null; id?: string | null; first_completed_at?: string | null; status?: string | null }[]) =>
+  new Set(rows.filter(isCompletedMissionRow).map(row => row.questid ?? row.id)).size
+
 // ── Maintenance Banner ─────────────────────────────────────────────────────────
 const MaintenanceBanner: React.FC<{ message: string; isAdmin: boolean; onDisable?: () => void }> = ({ message, isAdmin, onDisable }) => (
   <div style={{
@@ -394,19 +403,24 @@ const NotificationBell: React.FC<{ userId: string | undefined; onViewAllAnnounce
     if (userId) {
       const { data: quests } = await supabase
         .from('mission_progress')
-        .select('questid, completedat, hintsused, quests(title)')
-        .eq('userid', userId).eq('status', 'completed')
-        .order('completedat', { ascending: false })
-        .limit(10)
-      for (const q of (quests ?? []) as any[]) {
-        if (!q.completedat) continue
+        .select('questid, status, completedat, first_completed_at, updatedat, hintsused, quests(title)')
+        .eq('userid', userId)
+        .order('updatedat', { ascending: false })
+        .limit(30)
+      const completedQuests = ((quests ?? []) as any[])
+        .filter(isCompletedMissionRow)
+        .filter(q => Boolean(missionDoneAt(q)))
+        .sort((a, b) => new Date(missionDoneAt(b)!).getTime() - new Date(missionDoneAt(a)!).getTime())
+        .slice(0, 10)
+      for (const q of completedQuests) {
+        const completedAt = missionDoneAt(q)!
         const title = Array.isArray(q.quests) ? q.quests[0]?.title : q.quests?.title
         out.push({
-          id: `quest:${q.questid}:${q.completedat}`, kind: 'quest',
+          id: `quest:${q.questid}:${completedAt}`, kind: 'quest',
           icon: '⚔️', color: '#ffa726',
           title: `Quest completed: ${title ?? 'Unknown'}`,
           body: q.hintsused > 0 ? `Used ${q.hintsused} hint${q.hintsused > 1 ? 's' : ''}.` : 'No hints used — clean clear 🎯.',
-          timestamp: q.completedat,
+          timestamp: completedAt,
           onClick: () => navigate('/campaign'),
         })
       }
@@ -431,15 +445,16 @@ const NotificationBell: React.FC<{ userId: string | undefined; onViewAllAnnounce
 
       const { data: profile } = await supabase
         .from('users').select('totalxp, sandbox_runs').eq('id', userId).maybeSingle()
-      const { count: questCount } = await supabase
-        .from('mission_progress').select('*', { count: 'exact', head: true })
-        .eq('userid', userId).eq('status', 'completed')
+      const { data: progressRows } = await supabase
+        .from('mission_progress')
+        .select('id, questid, status, first_completed_at')
+        .eq('userid', userId)
 
       if (profile) {
         const stats = {
           totalxp: profile.totalxp ?? 0,
           sandboxRuns: profile.sandbox_runs ?? 0,
-          quests: questCount ?? 0,
+          quests: countUniqueCompletedQuests((progressRows ?? []) as any[]),
         }
         for (const m of [...XP_MILESTONES, ...RUN_MILESTONES, ...QUEST_MILESTONES]) {
           if (!m.check(stats)) continue
@@ -1312,12 +1327,11 @@ export const HomeDashboard: React.FC = () => {
     if (!user) return
     try {
       const { data: profile } = await supabase.from('users').select('totalxp, currentlevel, sandbox_runs').eq('id', user.id).single()
-      const { count: questsCompleted } = await supabase
+      const { data: progressRows } = await supabase
         .from('mission_progress')
-        .select('*', { count: 'exact', head: true })
+        .select('id, questid, status, first_completed_at')
         .eq('userid', user.id)
-        .eq('status', 'completed')
-      if (profile) setStats({ sandboxRuns: profile.sandbox_runs ?? 0, questsCompleted: questsCompleted ?? 0, xpToNextLevel: getXPToNextLevel(profile.totalxp ?? 0), levelProgress: getLevelProgress(profile.totalxp ?? 0) })
+      if (profile) setStats({ sandboxRuns: profile.sandbox_runs ?? 0, questsCompleted: countUniqueCompletedQuests((progressRows ?? []) as any[]), xpToNextLevel: getXPToNextLevel(profile.totalxp ?? 0), levelProgress: getLevelProgress(profile.totalxp ?? 0) })
       const { data: snippet } = await supabase
         .from('reports')
         .select('sourcecode, createdat')
@@ -1558,7 +1572,7 @@ export const HomeDashboard: React.FC = () => {
                   { icon: '🎓', tint: '#a371f7', label: 'Tutorials',              action: () => { navigate('/tutorials'); setProfileMenuOpen(false) } },
                   { icon: '📘', tint: '#26c6da', label: 'User Manual',            action: () => { navigate('/manual');       setProfileMenuOpen(false) } },
                   { icon: '📋', tint: '#8b949e', label: 'Patch Notes',            action: () => { navigate('/patch-notes'); setProfileMenuOpen(false) } },
-                  ...(!isGuest ? [{ icon: '🗺️', tint: '#e3b341', label: 'Replay Welcome Tour', action: () => { setProfileMenuOpen(false); window.dispatchEvent(new CustomEvent('cs-replay-tour')) } }] : []),
+                  { icon: '🗺️', tint: '#e3b341', label: isGuest ? 'Start Welcome Tour' : 'Replay Welcome Tour', action: () => { setProfileMenuOpen(false); window.dispatchEvent(new CustomEvent('cs-replay-tour')) } },
                   ...(isAdmin ? [{ icon: '🛡️', tint: '#f85149', label: 'Admin Panel', action: () => { navigate('/admin'); setProfileMenuOpen(false) } }] : []),
                 ].map((item: any) => (
                   <button key={item.label} className="cs-menu-item" onClick={item.action}

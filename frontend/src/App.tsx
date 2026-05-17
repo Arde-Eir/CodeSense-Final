@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { BrowserRouter, Routes, Route, Navigate, useNavigate } from 'react-router-dom';
 import { AuthProvider, useAuth } from './components/AuthScreen';
-import { OnboardingWalkthrough, ONBOARD_KEY } from './components/OnboardingWalkthrough';
+import { OnboardingWalkthrough, ONBOARD_ACTIVE_KEY, ONBOARD_KEY, ONBOARD_STEP_KEY } from './components/OnboardingWalkthrough';
 import { HomeDashboard } from './HomeDashboard';
 import { SignupPage } from './Signuppage';
 import { LoginPage } from './Loginpage';
@@ -101,24 +101,46 @@ const TourController: React.FC = () => {
   useEffect(() => {
     if (!user || isGuest) return;
     try {
+      if (localStorage.getItem(ONBOARD_ACTIVE_KEY) === 'true') {
+        setShowTour(true);
+        return;
+      }
       if (localStorage.getItem(ONBOARD_KEY) !== 'done') {
+        localStorage.setItem(ONBOARD_ACTIVE_KEY, 'true');
+        localStorage.setItem(ONBOARD_STEP_KEY, '0');
         const t = setTimeout(() => setShowTour(true), 800);
         return () => clearTimeout(t);
       }
     } catch { /* localStorage unavailable */ }
   }, [user?.id, isGuest]);
 
+  useEffect(() => {
+    if (!isGuest) return;
+    try {
+      if (localStorage.getItem(ONBOARD_ACTIVE_KEY) === 'true') {
+        setShowTour(true);
+      }
+    } catch { /* localStorage unavailable */ }
+  }, [isGuest]);
+
   // Allow any page to trigger a replay via a custom event.
   useEffect(() => {
-    const handler = () => { if (user && !isGuest) setShowTour(true); };
+    const handler = () => {
+      try {
+        localStorage.setItem(ONBOARD_ACTIVE_KEY, 'true');
+        localStorage.setItem(ONBOARD_STEP_KEY, '0');
+      } catch { /* localStorage unavailable */ }
+      if (user || isGuest) setShowTour(true);
+    };
     window.addEventListener('cs-replay-tour', handler);
     return () => window.removeEventListener('cs-replay-tour', handler);
   }, [user, isGuest]);
 
-  if (!showTour || !user || isGuest) return null;
+  if (!showTour || (!user && !isGuest)) return null;
   return (
     <OnboardingWalkthrough
       isAdmin={isAdmin}
+      isGuest={isGuest}
       onFinish={() => setShowTour(false)}
     />
   );

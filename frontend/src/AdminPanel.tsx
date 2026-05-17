@@ -1,6 +1,6 @@
 // AdminPanel.tsx — Tabler-based admin dashboard
 // Loads Tabler CSS from CDN on mount, removes it on unmount to avoid style bleed.
-import React, { useEffect, useState, useCallback } from 'react'
+import React, { useEffect, useState, useCallback, useMemo } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useAuth } from './components/AuthScreen'
 import { supabase } from './services/supabase'
@@ -8,9 +8,12 @@ import type { ExplorerProfile } from './types'
 import {
   computeUserStats, filterUsers, levelToPhase,
   patchMCQuestions, parseCodeFillAnswers,
+  normalizeMCQuestionOptions, normalizeMCQuestions,
   loadHintsForEdit, serializeHints, HINT_ACTIVITY_OPTIONS,
   type HintFormRow,
 } from './admin/adminHelpers'
+import { generateAutoHints } from './campaign/generateAutoHints'
+import type { ActivityTab, Quest } from './types/campaign'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -81,7 +84,7 @@ type Tab = 'dashboard' | 'users' | 'audit' | 'maintenance' | 'announcements' | '
 // ─── Quest form types ─────────────────────────────────────────────────────────
 
 interface QFormTheory    { id: string; type: string; heading: string; body: string; code: string; language: string; table_headers: string[]; table_rows: string[][] }
-interface QFormMCQ       { id: string; question: string; options: [string,string,string,string]; correct: number; explanation: string; hint: string }
+interface QFormMCQ       { id: string; question: string; options: [string,string,string,string]; correct: number; correctAnswers?: number[]; explanation: string; hint: string }
 interface QFormDragItem  { id: string; label: string; color: string }
 interface QFormDropZone  { id: string; label: string; accepted: string }
 interface QFormCodeFill  { id: string; code_lines: string; language: string; answers: string; hint: string; caption: string }
@@ -117,6 +120,212 @@ const newOrderProblem = (): QFormOrderProblem => ({
   id: `op_${Date.now()}`, question: '', items: [],
 })
 
+const newTheorySection = (type = 'default', patch: Partial<QFormTheory> = {}): QFormTheory => ({
+  id: `th_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+  type,
+  heading: '',
+  body: '',
+  code: '',
+  language: 'c',
+  table_headers: [],
+  table_rows: [[]],
+  ...patch,
+})
+
+const parseLineList = (text: string): string[] =>
+  text
+    .split(/\r?\n/)
+    .map(line => line.replace(/^\s*(?:[-*•]|\d+[.)])\s*/, '').trim())
+    .filter(Boolean)
+
+const lessonTextToSections = (text: string): QFormTheory[] =>
+  text
+    .split(/\n\s*\n/)
+    .map(block => block.trim())
+    .filter(Boolean)
+    .map(block => {
+      const lines = block.split(/\r?\n/).map(line => line.trim()).filter(Boolean)
+      const first = lines[0] ?? ''
+      const markdownHeading = first.match(/^#{1,3}\s+(.+)$/)
+      const colonHeading = lines.length > 1 && first.length <= 72 && first.endsWith(':')
+      if (markdownHeading || colonHeading) {
+        return newTheorySection('default', {
+          heading: markdownHeading?.[1] ?? first.replace(/:$/, ''),
+          body: lines.slice(1).join('\n'),
+        })
+      }
+      return newTheorySection('default', { body: lines.join('\n') })
+    })
+
+const parseHintLines = (text: string): HintFormRow[] =>
+  parseLineList(text).map((line, i) => {
+    const match = line.match(/^(.{1,48}?)(?:\s+-\s+|\s+:\s+)(.+)$/)
+    return {
+      id: `h_${Date.now()}_${i}_${Math.random().toString(36).slice(2, 6)}`,
+      title: match ? match[1].trim() : 'Helpful hint',
+      body: match ? match[2].trim() : line,
+      icon: '',
+      activity: 'all',
+      _extra: {},
+    }
+  })
+
+const hasText = (value: unknown): boolean =>
+  String(value ?? '').trim().length > 0
+
+const selectedTabsForForm = (form: QuestFormState): ActivityTab[] => {
+  const tabs: ActivityTab[] = []
+  if (form.act_drag) tabs.push('drag')
+  if (form.act_codefill) tabs.push('code_fill')
+  if (form.act_ordering) tabs.push('ordering')
+  if (form.act_balloon) tabs.push('balloon')
+  if (form.act_mc) tabs.push('mc')
+  return tabs
+}
+
+const tabHasContent = (form: QuestFormState, tab: ActivityTab): boolean => {
+  if (tab === 'mc') {
+    return form.mc_questions.some(q =>
+      hasText(q.question) || q.options.some(hasText) || hasText(q.explanation)
+    )
+  }
+
+  if (tab === 'balloon') {
+    return form.balloon_questions.some(q =>
+      hasText(q.question) || q.options.some(hasText) || hasText(q.explanation)
+    )
+  }
+
+  if (tab === 'code_fill') {
+    return form.code_fill_items.some(item =>
+      hasText(item.caption) || hasText(item.code_lines) || hasText(item.answers)
+    )
+  }
+
+  if (tab === 'ordering') {
+    return form.ordering_problems.some(problem =>
+      hasText(problem.question) ||
+      problem.items.some(item => hasText(item.label) || hasText(item.description))
+    )
+  }
+
+  if (tab === 'drag') {
+    return form.drag_problems.some(problem =>
+      hasText(problem.question) ||
+      problem.items.some(item => hasText(item.label)) ||
+      problem.drop_zones.some(zone => hasText(zone.label) || hasText(zone.accepted))
+    )
+  }
+
+  return false
+}
+
+const tabLabel = (tab: ActivityTab): string => {
+  if (tab === 'code_fill') return 'Code Fill'
+  if (tab === 'mc') return 'Quiz'
+  if (tab === 'drag') return 'Drag & Drop'
+  if (tab === 'balloon') return 'Balloon Pop'
+  return 'Ordering'
+}
+
+const campaignDifficultyFromForm = (
+  difficulty: QuestFormState['difficulty']
+): Quest['difficulty'] => {
+  if (difficulty === 'beginner') return 'easy'
+  if (difficulty === 'intermediate') return 'medium'
+  return 'hard'
+}
+
+const questPreviewFromForm = (form: QuestFormState): Quest => {
+  const dragItems = form.drag_problems.flatMap(p => p.items)
+  const dropZones = form.drag_problems.flatMap(p => p.drop_zones)
+  const orderingItems = form.ordering_problems.flatMap(p =>
+    p.items.map((item, index) => ({
+      id: item.id,
+      label: item.label,
+      description: item.description,
+      correct_order: index,
+    }))
+  )
+
+  return {
+    id: 'quest-builder-preview',
+    title: form.title,
+    description: form.description || null,
+    difficulty: campaignDifficultyFromForm(form.difficulty),
+    level: form.level,
+    phase: levelToPhase(form.level),
+    mode: 'campaign',
+    basexp: form.basexp,
+    requiredxp: form.requiredxp,
+    sortorder: form.sortorder,
+    isactive: form.isactive,
+    question_type: form.act_balloon ? 'pop_balloon'
+      : form.act_mc ? 'multiple_choice'
+      : form.act_codefill ? 'code_fill'
+      : form.act_ordering ? 'ordering'
+      : form.act_drag ? 'drag_drop'
+      : null,
+    objectives: form.objectives.filter(Boolean),
+    hints: null,
+    game_items: form.act_drag ? dragItems : null,
+    drop_zones: form.act_drag ? dropZones : null,
+    ordering_items: form.act_ordering ? orderingItems : null,
+    mc_questions: [
+      ...(form.act_mc ? form.mc_questions.map(q => ({
+        id: q.id,
+        question: q.question,
+        options: q.options,
+        correct: q.correct,
+        explanation: q.explanation,
+        hint: q.hint,
+        mode: 'mc' as const,
+      })) : []),
+      ...(form.act_balloon ? form.balloon_questions.map(q => ({
+        id: q.id,
+        question: q.question,
+        options: q.options,
+        correct: q.correct,
+        correctAnswers: q.correctAnswers,
+        explanation: q.explanation,
+        hint: q.hint,
+        mode: 'balloon' as const,
+      })) : []),
+    ],
+    code_fill_items: form.act_codefill ? form.code_fill_items.map(item => ({
+      id: item.id,
+      code_lines: item.code_lines.split(/\r?\n/),
+      language: item.language,
+      answers: parseCodeFillAnswers(item.answers),
+      hint: item.hint,
+      caption: item.caption,
+    })) : null,
+    tutorial_title: form.tutorial_title || null,
+    tutorial_body: form.tutorial_body || null,
+    tutorial_image: null,
+    theory_sections: null,
+  }
+}
+
+const questActivityLabels = (q: ExistingQuest): string[] => {
+  const labels: string[] = []
+  const mc = Array.isArray(q.mc_questions) ? q.mc_questions : []
+  const hasMode = mc.some((item: any) => item?.mode === 'balloon' || item?.mode === 'mc')
+  const mcCount = hasMode
+    ? mc.filter((item: any) => item?.mode !== 'balloon').length
+    : q.question_type === 'pop_balloon' ? 0 : mc.length
+  const balloonCount = hasMode
+    ? mc.filter((item: any) => item?.mode === 'balloon').length
+    : q.question_type === 'pop_balloon' ? mc.length : 0
+
+  if (mcCount) labels.push(`MC ${mcCount}`)
+  if (balloonCount) labels.push(`Balloon ${balloonCount}`)
+  if (Array.isArray(q.game_items) && q.game_items.length) labels.push('Drag')
+  if (Array.isArray(q.ordering_items) && q.ordering_items.length) labels.push('Ordering')
+  if (Array.isArray(q.code_fill_items) && q.code_fill_items.length) labels.push(`Code ${q.code_fill_items.length}`)
+  return labels
+}
+
 const defaultQF = (): QuestFormState => ({
   title: '', description: '', difficulty: 'beginner',
   level: 1, basexp: 100, requiredxp: 0, sortorder: 99, isactive: true,
@@ -124,7 +333,7 @@ const defaultQF = (): QuestFormState => ({
   theory_sections: [], objectives: [''],
   act_mc: true, act_drag: false, act_balloon: false, act_ordering: false, act_codefill: false,
   mc_questions: [{ id: '1', question: '', options: ['', '', '', ''], correct: 0, explanation: '', hint: '' }],
-  balloon_questions: [{ id: 'b1', question: '', options: ['', '', '', ''], correct: 0, explanation: '', hint: '' }],
+  balloon_questions: [{ id: 'b1', question: '', options: ['', '', '', ''], correct: 0, correctAnswers: [0], explanation: '', hint: '' }],
   drag_problems: [newDragProblem()],
   ordering_problems: [newOrderProblem()],
   code_fill_items: [],
@@ -180,16 +389,86 @@ export const AdminPanel: React.FC = () => {
   const [existingQuests, setExistingQuests] = useState<ExistingQuest[]>([])
   const [replaceTarget,  setReplaceTarget]  = useState('')
   const [questSaving,    setQuestSaving]    = useState(false)
-  const [questSubTab,    setQuestSubTab]    = useState<'create' | 'manage' | 'hints'>('create')
-  // Hints subtab state: which quest's hints are being edited, plus the
-  // current draft. Empty string = no quest selected.
-  const [hintsQuestId,   setHintsQuestId]   = useState('')
-  const [hintsDraft,     setHintsDraft]     = useState<HintFormRow[]>([])
-  const [hintsSaving,    setHintsSaving]    = useState(false)
-  const [hintsDirty,     setHintsDirty]     = useState(false)
+  const [questSubTab,    setQuestSubTab]    = useState<'create' | 'manage'>('create')
+  const [objectiveDraft, setObjectiveDraft] = useState('')
+  const [lessonDraft,    setLessonDraft]    = useState('')
+  const [hintDraft,      setHintDraft]      = useState('')
+  const [questsLoading,  setQuestsLoading]  = useState(false)
+  const [questActionId,  setQuestActionId]  = useState<string | null>(null)
+  const [questSearch,    setQuestSearch]    = useState('')
+  const [questLevelFilter, setQuestLevelFilter] = useState<'all' | '1' | '2' | '3'>('all')
+  const [questStatusFilter, setQuestStatusFilter] = useState<'all' | 'active' | 'inactive'>('all')
   const [fixingPop,      setFixingPop]      = useState(false)
   const [fixPopResult,   setFixPopResult]   = useState<string | null>(null)
   const qSet = (patch: Partial<QuestFormState>) => setQuestForm(p => ({ ...p, ...patch }))
+
+  const addObjectivesFromDraft = (replace = false) => {
+    const items = parseLineList(objectiveDraft)
+    if (!items.length) { showToast('Paste at least one objective first', 'error'); return }
+    qSet({ objectives: replace ? items : [...questForm.objectives.filter(Boolean), ...items] })
+    setObjectiveDraft('')
+  }
+
+  const addLessonSectionsFromDraft = (replace = false) => {
+    const sections = lessonTextToSections(lessonDraft)
+    if (!sections.length) { showToast('Paste lesson material first', 'error'); return }
+    qSet({ theory_sections: replace ? sections : [...questForm.theory_sections, ...sections] })
+    setLessonDraft('')
+  }
+
+  const addHintsFromDraft = (replace = false) => {
+    const rows = parseHintLines(hintDraft)
+    if (!rows.length) { showToast('Paste at least one hint first', 'error'); return }
+    qSet({ hints: replace ? rows : [...questForm.hints, ...rows] })
+    setHintDraft('')
+  }
+  const generateQuestHints = (replace = false) => {
+    const selectedTabs = selectedTabsForForm(questForm)
+    if (!selectedTabs.length) {
+      showToast('Select at least one activity before generating hints', 'error')
+      return
+    }
+
+    const tabs = selectedTabs.filter(tab => tabHasContent(questForm, tab))
+    const emptyTabs = selectedTabs.filter(tab => !tabHasContent(questForm, tab))
+
+    if (!tabs.length) {
+      showToast('Add activity content before generating hints', 'error')
+      return
+    }
+
+    const previewQuest = questPreviewFromForm(questForm)
+    const rows: HintFormRow[] = tabs.flatMap(tab =>
+      generateAutoHints(previewQuest, tab).map((hint, i) => ({
+        id: `h_auto_${tab}_${Date.now()}_${i}_${Math.random().toString(36).slice(2, 6)}`,
+        title: hint.title,
+        body: hint.body,
+        icon: hint.icon ?? '',
+        activity: tab,
+        _extra: {},
+      }))
+    )
+
+    qSet({ hints: replace ? rows : [...questForm.hints, ...rows] })
+    const skipped = emptyTabs.length ? ` Skipped empty: ${emptyTabs.map(tabLabel).join(', ')}.` : ''
+    showToast(`${replace ? 'Generated' : 'Added'} ${rows.length} editable hints for ${tabs.map(tabLabel).join(', ')}.${skipped}`, 'success')
+  }
+
+  const managedQuests = useMemo(() => {
+    const q = questSearch.trim().toLowerCase()
+    return existingQuests.filter(quest => {
+      if (questLevelFilter !== 'all' && quest.level !== Number(questLevelFilter)) return false
+      if (questStatusFilter === 'active' && !quest.isactive) return false
+      if (questStatusFilter === 'inactive' && quest.isactive) return false
+      if (!q) return true
+      return [
+        quest.title,
+        quest.description ?? '',
+        quest.difficulty ?? '',
+        quest.question_type ?? '',
+      ].some(value => value.toLowerCase().includes(q))
+    })
+  }, [existingQuests, questLevelFilter, questSearch, questStatusFilter])
 
   // ── Tabler CSS injection ──
   useEffect(() => {
@@ -293,14 +572,24 @@ export const AdminPanel: React.FC = () => {
   }, [])
 
   const fetchExistingQuests = useCallback(async () => {
-    const { data, error } = await supabase
-      .from('quests')
-      .select('id, title, level, difficulty, basexp, sortorder, isactive, phase, question_type, description, tutorial_title, tutorial_body, theory_sections, objectives, hints, mc_questions, game_items, drop_zones, ordering_items, code_fill_items')
-      .eq('mode', 'campaign')
-      .order('level', { ascending: true })
-      .order('sortorder', { ascending: true })
-    if (error) { console.warn('[fetchExistingQuests]', error.message); return }
-    if (data) setExistingQuests(data)
+    setQuestsLoading(true)
+    try {
+      const { data, error } = await supabase
+        .from('quests')
+        .select('id, title, level, difficulty, basexp, sortorder, isactive, phase, question_type, description, tutorial_title, tutorial_body, theory_sections, objectives, hints, mc_questions, game_items, drop_zones, ordering_items, code_fill_items')
+        .eq('mode', 'campaign')
+        .order('level', { ascending: true })
+        .order('sortorder', { ascending: true })
+      if (error) {
+        console.warn('[fetchExistingQuests]', error.message)
+        addIssue(`quests table: ${error.message}`)
+        showToast(`Failed to load quests: ${error.message}`, 'error')
+        return
+      }
+      setExistingQuests(data ?? [])
+    } finally {
+      setQuestsLoading(false)
+    }
   }, [])
 
   useEffect(() => {
@@ -461,66 +750,12 @@ export const AdminPanel: React.FC = () => {
   }
 
   // ── Quest actions ──────────────────────────────────────────────────────────
-  const resetQuestForm = () => { setQuestForm(defaultQF()); setReplaceTarget('') }
-
-  // ── Hints subtab actions ─────────────────────────────────────────────────
-  // Loads a quest's hints into the draft when the user picks one from the
-  // dropdown. Works on the existingQuests list so we don't refetch.
-  const loadHintsForQuest = (questId: string) => {
-    setHintsQuestId(questId)
-    setHintsDirty(false)
-    if (!questId) { setHintsDraft([]); return }
-    const q = existingQuests.find(x => x.id === questId) as any
-    setHintsDraft(loadHintsForEdit(q?.hints))
-  }
-
-  const addHintRow = () => {
-    setHintsDraft(prev => [...prev, {
-      id: `h_${Date.now()}_${Math.random().toString(36).slice(2,6)}`,
-      title: '', body: '', icon: '', activity: 'all', _extra: {},
-    }])
-    setHintsDirty(true)
-  }
-
-  const updateHintRow = (i: number, patch: Partial<HintFormRow>) => {
-    setHintsDraft(prev => prev.map((h, j) => j === i ? { ...h, ...patch } : h))
-    setHintsDirty(true)
-  }
-
-  const removeHintRow = (i: number) => {
-    setHintsDraft(prev => prev.filter((_, j) => j !== i))
-    setHintsDirty(true)
-  }
-
-  const moveHintRow = (i: number, dir: -1 | 1) => {
-    setHintsDraft(prev => {
-      const j = i + dir
-      if (j < 0 || j >= prev.length) return prev
-      const copy = [...prev]
-      ;[copy[i], copy[j]] = [copy[j], copy[i]]
-      return copy
-    })
-    setHintsDirty(true)
-  }
-
-  const saveHints = async () => {
-    if (!user || !hintsQuestId) return
-    setHintsSaving(true)
-    try {
-      const payload = serializeHints(hintsDraft)
-      const { error } = await supabase.from('quests').update({ hints: payload }).eq('id', hintsQuestId)
-      if (error) throw error
-      const q = existingQuests.find(x => x.id === hintsQuestId)
-      await writeAuditLog(user.id, 'quest_hints_update', undefined, {
-        title: q?.title, id: hintsQuestId, count: payload?.length ?? 0,
-      })
-      showToast('Hints saved')
-      setHintsDirty(false)
-      await fetchExistingQuests()
-    } catch (err: any) {
-      showToast(`Failed: ${err.message}`, 'error')
-    }
-    setHintsSaving(false)
+  const resetQuestForm = () => {
+    setQuestForm(defaultQF())
+    setReplaceTarget('')
+    setObjectiveDraft('')
+    setLessonDraft('')
+    setHintDraft('')
   }
 
   const fixPopLanguage = async () => {
@@ -547,8 +782,14 @@ export const AdminPanel: React.FC = () => {
         const { patched, changed } = patchMCQuestions(quest.mc_questions)
         fixedQs += changed
         if (changed > 0) {
-          const { error: ue } = await supabase.from('quests').update({ mc_questions: patched }).eq('id', quest.id)
-          if (!ue) fixedQuests++
+          const { data: updated, error: ue } = await supabase
+            .from('quests')
+            .update({ mc_questions: patched })
+            .eq('id', quest.id)
+            .select('id')
+          if (ue) throw ue
+          if (!updated?.length) throw new Error(`Update was blocked for "${quest.title}". Check quest update permissions.`)
+          fixedQuests++
         }
       }
       const msg = fixedQs > 0
@@ -591,14 +832,17 @@ export const AdminPanel: React.FC = () => {
     // Per-question hint is dropped from the payload when blank so JSONB stays
     // clean. Empty-string `hint` would otherwise pollute every MC row.
     const mc_questions_arr = [
-      ...(questForm.act_mc ? questForm.mc_questions.map((q, i) => ({
-          id: `mc_${i + 1}`, question: q.question, options: q.options,
+      ...(questForm.act_mc ? (normalizeMCQuestions(questForm.mc_questions as any[]) as QFormMCQ[]).map((q, i) => ({
+          id: `mc_${i + 1}`, question: q.question.trim(), options: q.options,
           correct: q.correct, explanation: q.explanation, mode: 'mc' as const,
           ...(q.hint.trim() ? { hint: q.hint.trim() } : {}),
         })) : []),
-      ...(questForm.act_balloon ? questForm.balloon_questions.map((q, i) => ({
-          id: `bp_${i + 1}`, question: q.question, options: q.options,
-          correct: q.correct, explanation: q.explanation, mode: 'balloon' as const,
+      ...(questForm.act_balloon ? (normalizeMCQuestions(questForm.balloon_questions as any[]) as QFormMCQ[]).map((q, i) => ({
+          id: `bp_${i + 1}`, question: q.question.trim(), options: q.options,
+          correct: q.correct,
+          correctAnswers: (q.correctAnswers?.length ? q.correctAnswers : [q.correct])
+            .filter(idx => Number.isInteger(idx) && idx >= 0 && idx < q.options.length),
+          explanation: q.explanation, mode: 'balloon' as const,
           ...(q.hint.trim() ? { hint: q.hint.trim() } : {}),
         })) : []),
     ]
@@ -751,16 +995,24 @@ export const AdminPanel: React.FC = () => {
       act_balloon:  balloonQsDB.length > 0,
       act_ordering: !!q.ordering_items?.length,
       act_codefill: !!q.code_fill_items?.length,
-      mc_questions: mcQsDB.length > 0 ? mcQsDB.map((m: any) => ({
+      mc_questions: mcQsDB.length > 0 ? mcQsDB.map((m: any) => {
+        const normalized = normalizeMCQuestionOptions(m)
+        return ({
         id: m.id ?? String(Math.random()), question: m.question ?? '',
-        options: m.options ?? ['', '', '', ''], correct: m.correct ?? 0, explanation: m.explanation ?? '',
+        options: [...(normalized.options as string[]), '', '', '', ''].slice(0, 4) as [string, string, string, string],
+        correct: normalized.correct as number, explanation: m.explanation ?? '',
         hint: m.hint ?? '',
-      })) : [{ id: '1', question: '', options: ['', '', '', ''], correct: 0, explanation: '', hint: '' }],
-      balloon_questions: balloonQsDB.length > 0 ? balloonQsDB.map((m: any) => ({
+      })}) : [{ id: '1', question: '', options: ['', '', '', ''], correct: 0, explanation: '', hint: '' }],
+      balloon_questions: balloonQsDB.length > 0 ? balloonQsDB.map((m: any) => {
+        const normalized = normalizeMCQuestionOptions(m)
+        return ({
         id: m.id ?? String(Math.random()), question: m.question ?? '',
-        options: m.options ?? ['', '', '', ''], correct: m.correct ?? 0, explanation: m.explanation ?? '',
+        options: [...(normalized.options as string[]), '', '', '', ''].slice(0, 4) as [string, string, string, string],
+        correct: normalized.correct as number,
+        correctAnswers: Array.isArray((normalized as any).correctAnswers) ? (normalized as any).correctAnswers : [normalized.correct as number],
+        explanation: m.explanation ?? '',
         hint: m.hint ?? '',
-      })) : [{ id: 'b1', question: '', options: ['', '', '', ''], correct: 0, explanation: '', hint: '' }],
+      })}) : [{ id: 'b1', question: '', options: ['', '', '', ''], correct: 0, correctAnswers: [0], explanation: '', hint: '' }],
       drag_problems: dragProblems,
       ordering_problems: orderingProblems,
       code_fill_items: (q.code_fill_items ?? []).map((c: any) => ({
@@ -780,22 +1032,46 @@ export const AdminPanel: React.FC = () => {
 
   const toggleQuestActive = async (q: any) => {
     if (!user) return
-    const { error } = await supabase.from('quests').update({ isactive: !q.isactive }).eq('id', q.id)
-    if (error) { showToast(`Failed: ${error.message}`, 'error'); return }
-    await writeAuditLog(user.id, q.isactive ? 'quest_deactivate' : 'quest_activate', undefined, { title: q.title })
-    showToast(`Quest ${q.isactive ? 'deactivated' : 'activated'}`)
-    await fetchExistingQuests()
+    setQuestActionId(q.id)
+    try {
+      const { data, error } = await supabase
+        .from('quests')
+        .update({ isactive: !q.isactive })
+        .eq('id', q.id)
+        .select('id')
+      if (error) throw error
+      if (!data?.length) throw new Error('No quest row was updated. Check quest update permissions.')
+      await writeAuditLog(user.id, q.isactive ? 'quest_deactivate' : 'quest_activate', undefined, { title: q.title })
+      showToast(`Quest ${q.isactive ? 'deactivated' : 'activated'}`)
+      await fetchExistingQuests()
+    } catch (err: any) {
+      showToast(`Failed: ${err.message}`, 'error')
+    } finally {
+      setQuestActionId(null)
+    }
   }
 
   const deleteQuest = async (q: any) => {
     if (!user) return
     if (!window.confirm(`Delete quest "${q.title}"? This cannot be undone.`)) return
-    const { error } = await supabase.from('quests').delete().eq('id', q.id)
-    if (error) { showToast(`Failed: ${error.message}`, 'error'); return }
-    await writeAuditLog(user.id, 'quest_delete', undefined, { title: q.title, id: q.id })
-    showToast('Quest deleted')
-    if (replaceTarget === q.id) setReplaceTarget('')
-    await fetchExistingQuests()
+    setQuestActionId(q.id)
+    try {
+      const { data, error } = await supabase
+        .from('quests')
+        .delete()
+        .eq('id', q.id)
+        .select('id')
+      if (error) throw error
+      if (!data?.length) throw new Error('No quest row was deleted. Check quest delete permissions.')
+      await writeAuditLog(user.id, 'quest_delete', undefined, { title: q.title, id: q.id })
+      showToast('Quest deleted')
+      if (replaceTarget === q.id) setReplaceTarget('')
+      await fetchExistingQuests()
+    } catch (err: any) {
+      showToast(`Failed: ${err.message}`, 'error')
+    } finally {
+      setQuestActionId(null)
+    }
   }
 
   // ─── Render ───────────────────────────────────────────────────────────────
@@ -1282,8 +1558,6 @@ export const AdminPanel: React.FC = () => {
                       onClick={() => setQuestSubTab('create')}>+ Create / Edit Quest</button>
                     <button className={`btn btn-sm ${questSubTab === 'manage' ? 'btn-primary' : 'btn-outline-secondary'}`}
                       onClick={() => setQuestSubTab('manage')}>Manage Existing</button>
-                    <button className={`btn btn-sm ${questSubTab === 'hints' ? 'btn-primary' : 'btn-outline-secondary'}`}
-                      onClick={() => setQuestSubTab('hints')}>💡 Hints</button>
                   </div>
 
                   {questSubTab === 'create' && (
@@ -1355,11 +1629,25 @@ export const AdminPanel: React.FC = () => {
                               <label className="form-label">Lesson Overview</label>
                               <textarea className="form-control" rows={3} value={questForm.tutorial_body} onChange={e => qSet({ tutorial_body: e.target.value })} placeholder="Brief overview shown before activities begin..." />
                             </div>
+                            <div className="mb-2">
+                              <label className="form-label">Paste Lesson Material</label>
+                              <textarea className="form-control form-control-sm" rows={5} value={lessonDraft}
+                                onChange={e => setLessonDraft(e.target.value)}
+                                placeholder={'Paste notes here. Separate sections with a blank line.\nUse "# Heading" or "Heading:" as the first line to create a section heading.'} />
+                              <div className="d-flex gap-2 mt-2 flex-wrap">
+                                <button className="btn btn-xs btn-primary" onClick={() => addLessonSectionsFromDraft(false)}>Add as Sections</button>
+                                <button className="btn btn-xs btn-outline-secondary" onClick={() => addLessonSectionsFromDraft(true)}>Replace Sections</button>
+                                <span className="text-muted" style={{ fontSize: '11px', alignSelf: 'center' }}>Best for quick copy-paste from lesson notes.</span>
+                              </div>
+                            </div>
                             <div className="d-flex justify-content-between align-items-center mb-1">
                               <label className="form-label mb-0" style={{ fontSize: '13px' }}>Theory Sections</label>
-                              <button className="btn btn-xs btn-outline-primary" onClick={() => qSet({
-                                theory_sections: [...questForm.theory_sections, { id: Date.now().toString(), type: 'default', heading: '', body: '', code: '', language: 'c', table_headers: [], table_rows: [[]] }]
-                              })}>+ Add Section</button>
+                              <div className="d-flex gap-1 flex-wrap justify-content-end">
+                                <button className="btn btn-xs btn-outline-primary" onClick={() => qSet({ theory_sections: [...questForm.theory_sections, newTheorySection('default')] })}>+ Text</button>
+                                <button className="btn btn-xs btn-outline-secondary" onClick={() => qSet({ theory_sections: [...questForm.theory_sections, newTheorySection('tip')] })}>+ Tip</button>
+                                <button className="btn btn-xs btn-outline-secondary" onClick={() => qSet({ theory_sections: [...questForm.theory_sections, newTheorySection('code')] })}>+ Code</button>
+                                <button className="btn btn-xs btn-outline-secondary" onClick={() => qSet({ theory_sections: [...questForm.theory_sections, newTheorySection('table', { table_headers: ['Term', 'Meaning'], table_rows: [['', '']] })] })}>+ Table</button>
+                              </div>
                             </div>
                             {questForm.theory_sections.map((sec, i) => (
                               <div key={sec.id} className="border rounded p-2 mb-2" style={{ fontSize: '12px' }}>
@@ -1429,6 +1717,16 @@ export const AdminPanel: React.FC = () => {
                             <button className="btn btn-xs btn-outline-primary" onClick={() => qSet({ objectives: [...questForm.objectives, ''] })}>+ Add</button>
                           </div>
                           <div className="card-body">
+                            <div className="mb-3">
+                              <label className="form-label">Paste Objectives</label>
+                              <textarea className="form-control form-control-sm" rows={4} value={objectiveDraft}
+                                onChange={e => setObjectiveDraft(e.target.value)}
+                                placeholder={'One objective per line, for example:\n- Identify valid C++ variable names\n- Use cin and cout for input and output'} />
+                              <div className="d-flex gap-2 mt-2 flex-wrap">
+                                <button className="btn btn-xs btn-primary" onClick={() => addObjectivesFromDraft(false)}>Add Objectives</button>
+                                <button className="btn btn-xs btn-outline-secondary" onClick={() => addObjectivesFromDraft(true)}>Replace List</button>
+                              </div>
+                            </div>
                             {questForm.objectives.map((obj, i) => (
                               <div key={i} className="d-flex gap-1 mb-1">
                                 <input className="form-control form-control-sm" value={obj} placeholder={`Objective ${i + 1}`}
@@ -1437,6 +1735,53 @@ export const AdminPanel: React.FC = () => {
                               </div>
                             ))}
                             {questForm.objectives.length === 0 && <div className="text-muted" style={{ fontSize: '12px' }}>No objectives added</div>}
+                          </div>
+                        </div>
+
+                        {/* Quest Hints */}
+                        <div className="card mb-3">
+                          <div className="card-header d-flex justify-content-between align-items-center">
+                            <h3 className="card-title mb-0">Quest Hints</h3>
+                            <button className="btn btn-xs btn-outline-primary" onClick={() => qSet({
+                              hints: [...questForm.hints, { id: `h_${Date.now()}`, title: '', body: '', icon: '', activity: 'all', _extra: {} }]
+                            })}>+ Add Hint</button>
+                          </div>
+                          <div className="card-body">
+                            <div className="mb-3">
+                              <label className="form-label">Paste Hints</label>
+                              <textarea className="form-control form-control-sm" rows={4} value={hintDraft}
+                                onChange={e => setHintDraft(e.target.value)}
+                                placeholder={'One hint per line. Optional title format:\nLoop clue - Check the loop condition.\nRemember to initialize variables before using them.'} />
+                              <div className="d-flex gap-2 mt-2 flex-wrap">
+                                <button className="btn btn-xs btn-primary" onClick={() => addHintsFromDraft(false)}>Add Hints</button>
+                                <button className="btn btn-xs btn-outline-secondary" onClick={() => addHintsFromDraft(true)}>Replace Hints</button>
+                                <button className="btn btn-xs btn-outline-primary" onClick={() => generateQuestHints(false)}>Generate Hints</button>
+                                <button className="btn btn-xs btn-outline-secondary" onClick={() => generateQuestHints(true)}>Replace with Generated</button>
+                              </div>
+                            </div>
+                            <div className="text-muted mb-2" style={{ fontSize: '11px' }}>Use activity scope when a hint should appear only for one game tab. Generated hints are copied into this form for every selected activity that already has content; empty activities are skipped.</div>
+                            {questForm.hints.map((h, i) => (
+                              <div key={h.id} className="border rounded p-2 mb-2" style={{ fontSize: '12px' }}>
+                                <div className="row g-1 mb-1">
+                                  <div className="col-7">
+                                    <input className="form-control form-control-sm" placeholder="Hint title" value={h.title}
+                                      onChange={e => { const rows = [...questForm.hints]; rows[i] = { ...rows[i], title: e.target.value }; qSet({ hints: rows }) }} />
+                                  </div>
+                                  <div className="col-4">
+                                    <select className="form-select form-select-sm" value={h.activity}
+                                      onChange={e => { const rows = [...questForm.hints]; rows[i] = { ...rows[i], activity: e.target.value as any }; qSet({ hints: rows }) }}>
+                                      {HINT_ACTIVITY_OPTIONS.map(opt => <option key={opt.value} value={opt.value}>{opt.label}</option>)}
+                                    </select>
+                                  </div>
+                                  <div className="col-1 d-flex justify-content-end">
+                                    <button className="btn btn-xs btn-ghost-danger" onClick={() => qSet({ hints: questForm.hints.filter((_, j) => j !== i) })}>✕</button>
+                                  </div>
+                                </div>
+                                <textarea className="form-control form-control-sm" rows={2} placeholder="Hint body" value={h.body}
+                                  onChange={e => { const rows = [...questForm.hints]; rows[i] = { ...rows[i], body: e.target.value }; qSet({ hints: rows }) }} />
+                              </div>
+                            ))}
+                            {questForm.hints.length === 0 && <div className="text-muted" style={{ fontSize: '12px' }}>No quest hints added</div>}
                           </div>
                         </div>
                       </div>
@@ -1591,11 +1936,11 @@ export const AdminPanel: React.FC = () => {
                             <div className="card-header d-flex justify-content-between align-items-center">
                               <h3 className="card-title mb-0">🎈 Balloon Pop Questions</h3>
                               <button className="btn btn-xs btn-outline-primary" onClick={() => qSet({
-                                balloon_questions: [...questForm.balloon_questions, { id: Date.now().toString(), question: '', options: ['', '', '', ''], correct: 0, explanation: '', hint: '' }]
+                                balloon_questions: [...questForm.balloon_questions, { id: Date.now().toString(), question: '', options: ['', '', '', ''], correct: 0, correctAnswers: [0], explanation: '', hint: '' }]
                               })}>+ Add Q</button>
                             </div>
                             <div className="card-body" style={{ maxHeight: '380px', overflowY: 'auto' }}>
-                              <div className="text-muted mb-2" style={{ fontSize: '11px' }}>4 options per question — select the correct one (radio). Keep option text short (under 25 chars) so it fits on balloons.</div>
+                              <div className="text-muted mb-2" style={{ fontSize: '11px' }}>Add 3-4 balloon labels, then tick every correct answer. Players must pop all correct balloons for that question. Keep option text short (under 25 chars).</div>
                               {questForm.balloon_questions.map((bq, qi) => (
                                 <div key={bq.id} className="border rounded p-2 mb-2" style={{ fontSize: '12px' }}>
                                   <div className="d-flex justify-content-between mb-1">
@@ -1606,8 +1951,17 @@ export const AdminPanel: React.FC = () => {
                                     onChange={e => { const qs = [...questForm.balloon_questions]; qs[qi] = { ...qs[qi], question: e.target.value }; qSet({ balloon_questions: qs }) }} />
                                   {bq.options.map((opt, oi) => (
                                     <div key={oi} className="d-flex align-items-center gap-1 mb-1">
-                                      <input type="radio" name={`balloon_correct_${bq.id}`} checked={bq.correct === oi} title="Mark as correct"
-                                        onChange={() => { const qs = [...questForm.balloon_questions]; qs[qi] = { ...qs[qi], correct: oi }; qSet({ balloon_questions: qs }) }} />
+                                      <input type="checkbox" checked={(bq.correctAnswers?.length ? bq.correctAnswers : [bq.correct]).includes(oi)} title="Mark as a correct balloon"
+                                        onChange={e => {
+                                          const qs = [...questForm.balloon_questions]
+                                          const current = bq.correctAnswers?.length ? bq.correctAnswers : [bq.correct]
+                                          const next = e.target.checked
+                                            ? Array.from(new Set([...current, oi])).sort((a, b) => a - b)
+                                            : current.filter(idx => idx !== oi)
+                                          const safeNext = next.length ? next : [oi]
+                                          qs[qi] = { ...qs[qi], correct: safeNext[0], correctAnswers: safeNext }
+                                          qSet({ balloon_questions: qs })
+                                        }} />
                                       <input className="form-control form-control-sm" placeholder={`Option ${oi + 1} (keep short!)`} value={opt}
                                         onChange={e => {
                                           const qs = [...questForm.balloon_questions]
@@ -1762,176 +2116,42 @@ export const AdminPanel: React.FC = () => {
                     </div>
                   )}
 
-                  {/* ── Hints subtab ────────────────────────────────────────
-                     Authoring path #2 for hints. Authoring path #1 is the
-                     full quest form on the Create/Edit subtab. Authoring
-                     path #3 is direct SQL on quests.hints — preserved here
-                     via each row's `_extra` (see loadHintsForEdit). */}
-                  {questSubTab === 'hints' && (
-                    <>
-                      <div className="card mb-3">
-                        <div className="card-header">
-                          <h3 className="card-title">💡 Quest Hints</h3>
-                          <span className="card-subtitle ms-2 text-muted" style={{ fontSize: '11px' }}>
-                            Authored hints appear in the per-tab side panel during play. Untagged hints show on every tab.
-                          </span>
-                        </div>
-                        <div className="card-body">
-                          <div className="mb-3">
-                            <label className="form-label">Quest</label>
-                            <select
-                              className="form-select"
-                              value={hintsQuestId}
-                              onChange={e => loadHintsForQuest(e.target.value)}
-                            >
-                              <option value="">— Select a quest —</option>
-                              {[1, 2, 3].map(lvl => (
-                                <optgroup key={lvl} label={`Level ${lvl}`}>
-                                  {existingQuests
-                                    .filter(q => q.level === lvl)
-                                    .map(q => (
-                                      <option key={q.id} value={q.id}>
-                                        {q.title} {q.isactive ? '' : '(inactive)'}
-                                      </option>
-                                    ))}
-                                </optgroup>
-                              ))}
-                            </select>
-                            <div className="form-text text-muted" style={{ fontSize: '11px' }}>
-                              Editing here updates only the <code>hints</code> column. Other quest fields are untouched.
-                            </div>
-                          </div>
-
-                          {hintsQuestId && (
-                            <>
-                              <div className="d-flex align-items-center justify-content-between mb-2">
-                                <div style={{ fontSize: '12px', color: '#8b949e' }}>
-                                  <strong>{hintsDraft.length}</strong> hint{hintsDraft.length === 1 ? '' : 's'}
-                                  {hintsDirty && <span className="text-warning ms-2">● unsaved changes</span>}
-                                </div>
-                                <button className="btn btn-sm btn-outline-primary" onClick={addHintRow}>
-                                  + Add Hint
-                                </button>
-                              </div>
-
-                              {hintsDraft.length === 0 && (
-                                <div className="alert alert-info py-2" style={{ fontSize: '12px' }}>
-                                  No hints yet. Click <strong>+ Add Hint</strong> above, or run an SQL update on this quest's <code>hints</code> column.
-                                </div>
-                              )}
-
-                              {hintsDraft.map((h, i) => (
-                                <div key={h.id} className="card mb-2" style={{ border: '1px solid rgba(88,166,255,0.2)' }}>
-                                  <div className="card-body" style={{ padding: '12px' }}>
-                                    <div className="d-flex align-items-center gap-2 mb-2">
-                                      <span className="badge bg-blue-lt">#{i + 1}</span>
-                                      <input
-                                        className="form-control form-control-sm"
-                                        style={{ maxWidth: 60, textAlign: 'center' }}
-                                        placeholder="💡"
-                                        value={h.icon}
-                                        onChange={e => updateHintRow(i, { icon: e.target.value })}
-                                        title="Emoji icon (optional)"
-                                      />
-                                      <select
-                                        className="form-select form-select-sm"
-                                        style={{ maxWidth: 200 }}
-                                        value={h.activity}
-                                        onChange={e => updateHintRow(i, { activity: e.target.value as HintFormRow['activity'] })}
-                                      >
-                                        {HINT_ACTIVITY_OPTIONS.map(opt => (
-                                          <option key={opt.value} value={opt.value}>{opt.label}</option>
-                                        ))}
-                                      </select>
-                                      <div className="ms-auto d-flex gap-1">
-                                        <button
-                                          className="btn btn-xs btn-ghost-secondary"
-                                          disabled={i === 0}
-                                          onClick={() => moveHintRow(i, -1)}
-                                          title="Move up"
-                                        >▲</button>
-                                        <button
-                                          className="btn btn-xs btn-ghost-secondary"
-                                          disabled={i === hintsDraft.length - 1}
-                                          onClick={() => moveHintRow(i, 1)}
-                                          title="Move down"
-                                        >▼</button>
-                                        <button
-                                          className="btn btn-xs btn-ghost-danger"
-                                          onClick={() => removeHintRow(i)}
-                                          title="Remove"
-                                        >✕</button>
-                                      </div>
-                                    </div>
-                                    <input
-                                      className="form-control form-control-sm mb-2"
-                                      placeholder="Hint title (e.g. 'Think about the loop boundary')"
-                                      value={h.title}
-                                      onChange={e => updateHintRow(i, { title: e.target.value })}
-                                    />
-                                    <textarea
-                                      className="form-control form-control-sm"
-                                      placeholder="Hint body — what the player sees when they reveal this hint."
-                                      rows={2}
-                                      value={h.body}
-                                      onChange={e => updateHintRow(i, { body: e.target.value })}
-                                    />
-                                    {Object.keys(h._extra).length > 0 && (
-                                      <div className="text-muted mt-1" style={{ fontSize: '10px' }}>
-                                        Extra fields preserved from SQL: <code>{Object.keys(h._extra).join(', ')}</code>
-                                      </div>
-                                    )}
-                                  </div>
-                                </div>
-                              ))}
-
-                              <div className="d-flex gap-2 mt-3">
-                                <button
-                                  className="btn btn-primary"
-                                  disabled={hintsSaving || !hintsDirty}
-                                  onClick={saveHints}
-                                >
-                                  {hintsSaving ? 'Saving…' : '💾 Save Hints'}
-                                </button>
-                                <button
-                                  className="btn btn-outline-secondary"
-                                  disabled={hintsSaving || !hintsDirty}
-                                  onClick={() => loadHintsForQuest(hintsQuestId)}
-                                >
-                                  Discard Changes
-                                </button>
-                              </div>
-                            </>
-                          )}
-                        </div>
-                      </div>
-                    </>
-                  )}
-
                   {/* Manage tab */}
                   {questSubTab === 'manage' && (
                     <>
                     {/* ── Data Tools ── */}
                     <div className="card mb-3">
                       <div className="card-header">
-                        <h3 className="card-title">🔧 Data Tools</h3>
-                        <span className="card-subtitle ms-2 text-muted" style={{ fontSize: '11px' }}>Bulk repairs for quest content</span>
+                        <div>
+                          <h3 className="card-title mb-1">🔧 Data Tools</h3>
+                          <div className="text-muted" style={{ fontSize: '12px' }}>Bulk repairs for quest content</div>
+                        </div>
                       </div>
                       <div className="card-body">
-                        <div className="d-flex align-items-center gap-3 flex-wrap">
-                          <div>
-                            <div style={{ fontSize: '12px', fontWeight: 600, marginBottom: 2 }}>Fix MC Question Language</div>
-                            <div className="text-muted" style={{ fontSize: '11px' }}>
-                              Replaces balloon-pop phrasing (<em>"Pop the item…"</em>) in Multiple Choice questions with proper MC language (<em>"Select…"</em> / <em>"Which item…"</em>).
+                        <div
+                          className="border rounded p-3"
+                          style={{
+                            maxWidth: 760,
+                            background: '#f8fafc',
+                            borderColor: '#dbe2ea',
+                          }}
+                        >
+                          <div className="d-flex align-items-start justify-content-between gap-3 flex-wrap">
+                            <div style={{ minWidth: 260, flex: '1 1 420px' }}>
+                              <div style={{ fontSize: '13px', fontWeight: 700, marginBottom: 4 }}>Fix MC Question Language</div>
+                              <div className="text-muted" style={{ fontSize: '12px', lineHeight: 1.55 }}>
+                                Replaces balloon-pop wording in Multiple Choice questions with clearer MC wording, like <em>Select...</em> or <em>Which item...</em>.
+                              </div>
                             </div>
+                            <button
+                              className="btn btn-sm btn-warning"
+                              disabled={fixingPop}
+                              onClick={fixPopLanguage}
+                              style={{ whiteSpace: 'nowrap' }}
+                            >
+                              {fixingPop ? 'Scanning...' : 'Run Fix'}
+                            </button>
                           </div>
-                          <button
-                            className="btn btn-sm btn-outline-warning ms-auto"
-                            disabled={fixingPop}
-                            onClick={fixPopLanguage}
-                          >
-                            {fixingPop ? 'Scanning…' : '⚙ Run Fix'}
-                          </button>
                         </div>
                         {fixPopResult && (
                           <div className={`alert alert-${fixPopResult.startsWith('Error') ? 'danger' : 'success'} py-2 mt-2 mb-0`} style={{ fontSize: '12px' }}>
@@ -1943,38 +2163,99 @@ export const AdminPanel: React.FC = () => {
 
                     <div className="card">
                       <div className="card-header">
-                        <h3 className="card-title">All Campaign Quests</h3>
+                        <div>
+                          <h3 className="card-title mb-1">All Campaign Quests</h3>
+                          <div className="text-muted" style={{ fontSize: '12px' }}>
+                            Showing {managedQuests.length} of {existingQuests.length} quest{existingQuests.length === 1 ? '' : 's'}
+                          </div>
+                        </div>
                         <div className="card-options">
-                          <button className="btn btn-sm btn-outline-primary" onClick={fetchExistingQuests}><i className="ti ti-refresh me-1" />Refresh</button>
+                          <button className="btn btn-sm btn-outline-primary" disabled={questsLoading} onClick={fetchExistingQuests}>
+                            <i className="ti ti-refresh me-1" />{questsLoading ? 'Refreshing...' : 'Refresh'}
+                          </button>
+                        </div>
+                      </div>
+                      <div className="card-body border-bottom">
+                        <div className="row g-2 align-items-end">
+                          <div className="col-md-6">
+                            <label className="form-label">Search quests</label>
+                            <input
+                              className="form-control form-control-sm"
+                              value={questSearch}
+                              onChange={e => setQuestSearch(e.target.value)}
+                              placeholder="Search title, description, difficulty, or type"
+                            />
+                          </div>
+                          <div className="col-6 col-md-2">
+                            <label className="form-label">Level</label>
+                            <select className="form-select form-select-sm" value={questLevelFilter} onChange={e => setQuestLevelFilter(e.target.value as any)}>
+                              <option value="all">All levels</option>
+                              <option value="1">Level 1</option>
+                              <option value="2">Level 2</option>
+                              <option value="3">Level 3</option>
+                            </select>
+                          </div>
+                          <div className="col-6 col-md-2">
+                            <label className="form-label">Status</label>
+                            <select className="form-select form-select-sm" value={questStatusFilter} onChange={e => setQuestStatusFilter(e.target.value as any)}>
+                              <option value="all">All status</option>
+                              <option value="active">Active</option>
+                              <option value="inactive">Inactive</option>
+                            </select>
+                          </div>
+                          <div className="col-md-2">
+                            <button
+                              className="btn btn-sm btn-outline-secondary w-100"
+                              onClick={() => { setQuestSearch(''); setQuestLevelFilter('all'); setQuestStatusFilter('all') }}
+                            >
+                              Clear
+                            </button>
+                          </div>
                         </div>
                       </div>
                       <div className="table-responsive">
                         <table className="table table-vcenter card-table table-striped">
                           <thead>
-                            <tr><th>Title</th><th>Level</th><th>Difficulty</th><th>XP</th><th>Order</th><th>Status</th><th>Actions</th></tr>
+                            <tr><th>Title</th><th>Level</th><th>Activities</th><th>XP</th><th>Order</th><th>Status</th><th className="text-end">Actions</th></tr>
                           </thead>
                           <tbody>
-                            {existingQuests.map(q => (
+                            {questsLoading && existingQuests.length === 0 && (
+                              <tr><td colSpan={7} className="text-center text-muted py-4">Loading quests...</td></tr>
+                            )}
+                            {!questsLoading && managedQuests.map(q => {
+                              const activities = questActivityLabels(q)
+                              const isBusy = questActionId === q.id
+                              return (
                               <tr key={q.id}>
-                                <td><strong style={{ fontSize: '13px' }}>{q.title}</strong></td>
+                                <td>
+                                  <strong style={{ fontSize: '13px' }}>{q.title}</strong>
+                                  {q.description && <div className="text-muted" style={{ fontSize: '11px', maxWidth: 420 }}>{q.description}</div>}
+                                </td>
                                 <td><span className={`badge bg-${q.level === 1 ? 'green' : q.level === 2 ? 'yellow' : 'red'}-lt`}>Level {q.level}</span></td>
-                                <td className="text-muted" style={{ fontSize: '12px' }}>{q.difficulty ?? '—'}</td>
+                                <td>
+                                  <div className="d-flex gap-1 flex-wrap">
+                                    {activities.length ? activities.map(label => <span key={label} className="badge bg-blue-lt">{label}</span>) : <span className="text-muted" style={{ fontSize: '12px' }}>No activities</span>}
+                                  </div>
+                                </td>
                                 <td>{q.basexp}</td>
                                 <td>{q.sortorder}</td>
                                 <td>{q.isactive ? <span className="badge bg-green">Active</span> : <span className="badge bg-secondary">Inactive</span>}</td>
-                                <td>
-                                  <div className="d-flex gap-1">
-                                    <button className="btn btn-sm btn-outline-secondary" onClick={() => { loadQuestForEdit(q); }}>Edit</button>
-                                    <button className="btn btn-sm btn-outline-warning" onClick={() => toggleQuestActive(q)}>
-                                      {q.isactive ? 'Deactivate' : 'Activate'}
+                                <td className="text-end">
+                                  <div className="d-flex gap-1 justify-content-end flex-wrap">
+                                    <button className="btn btn-sm btn-outline-primary" disabled={!!questActionId} onClick={() => { loadQuestForEdit(q); }}>Edit</button>
+                                    <button className="btn btn-sm btn-outline-warning" disabled={!!questActionId} onClick={() => toggleQuestActive(q)}>
+                                      {isBusy ? 'Working...' : q.isactive ? 'Deactivate' : 'Activate'}
                                     </button>
-                                    <button className="btn btn-sm btn-ghost-danger" onClick={() => deleteQuest(q)}>Delete</button>
+                                    <button className="btn btn-sm btn-ghost-danger" disabled={!!questActionId} onClick={() => deleteQuest(q)}>Delete</button>
                                   </div>
                                 </td>
                               </tr>
-                            ))}
-                            {existingQuests.length === 0 && (
+                            )})}
+                            {!questsLoading && existingQuests.length === 0 && (
                               <tr><td colSpan={7} className="text-center text-muted py-4">No quests found</td></tr>
+                            )}
+                            {!questsLoading && existingQuests.length > 0 && managedQuests.length === 0 && (
+                              <tr><td colSpan={7} className="text-center text-muted py-4">No quests match the current filters</td></tr>
                             )}
                           </tbody>
                         </table>

@@ -14,6 +14,8 @@ import React, { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 
 export const ONBOARD_KEY = 'cs-onboarded-v1'
+export const ONBOARD_ACTIVE_KEY = 'cs-onboard-active-v1'
+export const ONBOARD_STEP_KEY = 'cs-onboard-step-v1'
 
 interface Step {
   icon: string
@@ -23,7 +25,7 @@ interface Step {
   action?: { label: string; path?: string; onClick?: () => void }
 }
 
-const STEPS = (isAdmin: boolean): Step[] => [
+const STEPS = (isAdmin: boolean, isGuest = false): Step[] => [
   {
     icon: '👋',
     title: 'Welcome to CodeSense',
@@ -115,7 +117,9 @@ const STEPS = (isAdmin: boolean): Step[] => [
         </p>
       </>
     ),
-    action: { label: 'Open Campaign →', path: '/campaign' },
+    action: isGuest
+      ? { label: 'Create account for Campaign →', path: '/signup' }
+      : { label: 'Open Campaign →', path: '/campaign' },
   },
   {
     icon: '🏆',
@@ -149,7 +153,9 @@ const STEPS = (isAdmin: boolean): Step[] => [
         </p>
       </>
     ),
-    action: { label: 'Go to Profile →', path: '/profile' },
+    action: isGuest
+      ? { label: 'Create account for Profile →', path: '/signup' }
+      : { label: 'Go to Profile →', path: '/profile' },
   },
   {
     icon: '📘',
@@ -215,24 +221,44 @@ const STEPS = (isAdmin: boolean): Step[] => [
 
 export const OnboardingWalkthrough: React.FC<{
   isAdmin: boolean
+  isGuest?: boolean
   onFinish: () => void
-}> = ({ isAdmin, onFinish }) => {
+}> = ({ isAdmin, isGuest = false, onFinish }) => {
   const navigate = useNavigate()
-  const steps = STEPS(isAdmin)
-  const [idx, setIdx] = useState(0)
+  const steps = STEPS(isAdmin, isGuest)
+  const [idx, setIdx] = useState(() => {
+    try {
+      const raw = Number(localStorage.getItem(ONBOARD_STEP_KEY) ?? '0')
+      return Number.isFinite(raw) ? Math.max(0, Math.min(steps.length - 1, raw)) : 0
+    } catch {
+      return 0
+    }
+  })
   const step = steps[idx]
   const isLast = idx === steps.length - 1
 
   // Close on Escape
   useEffect(() => {
-    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') finish() }
+    try { localStorage.setItem(ONBOARD_ACTIVE_KEY, 'true') } catch { /* quota */ }
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') skip() }
     document.addEventListener('keydown', onKey)
     return () => document.removeEventListener('keydown', onKey)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
+  useEffect(() => {
+    try {
+      localStorage.setItem(ONBOARD_ACTIVE_KEY, 'true')
+      localStorage.setItem(ONBOARD_STEP_KEY, String(idx))
+    } catch { /* quota */ }
+  }, [idx])
+
   const finish = () => {
-    try { localStorage.setItem(ONBOARD_KEY, 'done') } catch { /* quota */ }
+    try {
+      localStorage.setItem(ONBOARD_KEY, 'done')
+      localStorage.removeItem(ONBOARD_ACTIVE_KEY)
+      localStorage.removeItem(ONBOARD_STEP_KEY)
+    } catch { /* quota */ }
     onFinish()
   }
 
@@ -248,10 +274,15 @@ export const OnboardingWalkthrough: React.FC<{
   const goToAction = () => {
     if (!step.action) return
     if (step.action.path) {
+      const nextIdx = isLast ? idx : Math.min(steps.length - 1, idx + 1)
+      try {
+        localStorage.setItem(ONBOARD_ACTIVE_KEY, 'true')
+        localStorage.setItem(ONBOARD_STEP_KEY, String(nextIdx))
+      } catch { /* quota */ }
       navigate(step.action.path)
       // Advance to the next step so the tour continues after the navigation.
       // Do NOT call finish() — the tour is a persistent overlay at App level.
-      if (!isLast) setIdx(i => Math.min(steps.length - 1, i + 1))
+      if (!isLast) setIdx(nextIdx)
     } else {
       step.action.onClick?.()
     }

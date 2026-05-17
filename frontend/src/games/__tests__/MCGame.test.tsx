@@ -1,5 +1,7 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen, fireEvent, act } from '@testing-library/react';
+// @vitest-environment jsdom
+import '@testing-library/jest-dom/vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { render, screen, fireEvent, act, cleanup } from '@testing-library/react';
 import { MCGame } from '../MCGame';
 import type { MCQ } from '../../types/campaign';
 
@@ -36,6 +38,11 @@ describe('MCGame', () => {
     vi.useFakeTimers();
   });
 
+  afterEach(() => {
+    cleanup();
+    vi.useRealTimers();
+  });
+
   it('renders empty-state message when questions array is empty', () => {
     render(<MCGame questions={[]} onComplete={vi.fn()} resetSignal={0} />);
     expect(screen.getByText(/No questions configured/i)).toBeInTheDocument();
@@ -47,6 +54,21 @@ describe('MCGame', () => {
     Q1.options.forEach(opt => {
       expect(screen.getByText(opt)).toBeInTheDocument();
     });
+  });
+
+  it('does not render blank option slots from three-choice questions', () => {
+    render(<MCGame questions={[{
+      id: 'q-blank',
+      question: 'Pick a keyword',
+      options: ['int', 'float', 'string', ''],
+      correct: 2,
+      explanation: '',
+    }]} onComplete={vi.fn()} resetSignal={0} />);
+
+    expect(screen.getByText('int')).toBeInTheDocument();
+    expect(screen.getByText('float')).toBeInTheDocument();
+    expect(screen.getByText('string')).toBeInTheDocument();
+    expect(screen.queryByText('D.')).toBeNull();
   });
 
   it('shows Q1/1 progress counter', () => {

@@ -149,6 +149,136 @@ html, body, #root {
   overflow: hidden;
 }
 
+.build-layout {
+  grid-template-columns: minmax(0, 1fr) minmax(360px, 440px);
+  gap: 10px;
+  padding: 10px;
+}
+
+.build-layout-rail-closed {
+  grid-template-columns: minmax(0, 1fr) 54px;
+}
+
+.build-canvas-column {
+  min-width: 0;
+}
+
+.build-side-rail {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-height: 0;
+  overflow: visible;
+}
+
+.build-side-rail.open {
+  min-width: 0;
+  overflow-y: auto;
+  overflow-x: visible;
+  padding-left: 10px;
+}
+
+.build-side-rail.closed {
+  align-items: stretch;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border-muted);
+  border-radius: var(--radius-lg);
+}
+
+.build-output-section {
+  min-height: 320px;
+  max-height: 680px;
+}
+
+.build-code-container {
+  min-height: 0;
+  height: 100%;
+}
+
+.build-output-resizer {
+  position: relative;
+  height: 12px;
+  flex: 0 0 12px;
+  cursor: row-resize;
+  margin: -2px 4px;
+}
+
+.build-output-resizer::after {
+  content: "";
+  position: absolute;
+  left: 18px;
+  right: 18px;
+  top: 5px;
+  height: 2px;
+  border-radius: 999px;
+  background: rgba(163, 113, 247, 0.3);
+}
+
+.build-output-resizer:hover::after {
+  background: rgba(163, 113, 247, 0.8);
+  box-shadow: 0 0 12px rgba(163, 113, 247, 0.35);
+}
+
+.build-rail-resizer {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: -6px;
+  width: 12px;
+  z-index: 20;
+  cursor: col-resize;
+}
+
+.build-rail-resizer::after {
+  content: "";
+  position: absolute;
+  top: 50%;
+  height: 96px;
+  left: 5px;
+  width: 2px;
+  border-radius: 999px;
+  transform: translateY(-50%);
+  background: rgba(163, 113, 247, 0.18);
+  opacity: 0;
+  transition: opacity 0.15s ease, background-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.build-rail-resizer:hover::after {
+  opacity: 1;
+  background: rgba(163, 113, 247, 0.75);
+  box-shadow: 0 0 12px rgba(163, 113, 247, 0.35);
+}
+
+.build-rail-toggle {
+  position: absolute;
+  top: 8px;
+  left: -36px;
+  z-index: 12;
+  width: 30px;
+  height: 30px;
+  border-radius: 8px;
+  border: 1px solid rgba(163,113,247,0.4);
+  background: rgba(13,17,23,0.94);
+  color: var(--purple);
+  font: 700 14px 'IBM Plex Mono', monospace;
+  cursor: pointer;
+  box-shadow: 0 4px 14px rgba(0,0,0,0.35);
+}
+
+.build-rail-collapsed-label {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 18px;
+  writing-mode: vertical-rl;
+  text-transform: uppercase;
+  letter-spacing: 1.4px;
+  color: var(--purple);
+  font: 700 11px 'IBM Plex Mono', monospace;
+}
+
 /* ── Panels (shared card style) ─────────────────────────── */
 .editor-section,
 .tabs-section {
@@ -550,9 +680,29 @@ html, body, #root {
     min-height: 0;
   }
 
+  .build-layout,
+  .build-layout-rail-closed {
+    grid-template-columns: 1fr;
+  }
+
+  .build-side-rail,
+  .build-side-rail.closed {
+    min-height: 360px;
+  }
+
+  .build-rail-toggle {
+    left: auto;
+    right: 10px;
+    top: 10px;
+  }
+
   /* Right column visualizer — give it a useful minimum height */
   .right-column {
     min-height: 400px;
+  }
+
+  .build-canvas-column {
+    min-height: 560px;
   }
 
   /* Tabs — allow horizontal scroll on small screens */

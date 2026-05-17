@@ -30,10 +30,11 @@ import { BalloonPopGame } from './games/BalloonPopGame';
 
 import TheorySectionBlock from './components/TheorySection';
 import type { ActivityTab, HintItem, Quest, TheorySection } from './types/campaign';
-import { composeHints } from './campaign/composeHints';
+import { composeHints, type ItemHintInput } from './campaign/composeHints';
+import { generateAutoHints } from './campaign/generateAutoHints';
 import {
-  computeActivityXP, persistedXpGained, levelXpCapForPhase,
-  FIRST_COMPLETION_XP, RETAKE_COMPLETION_XP,
+  computeActivityXP, computeHintPenalty, persistedXpGained, levelXpCapForPhase,
+  RETAKE_COMPLETION_XP, HINT_XP_COST, HINT_PENALTY_CAP_RATIO,
 } from './campaign/retakeXp';
 
 // ─── Constants ────────────────────────────────────────────────────────────
@@ -176,7 +177,7 @@ const HintToast: React.FC<{ visible: boolean; hintsUsed: number }> = ({ visible,
       Guidance unlocked
     </div>
     <div style={{ fontSize: 12, color: '#8b949e', fontFamily: 'Inter,sans-serif' }}>
-      Campaign XP is fixed by completion status and level cap.
+      Campaign reward is reduced by {HINT_XP_COST} XP per hint, up to {Math.round(HINT_PENALTY_CAP_RATIO * 100)}%.
     </div>
   </div>
 );
@@ -242,8 +243,12 @@ const GameSidePanel: React.FC<{
    *  per-question hint in sync with what the player is looking at. */
   tabHints:        HintItem[];
   hintsUsed:       number;
+  totalHintsUsed:  number;
   maxHints:        number;
   earnedXP:        number;
+  rewardBaseXP:    number;
+  rewardPenaltyXP: number;
+  rewardPenaltyCapped: boolean;
   isCompleted:     boolean;
   onTakeHint:      () => void;
   activeTab:       ActivityTab;
@@ -252,12 +257,16 @@ const GameSidePanel: React.FC<{
   // in the phase — we still show a button, but it returns to the level page.
   hasNextQuest:    boolean;
   onNextQuest:     () => void;
-}> = ({ quest, tabHints, hintsUsed, maxHints, earnedXP, isCompleted, onTakeHint, activeTab: _activeTab, hasNextQuest, onNextQuest }) => {
+}> = ({ quest, tabHints, hintsUsed, totalHintsUsed, maxHints, earnedXP, rewardBaseXP, rewardPenaltyXP, rewardPenaltyCapped, isCompleted, onTakeHint, activeTab, hasNextQuest, onNextQuest }) => {
   const [activeHint, setActiveHint] = useState<number | null>(null);
   const noHintsAvailable = tabHints.length === 0;
   const allHintsUsed     = !noHintsAvailable && hintsUsed >= maxHints;
   const buttonDisabled   = noHintsAvailable || allHintsUsed || isCompleted;
   const unlocked: HintItem[] = tabHints.slice(0, hintsUsed);
+
+  useEffect(() => {
+    setActiveHint(hintsUsed > 0 ? hintsUsed - 1 : null);
+  }, [hintsUsed, activeTab]);
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%', borderLeft: '1px solid #21262d', background: '#0d1117' }}>
@@ -275,8 +284,8 @@ const GameSidePanel: React.FC<{
         {unlocked.length === 0 && (
           <div style={{ fontSize: 12, color: '#484f58', fontFamily: 'Inter,sans-serif', fontStyle: 'italic' }}>
             {noHintsAvailable
-              ? 'No hints have been authored for this activity.'
-              : 'Take a hint below to unlock guidance.'}
+              ? 'No hints available for this activity.'
+              : `Hints are hidden until you use the button below. Each hint costs ${HINT_XP_COST} XP.`}
           </div>
         )}
         {unlocked.map((hint, i) => (
@@ -297,6 +306,12 @@ const GameSidePanel: React.FC<{
           <span style={{ fontSize: 10, color: '#484f58', fontFamily: "'JetBrains Mono',monospace", letterSpacing: '1px' }}>XP REWARD</span>
           <span style={{ fontSize: 14, fontWeight: 800, color: '#facc15', fontFamily: "'JetBrains Mono',monospace" }}>{earnedXP} XP</span>
         </div>
+        {!isCompleted && (
+          <div style={{ fontSize: 11, color: '#8b949e', fontFamily: 'Inter,sans-serif', marginBottom: 10, lineHeight: 1.5 }}>
+            Base {rewardBaseXP} XP · Hints used {totalHintsUsed} · -{rewardPenaltyXP} XP
+            {rewardPenaltyCapped ? ' (max penalty)' : ''}
+          </div>
+        )}
         {isCompleted ? (
           // Quest finished — replace the hint button with a "Next Quest"
           // CTA. If there's no next quest in this phase, the button becomes
@@ -331,7 +346,7 @@ const GameSidePanel: React.FC<{
               ? 'No hints available'
               : allHintsUsed
                 ? 'No more hints'
-                : `TAKE A HINT (${maxHints - hintsUsed} left)`}
+                : `TAKE A HINT (-${HINT_XP_COST} XP) · ${maxHints - hintsUsed} left`}
           </button>
         )}
       </div>
@@ -567,7 +582,10 @@ export const LessonActivity: React.FC = () => {
 
       if (ex) {
         setProgressId(ex.id);
-        setHintsUsed(ex.hintsused ?? 0);
+        // `hintsused` from the DB is cumulative for XP/leaderboard accounting.
+        // The visible hint cards are per activity/question and must stay hidden
+        // until the player pays for one with the bottom hint button.
+        setHintsUsed(0);
         hintsUsedRef.current = ex.hintsused ?? 0;
 
         const done = (Array.isArray(ex.completed_activities) ? ex.completed_activities : []) as ActivityTab[];
@@ -659,7 +677,7 @@ export const LessonActivity: React.FC = () => {
   // Per-question hint for the active item (MC / balloon / code-fill only).
   // Ordering and DragDrop don't surface a current-item index — their hint
   // is always undefined so the side panel falls back to the per-tab pool.
-  const currentItemHint = useMemo<string | undefined>(() => {
+  const currentItemHint = useMemo<ItemHintInput>(() => {
     if (!quest) return undefined;
     if (activeTab === 'mc')        return mcQs[currentItemIdx]?.hint ?? undefined;
     if (activeTab === 'balloon')   return balloonQs[currentItemIdx]?.hint ?? undefined;
@@ -667,10 +685,21 @@ export const LessonActivity: React.FC = () => {
     return undefined;
   }, [quest, activeTab, currentItemIdx, mcQs, balloonQs]);
 
-  const tabHints = useMemo(
+  const authoredHints = useMemo(
     () => composeHints(quest?.hints, activeTab, currentItemHint),
     [quest?.hints, activeTab, currentItemHint]
   );
+  const tabHints = useMemo(
+    () => authoredHints.length > 0
+      ? authoredHints
+      : generateAutoHints(quest, activeTab, currentItemIdx),
+    [authoredHints, quest, activeTab, currentItemIdx]
+  );
+
+  useEffect(() => {
+    setCurrentItemIdx(0);
+    setHintsUsed(0);
+  }, [activeTab, quest?.id]);
   // Was: Math.max(tabHints.length, 1) — that floor let users click "Take a
   // hint" on a tab with zero hints, charging XP and revealing nothing. The
   // real cap is exactly the number of hints available for this tab.
@@ -684,8 +713,22 @@ export const LessonActivity: React.FC = () => {
   const displayXP = isCompleted
     ? earnedXP
     : isRepeatTab
-      ? Math.min(RETAKE_COMPLETION_XP, levelRemaining)
-      : Math.min(FIRST_COMPLETION_XP, levelRemaining);
+      ? computeActivityXP({
+          isCompleted: true,
+          isFullCompletion: true,
+          levelRemaining,
+          hintsUsed: hintsUsedRef.current,
+        })
+      : computeActivityXP({
+          isCompleted: false,
+          isFullCompletion: true,
+          levelRemaining,
+          hintsUsed: hintsUsedRef.current,
+        });
+  const rewardDetails = computeHintPenalty({
+    isCompleted: isRepeatTab,
+    hintsUsed: hintsUsedRef.current,
+  });
 
   // ── Active item index reported by MC / Balloon / CodeFill games ─────────
   // Resets `hintsUsed` to 0 on every item transition so each question has
@@ -751,6 +794,7 @@ export const LessonActivity: React.FC = () => {
       isCompleted:    hasEverFullyCompletedRef.current,
       isFullCompletion: allDone,
       levelRemaining,
+      hintsUsed: hintsUsedRef.current,
     });
     levelXpEarnedRef.current += xpGainedNow;
 
@@ -1222,8 +1266,12 @@ export const LessonActivity: React.FC = () => {
                 quest={quest}
                 tabHints={tabHints}
                 hintsUsed={hintsUsed}
+                totalHintsUsed={hintsUsedRef.current}
                 maxHints={maxHints}
                 earnedXP={displayXP}
+                rewardBaseXP={rewardDetails.baseReward}
+                rewardPenaltyXP={rewardDetails.penalty}
+                rewardPenaltyCapped={rewardDetails.capped}
                 isCompleted={isCompleted}
                 onTakeHint={handleTakeHint}
                 activeTab={activeTab}

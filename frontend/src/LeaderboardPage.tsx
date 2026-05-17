@@ -13,7 +13,7 @@ interface Player {
   sandbox_runs: number
   quests_completed: number
   createdat: string
-  lastactive: string
+  lastactive: string | null
   charactertype: string | null
   user_type: 'student' | 'professional' | null
 }
@@ -24,6 +24,21 @@ interface SpeedRecord {
   completion_time_seconds: number
   users: Player | null
   quests: { title: string } | null
+}
+
+const isCompletedMissionRow = (row: { first_completed_at?: string | null; status?: string | null }) =>
+  Boolean(row.first_completed_at || row.status === 'completed')
+
+const countUniqueCompletedQuests = (rows: { questid?: string | null; id?: string | null; first_completed_at?: string | null; status?: string | null }[]) =>
+  new Set(rows.filter(isCompletedMissionRow).map(row => row.questid ?? row.id)).size
+
+const completedQuestCountsByUser = (rows: { userid: string; questid?: string | null; id?: string | null; first_completed_at?: string | null; status?: string | null }[]) => {
+  const byUser = new Map<string, Set<string>>()
+  for (const row of rows.filter(isCompletedMissionRow)) {
+    if (!byUser.has(row.userid)) byUser.set(row.userid, new Set())
+    byUser.get(row.userid)!.add(row.questid ?? row.id ?? '')
+  }
+  return byUser
 }
 
 const formatTime = (seconds: number): string => {
@@ -52,20 +67,41 @@ const FILTER_OPTIONS: { key: FilterKey; label: string; icon: string }[] = [
 ]
 
 // ─── Relative time helper ────────────────────────────────────────────────────
+const validActivityTime = (iso: string | null | undefined): number | null => {
+  const raw = iso
+  if (!raw) return null
+  const time = new Date(raw).getTime()
+  if (!Number.isFinite(time)) return null
+  const fiveMinutesAhead = Date.now() + 5 * 60_000
+  return time > fiveMinutesAhead ? null : time
+}
+
+const latestActivityIso = (values: Array<string | null | undefined>): string | null => {
+  let best: number | null = null
+  for (const value of values) {
+    const time = validActivityTime(value)
+    if (time == null) continue
+    if (best == null || time > best) best = time
+  }
+  return best == null ? null : new Date(best).toISOString()
+}
+
 const timeAgo = (iso: string | null | undefined): string => {
-  if (!iso) return '—'
-  const mins = Math.floor((Date.now() - new Date(iso).getTime()) / 60000)
+  const time = validActivityTime(iso)
+  if (time == null) return '—'
+  const mins = Math.max(0, Math.floor((Date.now() - time) / 60000))
   if (mins < 1)    return 'active now'
   if (mins < 60)   return `${mins}m ago`
   if (mins < 1440) return `${Math.floor(mins / 60)}h ago`
   const days = Math.floor(mins / 1440)
   if (days < 30)   return `${days}d ago`
-  return new Date(iso).toLocaleDateString([], { month: 'short', day: 'numeric' })
+  return new Date(time).toLocaleDateString([], { month: 'short', day: 'numeric' })
 }
 
 const isRecentlyActive = (iso: string | null | undefined): boolean => {
-  if (!iso) return false
-  const mins = Math.floor((Date.now() - new Date(iso).getTime()) / 60000)
+  const time = validActivityTime(iso)
+  if (time == null) return false
+  const mins = Math.floor((Date.now() - time) / 60000)
   return mins < 30
 }
 
@@ -76,10 +112,11 @@ const PlayerDetailModal: React.FC<{ player: Player; currentUserId?: string; onCl
 
   useEffect(() => {
     const fetch = async () => {
-      const { count } = await supabase
-        .from('mission_progress').select('*', { count: 'exact', head: true })
-        .eq('userid', player.id).eq('status', 'completed')
-      setQuestsCompleted(count ?? 0)
+      const { data: progressRows } = await supabase
+        .from('mission_progress')
+        .select('id, questid, status, first_completed_at')
+        .eq('userid', player.id)
+      setQuestsCompleted(countUniqueCompletedQuests((progressRows ?? []) as any[]))
 
       const { data: speedData } = await supabase
         .from('mission_progress')
@@ -310,6 +347,9 @@ export const LeaderboardPage: React.FC = () => {
       .on('postgres_changes', { event: '*', schema: 'public', table: 'users' }, () => {
         fetchPlayers(); fetchMyRank(); fetchStatsSummary()
       })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'mission_progress' }, () => {
+        fetchPlayers()
+      })
       .subscribe()
     return () => { supabase.removeChannel(channel) }
   }, [user?.id])
@@ -332,13 +372,28 @@ export const LeaderboardPage: React.FC = () => {
   }
 
   const fetchStatsSummary = async () => {
-    const { data } = await supabase.from('users').select('totalxp, lastactive').eq('isactive', true)
+    const since = new Date(Date.now() - 86400_000).toISOString()
+    const [usersRes, reportsRes, activityRes, progressRes] = await Promise.all([
+      supabase.from('users').select('id, totalxp, lastactive').eq('isactive', true),
+      supabase.from('reports').select('userid, createdat').gte('createdat', since).limit(1000),
+      supabase.from('activity_log').select('userid, createdat').gte('createdat', since).limit(1000),
+      supabase.from('mission_progress').select('userid, updatedat').gte('updatedat', since).limit(1000),
+    ])
+    const data = usersRes.data
     if (!data) return
     const totalPlayers = data.length
     const avgXP = totalPlayers === 0 ? 0 : Math.round(data.reduce((s, p) => s + (p.totalxp ?? 0), 0) / totalPlayers)
     const topXP = data.reduce((m, p) => Math.max(m, p.totalxp ?? 0), 0)
     const dayAgo = Date.now() - 86400_000
-    const activeToday = data.filter(p => p.lastactive && new Date(p.lastactive).getTime() >= dayAgo).length
+    const activeIds = new Set<string>()
+    for (const player of data) {
+      const activeAt = validActivityTime(player.lastactive)
+      if (activeAt != null && activeAt >= dayAgo) activeIds.add(player.id)
+    }
+    for (const row of (reportsRes.data ?? []) as any[]) activeIds.add(row.userid)
+    for (const row of (activityRes.data ?? []) as any[]) activeIds.add(row.userid)
+    for (const row of (progressRes.data ?? []) as any[]) activeIds.add(row.userid)
+    const activeToday = activeIds.size
     setStatsSummary({ totalPlayers, avgXP, topXP, activeToday })
   }
 
@@ -367,7 +422,54 @@ export const LeaderboardPage: React.FC = () => {
       }
 
       const { data, count } = await query
-      setPlayers((data ?? []) as Player[])
+      const basePlayers = (data ?? []) as Player[]
+      const ids = basePlayers.map(player => player.id)
+      let hydratedPlayers = basePlayers
+      if (ids.length > 0) {
+        const [progressRes, reportRes, activityRes] = await Promise.all([
+          supabase
+            .from('mission_progress')
+            .select('id, userid, questid, status, first_completed_at, completedat, updatedat')
+            .in('userid', ids),
+          supabase
+            .from('reports')
+            .select('userid, createdat')
+            .in('userid', ids)
+            .order('createdat', { ascending: false })
+            .limit(300),
+          supabase
+            .from('activity_log')
+            .select('userid, createdat')
+            .in('userid', ids)
+            .order('createdat', { ascending: false })
+            .limit(300),
+        ])
+        const progressRows = (progressRes.data ?? []) as any[]
+        const counts = completedQuestCountsByUser((progressRows ?? []) as any[])
+        const activityByUser = new Map<string, string[]>()
+        const addActivity = (userid: string | null | undefined, iso: string | null | undefined) => {
+          if (!userid || !iso) return
+          if (!activityByUser.has(userid)) activityByUser.set(userid, [])
+          activityByUser.get(userid)!.push(iso)
+        }
+        for (const row of progressRows) {
+          addActivity(row.userid, row.updatedat)
+          addActivity(row.userid, row.first_completed_at)
+          addActivity(row.userid, row.completedat)
+        }
+        for (const row of (reportRes.data ?? []) as any[]) addActivity(row.userid, row.createdat)
+        for (const row of (activityRes.data ?? []) as any[]) addActivity(row.userid, row.createdat)
+
+        hydratedPlayers = basePlayers.map(player => ({
+          ...player,
+          quests_completed: counts.get(player.id)?.size ?? 0,
+          lastactive: latestActivityIso([player.lastactive, ...(activityByUser.get(player.id) ?? [])]),
+        }))
+        if (sortKey === 'quests') {
+          hydratedPlayers = hydratedPlayers.sort((a, b) => b.quests_completed - a.quests_completed || b.totalxp - a.totalxp)
+        }
+      }
+      setPlayers(hydratedPlayers)
       setTotal(count ?? 0)
     } catch (e) {
       console.error('Leaderboard fetch error:', e)

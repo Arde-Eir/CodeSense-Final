@@ -16,6 +16,7 @@
 
 import React, { useEffect, useRef, useState, useCallback } from 'react';
 import type { MCQ } from '../types/campaign';
+import { normalizeMCQList } from './normalizeMCQ';
 
 const BALLOON_SCALE = 0.085;
 
@@ -94,6 +95,15 @@ function spawnBalloons(options: string[], qIdx: number, W: number, H: number): F
   });
 }
 
+function getCorrectIndices(question: MCQ): number[] {
+  const raw = question.correctAnswers ?? question.correct_answers ?? question.correct_indices ?? [question.correct];
+  const values = Array.isArray(raw) ? raw : [raw];
+  const indices = values
+    .map(v => typeof v === 'number' ? v : Number(v))
+    .filter(v => Number.isInteger(v) && v >= 0 && v < question.options.length);
+  return Array.from(new Set(indices.length ? indices : [question.correct]));
+}
+
 interface Props {
   questions:    MCQ[];
   onComplete:   (score: number, total: number) => void;
@@ -104,6 +114,7 @@ interface Props {
 }
 
 export const BalloonPopGame: React.FC<Props> = ({ questions, onComplete, resetSignal, onItemChange }) => {
+  const playableQuestions = React.useMemo(() => normalizeMCQList(questions), [questions]);
   const canvasRef    = useRef<HTMLCanvasElement>(null);
   const rafRef       = useRef<number>(0);
   const t0Ref        = useRef<number>(0);
@@ -118,6 +129,7 @@ export const BalloonPopGame: React.FC<Props> = ({ questions, onComplete, resetSi
     betweenTimer: 0,
     explanation:  '',
     correctLabel: '',
+    correctPopped: new Set<number>(),
     shake:        0,
     W:            0,
     H:            0,
@@ -128,8 +140,8 @@ export const BalloonPopGame: React.FC<Props> = ({ questions, onComplete, resetSi
     lives:        TOTAL_LIVES,
     qIdx:         0,
     score:        0,
-    total:        questions.length,
-    question:     questions[0]?.question ?? '',
+    total:        playableQuestions.length,
+    question:     playableQuestions[0]?.question ?? '',
     explanation:  '',
     correctLabel: '',
   });
@@ -145,23 +157,24 @@ export const BalloonPopGame: React.FC<Props> = ({ questions, onComplete, resetSi
       lives:        g.lives,
       qIdx:         g.qIdx,
       score:        g.score,
-      total:        questions.length,
-      question:     questions[Math.min(g.qIdx, questions.length - 1)]?.question ?? '',
+      total:        playableQuestions.length,
+      question:     playableQuestions[Math.min(g.qIdx, playableQuestions.length - 1)]?.question ?? '',
       explanation:  g.explanation,
       correctLabel: g.correctLabel,
     });
-  }, [questions]);
+  }, [playableQuestions]);
 
   const loadQuestion = useCallback((idx: number) => {
     const g = gs.current;
     g.balloons = spawnBalloons(
-      questions[idx]?.options ?? [],
+      playableQuestions[idx]?.options ?? [],
       idx,
       g.W || canvasRef.current?.offsetWidth  || 400,
       g.H || canvasRef.current?.offsetHeight || 300,
     );
     g.phase = 'playing';
-  }, [questions]);
+    g.correctPopped.clear();
+  }, [playableQuestions]);
 
   const hit = useCallback((clientX: number, clientY: number) => {
     const g      = gs.current;
@@ -172,7 +185,7 @@ export const BalloonPopGame: React.FC<Props> = ({ questions, onComplete, resetSi
     const rect = canvas.getBoundingClientRect();
     const mx = clientX - rect.left;
     const my = clientY - rect.top;
-    const q  = questions[g.qIdx];
+    const q  = playableQuestions[g.qIdx];
     if (!q) return;
 
     const { rx, ry } = getBalloonRadii(g.W || canvas.offsetWidth, g.H || canvas.offsetHeight);
@@ -183,7 +196,8 @@ export const BalloonPopGame: React.FC<Props> = ({ questions, onComplete, resetSi
       const dx = (mx - wx) / rx;
       const dy = (my - b.y)  / ry;
       if (dx * dx + dy * dy < 1.0) {
-        if (b.optionIndex === q.correct) {
+        const correctIndices = getCorrectIndices(q);
+        if (correctIndices.includes(b.optionIndex)) {
           b.state      = 'popped';
           b.particles  = Array.from({ length: 28 }, (_, pi) => {
             const a = (pi / 28) * Math.PI * 2 + Math.random() * 0.3;
@@ -198,12 +212,19 @@ export const BalloonPopGame: React.FC<Props> = ({ questions, onComplete, resetSi
               size:  3 + Math.random() * 5,
             };
           });
-          g.score++;
-          g.explanation  = q.explanation;
-          g.correctLabel = b.label;
-          g.phase        = 'between';
-          g.betweenTimer = 2.6;
-          g.balloons.forEach(ob => { if (ob.uid !== b.uid && ob.state === 'floating') ob.state = 'popped'; });
+          g.correctPopped.add(b.optionIndex);
+
+          if (correctIndices.every(idx => g.correctPopped.has(idx))) {
+            const correctLabels = correctIndices
+              .map(idx => q.options[idx])
+              .filter(Boolean);
+            g.score++;
+            g.explanation  = q.explanation;
+            g.correctLabel = correctLabels.join(', ');
+            g.phase        = 'between';
+            g.betweenTimer = 2.6;
+            g.balloons.forEach(ob => { if (ob.uid !== b.uid && ob.state === 'floating') ob.state = 'popped'; });
+          }
         } else {
           b.state      = 'wrong';
           b.wrongTimer = 0.8;
@@ -215,7 +236,7 @@ export const BalloonPopGame: React.FC<Props> = ({ questions, onComplete, resetSi
         return;
       }
     }
-  }, [questions, syncUi]);
+  }, [playableQuestions, syncUi]);
 
   const onClick      = useCallback((e: React.MouseEvent<HTMLCanvasElement>) => hit(e.clientX, e.clientY), [hit]);
   const onTouchStart = useCallback((e: React.TouchEvent<HTMLCanvasElement>) => {
@@ -231,6 +252,7 @@ export const BalloonPopGame: React.FC<Props> = ({ questions, onComplete, resetSi
       lives: TOTAL_LIVES, qIdx: 0, score: 0,
       phase: 'playing', explanation: '', correctLabel: '', shake: 0,
     });
+    gs.current.correctPopped.clear();
     loadQuestion(0);
     syncUi();
   }, [resetSignal, loadQuestion, syncUi]);
@@ -251,7 +273,7 @@ export const BalloonPopGame: React.FC<Props> = ({ questions, onComplete, resetSi
       gs.current.H = H;
       if (gs.current.phase === 'playing') {
         gs.current.balloons = spawnBalloons(
-          questions[gs.current.qIdx]?.options ?? [],
+          playableQuestions[gs.current.qIdx]?.options ?? [],
           gs.current.qIdx, W, H,
         );
       }
@@ -301,17 +323,18 @@ export const BalloonPopGame: React.FC<Props> = ({ questions, onComplete, resetSi
         g.betweenTimer -= dt;
         if (g.betweenTimer <= 0) {
           const next = g.qIdx + 1;
-          if (next >= questions.length) {
+          if (next >= playableQuestions.length) {
             g.phase = 'done';
             syncUi();
             if (!completedRef.current) {
               completedRef.current = true;
-              setTimeout(() => onComplete(g.score, questions.length), 400);
+              setTimeout(() => onComplete(g.score, playableQuestions.length), 400);
             }
           } else {
             g.qIdx = next;
             g.explanation  = '';
             g.correctLabel = '';
+            g.correctPopped.clear();
             loadQuestion(next);
             syncUi();
           }
@@ -443,11 +466,12 @@ export const BalloonPopGame: React.FC<Props> = ({ questions, onComplete, resetSi
       lives: TOTAL_LIVES, qIdx: 0, score: 0,
       phase: 'playing', explanation: '', correctLabel: '', shake: 0,
     });
+    gs.current.correctPopped.clear();
     loadQuestion(0);
     syncUi();
   }, [loadQuestion, syncUi]);
 
-  if (!questions.length) return (
+  if (!playableQuestions.length) return (
     <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#484f58', fontSize: 13, fontFamily: "'JetBrains Mono',monospace" }}>
       No questions configured for this balloon game.
     </div>
@@ -546,7 +570,7 @@ export const BalloonPopGame: React.FC<Props> = ({ questions, onComplete, resetSi
             fontSize: 9, color: '#58a6ff',
             fontFamily: "'JetBrains Mono',monospace",
             letterSpacing: '2px', textTransform: 'uppercase', marginBottom: 5,
-          }}>🎈 POP THE CORRECT BALLOON</div>
+          }}>🎈 POP ALL CORRECT BALLOONS</div>
           <div style={{
             // ↓ key fix: clamp font size so it always fits
             fontSize: 'clamp(12px, 1.8vw, 14px)',

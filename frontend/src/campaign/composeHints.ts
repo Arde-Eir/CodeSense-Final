@@ -9,6 +9,25 @@
 
 import type { ActivityTab, HintItem } from '../types/campaign';
 
+export type ItemHintInput = string | string[] | HintItem | HintItem[] | null | undefined;
+
+function normalizeItemHints(itemHint: ItemHintInput): HintItem[] {
+  if (!itemHint) return [];
+  const values = Array.isArray(itemHint) ? itemHint : [itemHint];
+  return values.flatMap((hint, index) => {
+    if (typeof hint === 'string') {
+      const body = hint.trim();
+      return body ? [{ icon: '🎯', title: index === 0 ? 'Hint for this question' : `Hint ${index + 1} for this question`, body }] : [];
+    }
+
+    if (!hint || typeof hint !== 'object') return [];
+    const title = String(hint.title ?? '').trim() || (index === 0 ? 'Hint for this question' : `Hint ${index + 1} for this question`);
+    const body = String(hint.body ?? '').trim();
+    if (!body) return [];
+    return [{ ...hint, icon: hint.icon ?? '🎯', title, body }];
+  });
+}
+
 /** Build the visible hint list for the current activity tab + current item.
  *
  *  @param questHints   Per-quest hints (Quest.hints). Pool for this tab is
@@ -20,13 +39,8 @@ import type { ActivityTab, HintItem } from '../types/campaign';
 export function composeHints(
   questHints: HintItem[] | null | undefined,
   activeTab:  ActivityTab,
-  itemHint?:  string | null,
+  itemHint?:  ItemHintInput,
 ): HintItem[] {
   const pool = (questHints ?? []).filter(h => !h.activity || h.activity === activeTab);
-  const trimmed = (itemHint ?? '').trim();
-  if (!trimmed) return pool;
-  return [
-    { icon: '🎯', title: 'Hint for this question', body: trimmed },
-    ...pool,
-  ];
+  return [...normalizeItemHints(itemHint), ...pool];
 }

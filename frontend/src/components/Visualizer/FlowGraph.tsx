@@ -11,7 +11,7 @@ import {
 import type { Connection, Edge, Node, NodeProps, NodeChange, EdgeChange } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
 import type { CFG, SafetyCheck, ControlFlowNode } from '../../types';
-import { generateCppFromGraph } from '../../services/CodeGenerator';
+import { FLOWCHART_CODE_TOPICS, generateCppFromGraph } from '../../services/CodeGenerator';
 import { validateGraph } from '../../services/GraphValidator';
 import { ValidationPanel } from './ValidationPanel';
 
@@ -113,43 +113,45 @@ const EDITOR_TITLE: Record<string, string> = {
 };
 
 const CODE_PLACEHOLDER: Record<string, string> = {
-  process:            'e.g.  hp = hp - 10;',
-  decision:           'e.g.  hp > 0',
-  io:                 'e.g.  cout << hp << endl;',
+  process:            'e.g.  create integer age equals 18',
+  decision:           'e.g.  if age is greater than 17',
+  io:                 'e.g.  print score',
   predefined:         'e.g.  calculateDamage(hp, atk);',
   connector:          '',
   off_page_connector: '',
   document:           'e.g.  label or filename',
-  manual_input:       'e.g.  cin >> name;',
+  manual_input:       'e.g.  ask for name',
   delay:              'e.g.  sleep(1000);',
-  database:           'e.g.  scores[i]',
+  database:           'e.g.  create integer score equals 0',
   terminator:         '',
   junction:           '',
 };
 
 const NODE_TEMPLATES: Record<string, { label: string; code: string }[]> = {
   process: [
-    { label: 'Initialize counter', code: 'int i = 0;' },
-    { label: 'Update value', code: 'hp = hp - 10;' },
-    { label: 'Increment counter', code: 'i++;' },
+    { label: 'Create age', code: 'create integer age equals 18' },
+    { label: 'Update score', code: 'set score to 100' },
+    { label: 'Increment counter', code: 'increase counter by 1' },
+    { label: 'Create class', code: 'class Student {\npublic:\n    string name;\n    int age;\n};' },
   ],
   decision: [
-    { label: 'i < n', code: 'i < n' },
-    { label: 'hp > 0', code: 'hp > 0' },
-    { label: 'score >= passingScore', code: 'score >= passingScore' },
+    { label: 'Age is adult', code: 'if age is greater than 17' },
+    { label: 'HP remains', code: 'if hp is greater than 0' },
+    { label: 'Passing score', code: 'if score is greater than or equal to passingScore' },
   ],
   io: [
-    { label: 'Print value', code: 'value' },
-    { label: 'Print message', code: '"Done"' },
-    { label: 'Print result', code: 'result' },
+    { label: 'Print value', code: 'print value' },
+    { label: 'Print message', code: 'print Done' },
+    { label: 'Print result', code: 'print result' },
   ],
   manual_input: [
-    { label: 'Read value', code: 'value' },
-    { label: 'Read name', code: 'name' },
+    { label: 'Read value', code: 'ask for value' },
+    { label: 'Read name', code: 'ask for name' },
   ],
   predefined: [
     { label: 'Call calculate', code: 'calculateResult()' },
     { label: 'Call validate', code: 'validateInput()' },
+    { label: 'Define helper', code: 'int add(int a, int b) {\n    return a + b;\n}' },
   ],
   delay: [
     { label: 'Wait one second', code: 'sleep(1)' },
@@ -258,6 +260,40 @@ const PALETTE_ITEMS: {
     ),
   },
 ];
+
+function isEndTerminator(node: Node<ExtendedNodeData>): boolean {
+  return node.type === 'terminator' && String(node.data?.label ?? '').toLowerCase() !== 'start';
+}
+
+function findLooseEndpoint(nodes: Node<ExtendedNodeData>[], edges: Edge[]): Node<ExtendedNodeData> | null {
+  const sourceIds = new Set(edges.map(edge => edge.source));
+  for (let i = nodes.length - 1; i >= 0; i--) {
+    const node = nodes[i];
+    if (sourceIds.has(node.id)) continue;
+    if (isEndTerminator(node)) continue;
+    if (node.type === 'decision') continue;
+    return node;
+  }
+  return null;
+}
+
+function flowEdge(source: string, target: string, label?: string): Edge {
+  const isTrue = label === 'true';
+  const isFalse = label === 'false';
+  const edgeColor = isTrue ? '#4caf50' : isFalse ? '#ff4444' : '#64b5f6';
+  return {
+    id: `edge-${source}-${target}-${Date.now()}`,
+    source,
+    target,
+    label,
+    type: 'default',
+    markerEnd: { type: MarkerType.ArrowClosed, color: edgeColor },
+    style: { stroke: edgeColor, strokeWidth: 2 },
+    labelStyle: { fill: isTrue ? '#4caf50' : isFalse ? '#ff6b6b' : '#ffffff', fontSize: '11px', fontWeight: '700' },
+    labelBgStyle: { fill: '#0d1117', fillOpacity: 0.9 },
+    labelBgPadding: [5, 8] as [number, number],
+  };
+}
 
 // ─────────────────────────────────────────────────────────────────────────────
 // §3  SHARED NODE HELPERS
@@ -846,6 +882,65 @@ const GameStats: React.FC<{
   );
 };
 
+const FlowchartQuickGuide: React.FC<{ onClose: () => void }> = ({ onClose }) => (
+  <aside style={{
+    position: 'absolute', top: 52, left: 12, zIndex: 1000,
+    width: 320, maxWidth: 'calc(100% - 270px)',
+    background: 'linear-gradient(135deg,rgba(13,17,23,0.98),rgba(22,27,34,0.98))',
+    border: '1px solid rgba(88,166,255,0.28)',
+    borderRadius: 10,
+    boxShadow: '0 16px 44px rgba(0,0,0,0.45)',
+    overflow: 'hidden',
+    color: '#c9d1d9',
+    fontSize: 11,
+  }}>
+    <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '10px 12px', borderBottom: '1px solid #21262d', background: 'rgba(88,166,255,0.06)' }}>
+      <strong style={{ color: '#58a6ff', fontSize: 11, letterSpacing: 0.6, textTransform: 'uppercase', fontFamily: "'IBM Plex Mono', monospace", flex: 1 }}>Quick Flowchart Manual</strong>
+      <button onClick={onClose} title="Hide quick guide" style={{ background: 'transparent', border: 'none', color: '#8b949e', cursor: 'pointer', fontSize: 16, lineHeight: 1 }}>x</button>
+    </div>
+    <div style={{ padding: 12, display: 'grid', gap: 10, lineHeight: 1.55 }}>
+      <div>
+        <div style={{ color: '#e6edf3', fontWeight: 700, marginBottom: 4 }}>Best workflow</div>
+        <ol style={{ paddingLeft: 18, margin: 0 }}>
+          <li>Add Start, actions, decisions, then End. New shapes auto-wire from the current loose endpoint.</li>
+          <li>Double-click each shape and type human sentences or C++.</li>
+          <li>Connect handles from top to bottom; decision edges auto-label true/false.</li>
+          <li>Click Generate C++ and fix only blocking validation errors.</li>
+        </ol>
+      </div>
+      <div>
+        <div style={{ color: '#e6edf3', fontWeight: 700, marginBottom: 4 }}>Human inputs that work</div>
+        <code style={{ display: 'block', background: '#010409', border: '1px solid #21262d', borderRadius: 6, padding: 8, color: '#9ecbff', whiteSpace: 'pre-wrap', lineHeight: 1.6 }}>
+{`create integer age equals 18
+ask for user age
+if user age is greater than 17
+print too young
+increase score by 10`}
+        </code>
+      </div>
+      <div>
+        <div style={{ color: '#e6edf3', fontWeight: 700, marginBottom: 4 }}>Supported generation topics</div>
+        <div style={{ display: 'grid', gap: 3, color: '#8b949e' }}>
+          {FLOWCHART_CODE_TOPICS.slice(0, 6).map(topic => (
+            <span key={topic}>- {topic}</span>
+          ))}
+        </div>
+      </div>
+      <div>
+        <div style={{ color: '#e6edf3', fontWeight: 700, marginBottom: 4 }}>Shape cheat sheet</div>
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '4px 10px', color: '#8b949e' }}>
+          <span><b style={{ color: '#42a5f5' }}>Start/End</b> entry and exit</span>
+          <span><b style={{ color: '#4caf50' }}>Process</b> variables and math</span>
+          <span><b style={{ color: '#ffa726' }}>Decision</b> if/while checks</span>
+          <span><b style={{ color: '#64b5f6' }}>Output</b> print text/value</span>
+          <span><b style={{ color: '#ff7043' }}>Input</b> ask/read value</span>
+          <span><b style={{ color: '#e040fb' }}>Junction</b> merge paths</span>
+        </div>
+      </div>
+    </div>
+  </aside>
+);
+
 // ── GenerateCodePanel ─────────────────────────────────────────────────────────
 const GenerateCodePanel: React.FC<{
   nodes:             Node[];
@@ -975,6 +1070,15 @@ const GenerateCodePanel: React.FC<{
               → click Generate
             </div>
           )}
+
+          <details style={{ fontSize: 9, color: '#8b949e', background: 'rgba(255,255,255,0.025)', border: '1px solid #21262d', borderRadius: 6, padding: '6px 8px' }}>
+            <summary style={{ cursor: 'pointer', color: '#c9d1d9', fontWeight: 700 }}>Supported topics</summary>
+            <div style={{ display: 'grid', gap: 3, marginTop: 6, lineHeight: 1.45 }}>
+              {FLOWCHART_CODE_TOPICS.map(topic => (
+                <span key={topic}>- {topic}</span>
+              ))}
+            </div>
+          </details>
 
           {!hasErrors && isDirty && generatedCode && (
             <div style={{ fontSize: 9, color: '#ffa726', padding: '5px 8px', background: 'rgba(255,167,38,0.08)', border: '1px solid rgba(255,167,38,0.3)', borderRadius: 6 }}>
@@ -1318,6 +1422,7 @@ const FlowGraphInner: React.FC<Props> = ({
   const [edges, setEdges]                 = useState<Edge[]>([]);
   const [isLocked, setIsLocked]           = useState(false);
   const [showPanel, setShowPanel]         = useState(true);
+  const [showGuide, setShowGuide]         = useState(false);
   const [hoverInfo, setHoverInfo]         = useState<string | null>(null);
   const [mousePos,  setMousePos]          = useState({ x: 0, y: 0 });
   const [editState,     setEditState]     = useState<EditState | null>(null);
@@ -1474,15 +1579,19 @@ const FlowGraphInner: React.FC<Props> = ({
 
   const handleAddNode = useCallback((type: FlowNodeType) => {
     const id = newNodeId();
+    const autoSource = findLooseEndpoint(nodes, edges);
+    const hasStart = nodes.some(
+      n => n.type === 'terminator' && String(n.data.label ?? '').toLowerCase() === 'start'
+    );
+    const initialLabel = (type === 'terminator' && hasStart) ? 'End' : DEFAULT_LABELS[type];
+    const position = autoSource
+      ? { x: autoSource.position.x, y: autoSource.position.y + 150 }
+      : { x: 220 + Math.random() * 160, y: 80 + nodes.length * 30 };
 
     setNodes(current => {
-      const hasStart = current.some(
-        n => n.type === 'terminator' && String(n.data.label ?? '').toLowerCase() === 'start'
-      );
-      const initialLabel = (type === 'terminator' && hasStart) ? 'End' : DEFAULT_LABELS[type];
       const newNode: Node<ExtendedNodeData> = {
         id, type,
-        position: { x: 220 + Math.random() * 160, y: 80 + current.length * 30 },
+        position,
         data: {
           id, label: initialLabel, code: '', line: -1,
           onHover: setHoverInfo,
@@ -1492,25 +1601,26 @@ const FlowGraphInner: React.FC<Props> = ({
       };
       return [...current, newNode];
     });
+    if (autoSource) {
+      setEdges(current => {
+        const next = [...current, flowEdge(autoSource.id, id)];
+        setNodes(nds => { onGraphChange?.(nds, next); return nds; });
+        return next;
+      });
+    }
 
     setTimeout(() => {
       setNodes(current => {
         const node = current.find(n => n.id === id);
         if (node) {
-          const hasStart = current.some(
-            n => n.type === 'terminator' &&
-                 String(n.data.label ?? '').toLowerCase() === 'start' &&
-                 n.id !== id
-          );
-          const lbl = (type === 'terminator' && hasStart) ? 'End' : DEFAULT_LABELS[type];
-          setEditState({ nodeId: id, label: lbl, code: '', type });
+          setEditState({ nodeId: id, label: initialLabel, code: '', type });
         }
         return current;
       });
     }, 50);
 
     setIsDirty(true);
-  }, [handleOpenEdit]);
+  }, [edges, handleOpenEdit, nodes, onGraphChange]);
 
   // ── React Flow change handlers ─────────────────────────────────────────────
 
@@ -1551,12 +1661,37 @@ const FlowGraphInner: React.FC<Props> = ({
       );
       if (alreadyExists) return eds;
 
+      const sourceNode = nodes.find(n => n.id === params.source);
+      const outgoingFromSource = eds.filter(edge => edge.source === params.source);
+      const isDecisionEdge = sourceNode?.type === 'decision';
+      let edgeLabel: string | undefined;
+
+      if (isDecisionEdge) {
+        const labels = new Set(outgoingFromSource.map(edge => String(edge.label ?? '').toLowerCase()));
+        if (params.sourceHandle === 'left') {
+          edgeLabel = 'false';
+        } else if (params.sourceHandle === 'right') {
+          edgeLabel = 'true';
+        } else {
+          edgeLabel = labels.has('true') || labels.has('yes') ? 'false' : 'true';
+        }
+
+        if ((edgeLabel === 'true' && (labels.has('true') || labels.has('yes'))) ||
+            (edgeLabel === 'false' && (labels.has('false') || labels.has('no')))) {
+          edgeLabel = labels.has('true') || labels.has('yes') ? 'false' : 'true';
+        }
+      }
+
+      const isTrue = edgeLabel === 'true';
+      const isFalse = edgeLabel === 'false';
+      const edgeColor = isTrue ? '#4caf50' : isFalse ? '#ff4444' : '#64b5f6';
       const next = addEdge({
         ...params,
+        label:          edgeLabel,
         type:           'default',
-        markerEnd:      { type: MarkerType.ArrowClosed, color: '#64b5f6' },
-        style:          { stroke: '#64b5f6', strokeWidth: 2 },
-        labelStyle:     { fill: '#ffffff', fontSize: '11px', fontWeight: '600' },
+        markerEnd:      { type: MarkerType.ArrowClosed, color: edgeColor },
+        style:          { stroke: edgeColor, strokeWidth: 2 },
+        labelStyle:     { fill: isTrue ? '#4caf50' : isFalse ? '#ff6b6b' : '#ffffff', fontSize: '11px', fontWeight: '700' },
         labelBgStyle:   { fill: '#0d1117', fillOpacity: 0.9 },
         labelBgPadding: [5, 8] as [number, number],
       }, eds);
@@ -1564,7 +1699,7 @@ const FlowGraphInner: React.FC<Props> = ({
       setIsDirty(true);
       return next;
     });
-  }, [onGraphChange]);
+  }, [nodes, onGraphChange]);
 
   // ── Node click → mark as visited ──────────────────────────────────────────
 
@@ -1705,6 +1840,27 @@ const FlowGraphInner: React.FC<Props> = ({
 
       {isBuildMode && (
         <>
+          <button
+            onClick={() => setShowGuide(v => !v)}
+            title={showGuide ? 'Hide quick flowchart manual' : 'Show quick flowchart manual'}
+            style={{
+              position: 'absolute', top: 12, left: 12, zIndex: 1001,
+              background: showGuide ? 'rgba(88,166,255,0.16)' : 'rgba(13,17,23,0.9)',
+              border: `1px solid ${showGuide ? 'rgba(88,166,255,0.45)' : '#30363d'}`,
+              color: showGuide ? '#58a6ff' : '#8b949e',
+              padding: '7px 12px', borderRadius: 8,
+              fontSize: 11, fontWeight: 700, letterSpacing: 0.6, cursor: 'pointer',
+              fontFamily: "'IBM Plex Mono', monospace",
+              boxShadow: '0 4px 12px rgba(0,0,0,0.35)',
+              opacity:       isDrawerOpen ? 0.25 : 1,
+              filter:        isDrawerOpen ? 'blur(2px)' : 'none',
+              pointerEvents: isDrawerOpen ? 'none' : 'auto',
+            }}
+          >
+            ? GUIDE
+          </button>
+          {showGuide && !isDrawerOpen && <FlowchartQuickGuide onClose={() => setShowGuide(false)} />}
+
           {/* Single toggle — always visible, controls the whole panel */}
           <button
             onClick={() => setShowPanel(v => !v)}
@@ -1778,7 +1934,9 @@ const FlowGraphInner: React.FC<Props> = ({
         onClick={() => setIsLocked(l => !l)}
         title={isLocked ? 'Unlock — re-enable drag & pan' : 'Lock — freeze nodes & pan (zoom stays on)'}
         style={{
-          position: 'absolute', bottom: 70, left: 12, zIndex: 1001,
+          position: 'absolute',
+          ...(isBuildMode ? { top: 12, left: 92 } : { bottom: 70, left: 12 }),
+          zIndex: 1001,
           background: isLocked ? 'rgba(248,81,73,0.15)' : 'rgba(13,17,23,0.9)',
           border: `1px solid ${isLocked ? 'rgba(248,81,73,0.45)' : '#30363d'}`,
           color: isLocked ? '#f85149' : '#8b949e',

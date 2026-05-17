@@ -6,6 +6,17 @@ export const DatabaseService = {
 
   // ── AUTHENTICATION ──────────────────────────────────────────────────────────
 
+  async updateLastActive(userId: string): Promise<void> {
+    try {
+      await supabase
+        .from('users')
+        .update({ lastactive: new Date().toISOString() })
+        .eq('id', userId)
+    } catch (error) {
+      console.warn('Last-active update failed:', error)
+    }
+  },
+
   async login(playerName: string, secretCode: string): Promise<ExplorerProfile> {
     try {
       const { data: userRow, error: lookupError } = await supabase
@@ -44,10 +55,7 @@ export const DatabaseService = {
         throw new Error(`ACCOUNT_BANNED${reason}`)
       }
 
-      await supabase
-        .from('users')
-        .update({ lastactive: new Date().toISOString() })
-        .eq('id', data.user.id)
+      await DatabaseService.updateLastActive(data.user.id)
 
       return mapProfile(profile)
 
@@ -384,6 +392,7 @@ export const DatabaseService = {
             .eq('id', userId)
         }
       }
+      await DatabaseService.updateLastActive(userId)
     } catch (error) {
       console.error('Sandbox log failed (non-critical):', error)
     }

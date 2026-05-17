@@ -188,12 +188,12 @@ const GeneratedCodeViewer: React.FC<{
   );
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', height: '100%', gap: '10px' }}>
+    <div style={{ display: 'flex', flexDirection: 'column', height: '100%', minHeight: 0, gap: '10px' }}>
       <div style={{ display: 'flex', alignItems: 'center', padding: '0 2px' }}>
         <span style={{ fontSize: '11px', color: '#a371f7', fontWeight: '700', letterSpacing: '0.5px', textTransform: 'uppercase', fontFamily: 'IBM Plex Mono, monospace' }}>⚡ Generated C++</span>
         <span style={{ marginLeft: 'auto', fontSize: '10px', color: '#484f58' }}>from flowchart</span>
       </div>
-      <div style={{ flex: 1, overflow: 'auto', background: '#010409', border: '1px solid rgba(163,113,247,0.2)', borderRadius: '8px', padding: '14px' }}>
+      <div style={{ flex: '1 1 auto', minHeight: 170, overflow: 'auto', background: '#010409', border: '1px solid rgba(163,113,247,0.2)', borderRadius: '8px', padding: '14px' }}>
         <pre style={{ margin: 0, fontSize: '12px', color: '#c9d1d9', fontFamily: 'IBM Plex Mono, monospace', whiteSpace: 'pre-wrap', wordBreak: 'break-word', lineHeight: '1.8' }}>
           {code}
         </pre>
@@ -213,6 +213,50 @@ const GeneratedCodeViewer: React.FC<{
     </div>
   );
 };
+
+const BuildModeManual: React.FC = () => (
+  <div style={{
+    padding: '14px 16px',
+    background: 'rgba(163,113,247,0.05)',
+    border: '1px solid rgba(163,113,247,0.2)',
+    borderRadius: '10px',
+    fontSize: '12px',
+    color: '#8b949e',
+    lineHeight: 1.75,
+  }}>
+    <div style={{ color: '#a371f7', fontWeight: 700, marginBottom: 8, fontSize: 11, textTransform: 'uppercase', letterSpacing: 0.5, fontFamily: 'IBM Plex Mono, monospace' }}>
+      Flowchart to Code Manual
+    </div>
+    <div style={{ display: 'grid', gap: 10 }}>
+      <div>
+        <strong style={{ color: '#e6edf3' }}>1. Build the path</strong>
+        <div>Start with a Start node, add your actions and decisions, then connect everything to End.</div>
+      </div>
+      <div>
+        <strong style={{ color: '#e6edf3' }}>2. Write naturally</strong>
+        <div>Nodes accept C++ or simple sentences like <code>create integer age equals 18</code>, <code>ask for name</code>, and <code>print total</code>.</div>
+      </div>
+      <div>
+        <strong style={{ color: '#e6edf3' }}>3. Use the right shapes</strong>
+        <div>Process for math/variables, Manual Input for <code>cin</code>, Output for <code>cout</code>, Decision for <code>if</code> or loop checks.</div>
+      </div>
+      <div>
+        <strong style={{ color: '#e6edf3' }}>4. Generate and analyze</strong>
+        <div>Click Generate C++, then Load &amp; Analyze to send the generated code through Tokens, AST, CFG, Math, and Logs.</div>
+      </div>
+    </div>
+    <div style={{ marginTop: 12, padding: 10, background: '#010409', border: '1px solid #21262d', borderRadius: 8 }}>
+      <div style={{ color: '#58a6ff', fontWeight: 700, marginBottom: 5, fontSize: 11 }}>Good sentence patterns</div>
+      <code style={{ color: '#9ecbff', whiteSpace: 'pre-wrap', lineHeight: 1.65 }}>
+{`create integer score equals 0
+set total to price plus tax
+increase counter by 1
+if score is greater than or equal to 75
+print Passed`}
+      </code>
+    </div>
+  </div>
+);
 
 // ─── Accordion Panel ──────────────────────────────────────────────────────────
 interface AccordionPanelProps {
@@ -325,6 +369,9 @@ int main() {
   const [tabFullscreen, setTabFullscreen] = useState(false);
   const [editorFullscreen, setEditorFullscreen] = useState(false);
   const [builtCode, setBuiltCode] = useState('');
+  const [buildRailOpen, setBuildRailOpen] = useState(true);
+  const [buildRailWidth, setBuildRailWidth] = useState(440);
+  const [buildOutputHeight, setBuildOutputHeight] = useState(420);
   const [liveStats, setLiveStats] = useState<LiveStats | null>(null);
   const [runFlash, setRunFlash] = useState(false);
 
@@ -361,6 +408,48 @@ int main() {
     window.addEventListener('mousemove', onMouseMove);
     window.addEventListener('mouseup', onMouseUp);
   }, []);
+
+  const handleBuildRailResizeMouseDown = useCallback((e: React.MouseEvent) => {
+    e.preventDefault();
+    document.body.style.cursor = 'col-resize';
+    document.body.style.userSelect = 'none';
+
+    const onMouseMove = (evt: MouseEvent) => {
+      const viewport = window.innerWidth || 1200;
+      const maxWidth = Math.min(720, viewport * 0.5);
+      setBuildRailWidth(Math.min(maxWidth, Math.max(360, viewport - evt.clientX - 14)));
+    };
+    const onMouseUp = () => {
+      document.body.style.cursor = '';
+      document.body.style.userSelect = '';
+      window.removeEventListener('mousemove', onMouseMove);
+      window.removeEventListener('mouseup', onMouseUp);
+    };
+
+    window.addEventListener('mousemove', onMouseMove);
+    window.addEventListener('mouseup', onMouseUp);
+  }, []);
+
+  const handleBuildOutputResizeMouseDown = useCallback((e: React.MouseEvent) => {
+    e.preventDefault();
+    document.body.style.cursor = 'row-resize';
+    document.body.style.userSelect = 'none';
+
+    const startY = e.clientY;
+    const startHeight = buildOutputHeight;
+    const onMouseMove = (evt: MouseEvent) => {
+      setBuildOutputHeight(Math.min(680, Math.max(320, startHeight + (evt.clientY - startY))));
+    };
+    const onMouseUp = () => {
+      document.body.style.cursor = '';
+      document.body.style.userSelect = '';
+      window.removeEventListener('mousemove', onMouseMove);
+      window.removeEventListener('mouseup', onMouseUp);
+    };
+
+    window.addEventListener('mousemove', onMouseMove);
+    window.addEventListener('mouseup', onMouseUp);
+  }, [buildOutputHeight]);
 
   const togglePanel = (panel: 'editor' | 'tabs') => {
     setOpenPanels(prev => ({ ...prev, [panel]: !prev[panel] }));
@@ -487,7 +576,10 @@ int main() {
       </header>
 
       {/* ── Main ───────────────────────────────────────────────────────── */}
-      <main className="main-layout">
+      <main
+        className={`main-layout ${mode === 'build' ? 'build-layout' : ''} ${mode === 'build' && !buildRailOpen ? 'build-layout-rail-closed' : ''}`}
+        style={mode === 'build' && buildRailOpen ? { gridTemplateColumns: `minmax(0, 1fr) ${buildRailWidth}px` } : undefined}
+      >
 
         {/* ══════════════════ ANALYZE MODE ══════════════════════════════ */}
         {mode === 'analyze' && (<>
@@ -676,35 +768,57 @@ int main() {
 
         {/* ══════════════════ BUILD MODE ════════════════════════════════ */}
         {mode === 'build' && (<>
-          <div className="left-column">
-            <section className="editor-section" style={{ flex: 1 }}>
-              <div className="section-title build-title">Generated C++ Output</div>
-              <div className="editor-container" style={{ padding: '16px', display: 'flex', flexDirection: 'column' }}>
-                <GeneratedCodeViewer code={builtCode} onLoadInEditor={c => { setCode(c); setMode('analyze'); setResult(null); }} />
-              </div>
-            </section>
-            <div style={{
-              padding: '14px 16px', background: 'rgba(163,113,247,0.05)',
-              border: '1px solid rgba(163,113,247,0.2)', borderRadius: '10px',
-              fontSize: '12px', color: '#8b949e', lineHeight: '1.8', flexShrink: 0,
-            }}>
-              <div style={{ color: '#a371f7', fontWeight: '700', marginBottom: '6px', fontSize: '11px', textTransform: 'uppercase', letterSpacing: '0.5px', fontFamily: 'IBM Plex Mono, monospace' }}>
-                🎨 How to build
-              </div>
-              <div>1. Use <strong style={{ color: '#58a6ff' }}>ADD NODE</strong> on the canvas to place shapes</div>
-              <div>2. Double-click nodes to write C++ code inside them</div>
-              <div>3. Connect nodes with edges (drag from handle to handle)</div>
-              <div>4. Label decision edges <strong style={{ color: '#3fb950' }}>true</strong> / <strong style={{ color: '#f85149' }}>false</strong></div>
-              <div>5. Hit <strong style={{ color: '#a371f7' }}>⚡ GENERATE C++</strong> in the canvas panel</div>
-              <div style={{ marginTop: '8px', color: '#484f58' }}>Then use <strong style={{ color: '#3fb950' }}>🔍 Load &amp; Analyze</strong> to send to the analyzer.</div>
+          <div className="right-column build-canvas-column">
+            <div className="section-title build-title">
+              <span>Flowchart Canvas</span>
+              <span style={{ marginLeft: 'auto', color: '#484f58', fontSize: 10, textTransform: 'none', letterSpacing: 0 }}>
+                More room for building. Use the Guide button inside the canvas for quick help.
+              </span>
             </div>
-          </div>
-          <div className="right-column">
-            <div className="section-title build-title">Flowchart Canvas</div>
             <div className="visualizer-container">
               <FlowGraph onCodeGenerated={setBuiltCode} />
             </div>
           </div>
+
+          <aside className={`build-side-rail ${buildRailOpen ? 'open' : 'closed'}`}>
+            {buildRailOpen && (
+              <div
+                className="build-rail-resizer"
+                onMouseDown={handleBuildRailResizeMouseDown}
+                title="Drag to resize generated output and manual panel"
+              />
+            )}
+            <button
+              type="button"
+              onClick={() => setBuildRailOpen(open => !open)}
+              className="build-rail-toggle"
+              title={buildRailOpen ? 'Collapse generated output and manual' : 'Open generated output and manual'}
+            >
+              {buildRailOpen ? '>' : '<'}
+            </button>
+            {buildRailOpen ? (
+              <>
+                <section className="editor-section build-output-section" style={{ flex: `0 0 ${buildOutputHeight}px` }}>
+                  <div className="section-title build-title">Generated C++ Output</div>
+                  <div className="editor-container build-code-container" style={{ padding: '16px', display: 'flex', flexDirection: 'column' }}>
+                    <GeneratedCodeViewer code={builtCode} onLoadInEditor={c => { setCode(c); setMode('analyze'); setResult(null); }} />
+                  </div>
+                </section>
+                <div
+                  className="build-output-resizer"
+                  onMouseDown={handleBuildOutputResizeMouseDown}
+                  onDoubleClick={() => setBuildOutputHeight(420)}
+                  title="Drag to resize generated code preview. Double-click to reset."
+                />
+                <BuildModeManual />
+              </>
+            ) : (
+              <div className="build-rail-collapsed-label">
+                <span>Output</span>
+                <span>Manual</span>
+              </div>
+            )}
+          </aside>
         </>)}
       </main>
 

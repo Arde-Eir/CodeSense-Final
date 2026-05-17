@@ -35,6 +35,9 @@ interface ReportEntry {
 interface QuestEntry {
   questid: string
   completedat: string | null
+  first_completed_at?: string | null
+  updatedat?: string | null
+  status?: string | null
   hintsused: number
   quests: { title: string } | { title: string }[] | null
 }
@@ -57,6 +60,15 @@ interface ActivityLogEntry {
 
 const fmtTime = (s: number): string =>
   `${String(Math.floor(s / 60)).padStart(2, '0')}:${String(s % 60).padStart(2, '0')}`
+
+const isCompletedMissionRow = (row: { first_completed_at?: string | null; status?: string | null }) =>
+  Boolean(row.first_completed_at || row.status === 'completed')
+
+const missionDoneAt = (row: { first_completed_at?: string | null; completedat?: string | null }) =>
+  row.first_completed_at ?? row.completedat ?? null
+
+const countUniqueCompletedQuests = (rows: { questid?: string | null; id?: string | null; first_completed_at?: string | null; status?: string | null }[]) =>
+  new Set(rows.filter(isCompletedMissionRow).map(row => row.questid ?? row.id)).size
 
 // ─── Achievements definition ──────────────────────────────────────────────────
 
@@ -236,17 +248,24 @@ export const ProfileSettings: React.FC = () => {
         }
       }
 
-      // Quests completed
-      const { count: qc } = await supabase.from('mission_progress').select('*', { count: 'exact', head: true })
-        .eq('userid', user.id).eq('status', 'completed')
-      setQuestsCompleted(qc ?? 0)
+      // Quests completed. first_completed_at survives retakes, so it is the
+      // durable completion signal; status='completed' remains a legacy fallback.
+      const { data: progressRows } = await supabase.from('mission_progress')
+        .select('id, questid, status, first_completed_at')
+        .eq('userid', user.id)
+      setQuestsCompleted(countUniqueCompletedQuests((progressRows ?? []) as any[]))
 
       // Recent completed quests for activity
       const { data: cq } = await supabase.from('mission_progress')
-        .select('questid, completedat, hintsused, quests(title)')
-        .eq('userid', user.id).eq('status', 'completed')
-        .order('completedat', { ascending: false }).limit(15)
-      setCompletedQuests((cq ?? []) as unknown as QuestEntry[])
+        .select('questid, status, completedat, first_completed_at, updatedat, hintsused, quests(title)')
+        .eq('userid', user.id)
+        .order('updatedat', { ascending: false }).limit(40)
+      const recentCompleted = ((cq ?? []) as unknown as QuestEntry[])
+        .filter(isCompletedMissionRow)
+        .filter(q => Boolean(missionDoneAt(q)))
+        .sort((a, b) => new Date(missionDoneAt(b)!).getTime() - new Date(missionDoneAt(a)!).getTime())
+        .slice(0, 15)
+      setCompletedQuests(recentCompleted)
 
       // Fastest quest completions
       const { data: fq } = await supabase
@@ -445,8 +464,9 @@ export const ProfileSettings: React.FC = () => {
         })),
         ...completedQuests.map(q => {
           const questTitle = Array.isArray(q.quests) ? q.quests[0]?.title : q.quests?.title
+          const completedAt = missionDoneAt(q) ?? ''
           return {
-            key: `q-${q.questid}`, date: q.completedat ?? '', icon: '⚔️',
+            key: `q-${q.questid}`, date: completedAt, icon: '⚔️',
             title: `Quest completed: ${questTitle ?? 'Unknown'}`,
             sub: q.hintsused > 0 ? `${q.hintsused} hint${q.hintsused > 1 ? 's' : ''} used` : 'No hints used 🎯',
             color: '#ffa726',

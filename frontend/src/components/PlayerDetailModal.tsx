@@ -29,20 +29,43 @@ interface PlayerRow {
 }
 
 const timeAgo = (iso: string | null | undefined): string => {
-  if (!iso) return '—'
-  const mins = Math.floor((Date.now() - new Date(iso).getTime()) / 60000)
+  const time = validActivityTime(iso)
+  if (time == null) return '—'
+  const mins = Math.max(0, Math.floor((Date.now() - time) / 60000))
   if (mins < 1)    return 'active now'
   if (mins < 60)   return `${mins}m ago`
   if (mins < 1440) return `${Math.floor(mins / 60)}h ago`
   const days = Math.floor(mins / 1440)
   if (days < 30)   return `${days}d ago`
-  return new Date(iso).toLocaleDateString([], { month: 'short', day: 'numeric' })
+  return new Date(time).toLocaleDateString([], { month: 'short', day: 'numeric' })
 }
 
 const isRecentlyActive = (iso: string | null | undefined): boolean => {
-  if (!iso) return false
-  return Math.floor((Date.now() - new Date(iso).getTime()) / 60000) < 30
+  const time = validActivityTime(iso)
+  if (time == null) return false
+  return Math.floor((Date.now() - time) / 60000) < 30
 }
+
+const validActivityTime = (iso: string | null | undefined): number | null => {
+  const raw = iso
+  if (!raw) return null
+  const time = new Date(raw).getTime()
+  if (!Number.isFinite(time)) return null
+  return time > Date.now() + 5 * 60_000 ? null : time
+}
+
+const latestActivityIso = (values: Array<string | null | undefined>): string | null => {
+  let best: number | null = null
+  for (const value of values) {
+    const time = validActivityTime(value)
+    if (time == null) continue
+    if (best == null || time > best) best = time
+  }
+  return best == null ? null : new Date(best).toISOString()
+}
+
+const countUniqueCompletedQuests = (rows: { id?: string | null; questid?: string | null; first_completed_at?: string | null; status?: string | null }[]) =>
+  new Set(rows.filter(row => row.first_completed_at || row.status === 'completed').map(row => row.questid ?? row.id)).size
 
 export const PlayerDetailModal: React.FC<{
   userId: string
@@ -76,19 +99,34 @@ export const PlayerDetailModal: React.FC<{
       // Fallback: if quests_completed column doesn't exist yet (pre-migration),
       // count from mission_progress so the UI never shows stale zeros.
       if ((data as any).quests_completed == null) {
-        const { count } = await supabase
+        const { data: progressRows } = await supabase
           .from('mission_progress')
-          .select('*', { count: 'exact', head: true })
+          .select('id, questid, status, first_completed_at')
           .eq('userid', userId)
-          .eq('status', 'completed')
         if (!cancelled) {
-          setPlayer({ ...data, quests_completed: count ?? 0 } as PlayerRow)
+          setPlayer({ ...data, quests_completed: countUniqueCompletedQuests((progressRows ?? []) as any[]) } as PlayerRow)
           setLoading(false)
         }
         return
       }
 
-      setPlayer(data as PlayerRow)
+      const [reportsRes, activityRes, progressRes] = await Promise.all([
+        supabase.from('reports').select('createdat').eq('userid', userId).order('createdat', { ascending: false }).limit(1),
+        supabase.from('activity_log').select('createdat').eq('userid', userId).order('createdat', { ascending: false }).limit(1),
+        supabase.from('mission_progress').select('updatedat, completedat, first_completed_at').eq('userid', userId).order('updatedat', { ascending: false }).limit(1),
+      ])
+      const progress = (progressRes.data ?? [])[0] as any
+      setPlayer({
+        ...data,
+        lastactive: latestActivityIso([
+          data.lastactive,
+          (reportsRes.data ?? [])[0]?.createdat,
+          (activityRes.data ?? [])[0]?.createdat,
+          progress?.updatedat,
+          progress?.first_completed_at,
+          progress?.completedat,
+        ]),
+      } as PlayerRow)
       setLoading(false)
     }
     fetchAll()

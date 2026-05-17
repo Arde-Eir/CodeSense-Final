@@ -393,7 +393,7 @@ describe('validateGraph', () => {
   });
 
   // Rule 11 — Required executable node code
-  it('emits MISSING_NODE_CODE error for executable nodes with default label and no code', () => {
+  it('emits MISSING_NODE_CODE warning for executable nodes with default label and no code', () => {
     const nodes = [
       makeNode('s', 'terminator', 'Start'),
       makeNode('p', 'process',    'Process'),  // default placeholder label
@@ -404,7 +404,25 @@ describe('validateGraph', () => {
       makeEdge('e2', 'p', 'e'),
     ];
     const result = validateGraph(nodes, edges);
-    expect(result.errors.some(w => w.code === 'MISSING_NODE_CODE')).toBe(true);
+    expect(result.errors.some(w => w.code === 'MISSING_NODE_CODE')).toBe(false);
+    expect(result.warnings.some(w => w.code === 'MISSING_NODE_CODE')).toBe(true);
+    expect(result.isValid).toBe(true);
+  });
+
+  it('allows generation when an executable node has a meaningful label but no code', () => {
+    const nodes = [
+      makeNode('s', 'terminator', 'Start'),
+      makeNode('p', 'process',    'x = 1'),
+      makeNode('e', 'terminator', 'End'),
+    ];
+    const edges = [
+      makeEdge('e1', 's', 'p'),
+      makeEdge('e2', 'p', 'e'),
+    ];
+    const result = validateGraph(nodes, edges);
+    expect(result.isValid).toBe(true);
+    expect(result.errors).toHaveLength(0);
+    expect(result.warnings.some(w => w.code === 'NODE_CODE_FROM_LABEL')).toBe(true);
   });
 
   // Happy path

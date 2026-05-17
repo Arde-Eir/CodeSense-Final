@@ -58,6 +58,17 @@ describe('composeHints', () => {
       expect(r).toHaveLength(1);
       expect(r[0].body).toBe('only-hint');
     });
+
+    it('accepts multiple per-question hints', () => {
+      const r = composeHints([all], 'mc', ['First clue', 'Second clue']);
+      expect(r.map(h => h.body)).toEqual(['First clue', 'Second clue', 'u']);
+      expect(r[1].title).toBe('Hint 2 for this question');
+    });
+
+    it('accepts rich per-question hint objects', () => {
+      const r = composeHints([], 'mc', { title: 'Watch the condition', body: 'Look for ==.', icon: '🔎' });
+      expect(r[0]).toMatchObject({ title: 'Watch the condition', body: 'Look for ==.', icon: '🔎' });
+    });
   });
 
   describe('purity', () => {

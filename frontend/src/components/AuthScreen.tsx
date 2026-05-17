@@ -165,6 +165,31 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     return () => clearInterval(pollInterval)
   }, [refreshMaintenanceMode])
 
+  useEffect(() => {
+    if (!user?.id || isGuest || impersonatingUser) return
+
+    let lastTouch = 0
+    const touch = () => {
+      const now = Date.now()
+      if (now - lastTouch < 60_000) return
+      lastTouch = now
+      DatabaseService.updateLastActive(user.id)
+    }
+
+    touch()
+    const interval = window.setInterval(touch, 120_000)
+    const onVisible = () => { if (document.visibilityState === 'visible') touch() }
+    const onFocus = () => touch()
+
+    document.addEventListener('visibilitychange', onVisible)
+    window.addEventListener('focus', onFocus)
+    return () => {
+      window.clearInterval(interval)
+      document.removeEventListener('visibilitychange', onVisible)
+      window.removeEventListener('focus', onFocus)
+    }
+  }, [user?.id, isGuest, impersonatingUser])
+
   const login = async (playerName: string, secretCode: string) => {
     const profile = await DatabaseService.login(playerName, secretCode)
     sessionStorage.removeItem('guestMode')

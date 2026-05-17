@@ -123,4 +123,76 @@ describe('generateCppFromGraph', () => {
     expect(code).toContain('cout << "alive" << endl;');
     expect(code).toContain('cout << "done" << endl;');
   });
+
+  it('turns simple English process text into C++ declarations and updates', () => {
+    const nodes = [
+      makeNode('s', 'terminator', 'Start'),
+      makeNode('p1', 'process', 'Create integer age equals 18'),
+      makeNode('p2', 'process', 'increase age by 1'),
+      makeNode('p3', 'process', 'create text full name equals Ada Lovelace'),
+      makeNode('e', 'terminator', 'End'),
+    ];
+    const edges = [
+      makeEdge('e1', 's', 'p1'),
+      makeEdge('e2', 'p1', 'p2'),
+      makeEdge('e3', 'p2', 'p3'),
+      makeEdge('e4', 'p3', 'e'),
+    ];
+
+    const code = generateCppFromGraph(nodes, edges);
+
+    expect(code).toContain('#include <string>');
+    expect(code).toContain('int age = 18;');
+    expect(code).toContain('age += 1;');
+    expect(code).toContain('string fullName = "Ada Lovelace";');
+  });
+
+  it('turns simple English input, output, and decision text into C++', () => {
+    const nodes = [
+      makeNode('s', 'terminator', 'Start'),
+      makeNode('i', 'manual_input', 'Ask for user age'),
+      makeNode('d', 'decision', 'if user age is greater than 17'),
+      makeNode('t', 'io', 'print allowed'),
+      makeNode('f', 'io', 'print too young'),
+      makeNode('e', 'terminator', 'End'),
+    ];
+    const edges = [
+      makeEdge('e1', 's', 'i'),
+      makeEdge('e2', 'i', 'd'),
+      makeEdge('e3', 'd', 't', 'true'),
+      makeEdge('e4', 'd', 'f', 'false'),
+      makeEdge('e5', 't', 'e'),
+      makeEdge('e6', 'f', 'e'),
+    ];
+
+    const code = generateCppFromGraph(nodes, edges);
+
+    expect(code).toContain('cin >> userAge;');
+    expect(code).toContain('if (userAge > 17)');
+    expect(code).toContain('cout << allowed << endl;');
+    expect(code).toContain('cout << "too young" << endl;');
+  });
+
+  it('emits complete classes and helper functions above main', () => {
+    const nodes = [
+      makeNode('s', 'terminator', 'Start'),
+      makeNode('cls', 'process', 'Student class', 'class Student {\npublic:\n    string name;\n};'),
+      makeNode('fn', 'predefined', 'Helper', 'int add(int a, int b) {\n    return a + b;\n}'),
+      makeNode('p', 'process', 'Use helper', 'int total = add(1, 2);'),
+      makeNode('e', 'terminator', 'End'),
+    ];
+    const edges = [
+      makeEdge('e1', 's', 'cls'),
+      makeEdge('e2', 'cls', 'fn'),
+      makeEdge('e3', 'fn', 'p'),
+      makeEdge('e4', 'p', 'e'),
+    ];
+
+    const code = generateCppFromGraph(nodes, edges);
+
+    expect(code).toMatch(/class Student[\s\S]+};[\s\S]+int main/);
+    expect(code).toMatch(/int add\(int a, int b\)[\s\S]+int main/);
+    expect(code).toContain('// Top-level declaration emitted above main: Student class');
+    expect(code).toContain('int total = add(1, 2);');
+  });
 });

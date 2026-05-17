@@ -1,11 +1,14 @@
 import { describe, it, expect } from 'vitest';
 import {
   computeActivityXP,
+  computeHintPenalty,
   persistedXpGained,
   isRetakeRun,
   levelXpCapForPhase,
   FIRST_COMPLETION_XP,
   RETAKE_COMPLETION_XP,
+  HINT_XP_COST,
+  HINT_PENALTY_CAP_RATIO,
   LEVEL_XP_CAP_BY_PHASE,
 } from '../retakeXp';
 
@@ -56,6 +59,47 @@ describe('computeActivityXP', () => {
       isFullCompletion: true,
       levelRemaining: 7,
     })).toBe(7);
+  });
+
+  it('subtracts the larger campaign hint cost from first completion XP', () => {
+    expect(computeActivityXP({
+      isCompleted: false,
+      isFullCompletion: true,
+      levelRemaining: 999,
+      hintsUsed: 2,
+    })).toBe(FIRST_COMPLETION_XP - (2 * HINT_XP_COST));
+  });
+
+  it('caps hint penalties at half the reward so progress remains possible', () => {
+    expect(computeActivityXP({
+      isCompleted: false,
+      isFullCompletion: true,
+      levelRemaining: 999,
+      hintsUsed: 99,
+    })).toBe(FIRST_COMPLETION_XP * HINT_PENALTY_CAP_RATIO);
+  });
+
+  it('keeps retakes from being fully erased by one hint', () => {
+    expect(computeActivityXP({
+      isCompleted: true,
+      isFullCompletion: true,
+      levelRemaining: 999,
+      hintsUsed: 1,
+    })).toBe(RETAKE_COMPLETION_XP * HINT_PENALTY_CAP_RATIO);
+  });
+});
+
+describe('computeHintPenalty', () => {
+  it('reports the base reward, applied penalty, and cap state', () => {
+    expect(computeHintPenalty({
+      isCompleted: false,
+      hintsUsed: 4,
+    })).toEqual({
+      baseReward: FIRST_COMPLETION_XP,
+      penalty: FIRST_COMPLETION_XP * HINT_PENALTY_CAP_RATIO,
+      maxPenalty: FIRST_COMPLETION_XP * HINT_PENALTY_CAP_RATIO,
+      capped: true,
+    });
   });
 });
 
