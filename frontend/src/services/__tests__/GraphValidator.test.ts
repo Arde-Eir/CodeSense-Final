@@ -425,6 +425,42 @@ describe('validateGraph', () => {
     expect(result.warnings.some(w => w.code === 'NODE_CODE_FROM_LABEL')).toBe(true);
   });
 
+  it('warns when flowchart nodes use raw C++ instead of pseudocode style', () => {
+    const nodes = [
+      makeNode('s', 'terminator', 'Start'),
+      makeNode('p', 'process', 'Update score', { code: 'score = score + 10;' }),
+      makeNode('e', 'terminator', 'End'),
+    ];
+    const edges = [
+      makeEdge('e1', 's', 'p'),
+      makeEdge('e2', 'p', 'e'),
+    ];
+
+    const result = validateGraph(nodes, edges);
+
+    expect(result.isValid).toBe(true);
+    expect(result.warnings.some(w => w.code === 'PSEUDOCODE_STYLE_GUIDANCE')).toBe(true);
+  });
+
+  it('warns when node wording does not match the flowchart shape', () => {
+    const nodes = [
+      makeNode('s', 'terminator', 'Start'),
+      makeNode('i', 'manual_input', 'Name', { code: 'name' }),
+      makeNode('o', 'io', 'Result', { code: 'result' }),
+      makeNode('e', 'terminator', 'End'),
+    ];
+    const edges = [
+      makeEdge('e1', 's', 'i'),
+      makeEdge('e2', 'i', 'o'),
+      makeEdge('e3', 'o', 'e'),
+    ];
+
+    const result = validateGraph(nodes, edges);
+
+    expect(result.isValid).toBe(true);
+    expect(result.warnings.some(w => w.code === 'PSEUDOCODE_STYLE_GUIDANCE')).toBe(true);
+  });
+
   // Happy path
   it('returns isValid true and no errors for a correct fully-labelled graph', () => {
     const nodes = [

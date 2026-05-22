@@ -173,6 +173,61 @@ describe('generateCppFromGraph', () => {
     expect(code).toContain('cout << "too young" << endl;');
   });
 
+  it('accepts more conversational English in flowchart nodes', () => {
+    const nodes = [
+      makeNode('s', 'terminator', 'Start'),
+      makeNode('p1', 'process', 'Let score be zero'),
+      makeNode('p2', 'process', 'store 75 in passing score'),
+      makeNode('i', 'manual_input', 'Ask for name', 'ask the user for their name'),
+      makeNode('d', 'decision', 'repeat while score is below passing score'),
+      makeNode('t', 'io', 'Display hello', 'display hello world'),
+      makeNode('u', 'process', 'Add points', 'set score to score plus 10'),
+      makeNode('e', 'terminator', 'End'),
+    ];
+    const edges = [
+      makeEdge('e1', 's', 'p1'),
+      makeEdge('e2', 'p1', 'p2'),
+      makeEdge('e3', 'p2', 'i'),
+      makeEdge('e4', 'i', 'd'),
+      makeEdge('e5', 'd', 't', 'true'),
+      makeEdge('e6', 't', 'u'),
+      makeEdge('e7', 'u', 'd'),
+      makeEdge('e8', 'd', 'e', 'false'),
+    ];
+
+    const code = generateCppFromGraph(nodes, edges);
+
+    expect(code).toContain('int score = 0;');
+    expect(code).toContain('passingScore = 75;');
+    expect(code).toContain('cin >> name;');
+    expect(code).toContain('while (score < passingScore)');
+    expect(code).toContain('cout << "hello world" << endl;');
+    expect(code).toContain('score = score + 10;');
+  });
+
+  it('generates friendly snippets for lists, helper calls, and wait instructions', () => {
+    const nodes = [
+      makeNode('s', 'terminator', 'Start'),
+      makeNode('db', 'database', 'Create scores', 'create a list of scores'),
+      makeNode('fn', 'predefined', 'Calculate', 'call calculate result with score and passing score'),
+      makeNode('w', 'delay', 'Wait', 'wait two seconds'),
+      makeNode('e', 'terminator', 'End'),
+    ];
+    const edges = [
+      makeEdge('e1', 's', 'db'),
+      makeEdge('e2', 'db', 'fn'),
+      makeEdge('e3', 'fn', 'w'),
+      makeEdge('e4', 'w', 'e'),
+    ];
+
+    const code = generateCppFromGraph(nodes, edges);
+
+    expect(code).toContain('#include <vector>');
+    expect(code).toContain('vector<int> scores;');
+    expect(code).toContain('calculateResult(score, passingScore);');
+    expect(code).toContain('sleep(2);');
+  });
+
   it('emits complete classes and helper functions above main', () => {
     const nodes = [
       makeNode('s', 'terminator', 'Start'),

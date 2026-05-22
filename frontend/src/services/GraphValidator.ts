@@ -82,6 +82,73 @@ const LINEAR_NODE_TYPES = new Set([
   'off_page_connector',
 ]);
 
+const PSEUDOCODE_NODE_TYPES = new Set([
+  'process',
+  'io',
+  'manual_input',
+  'predefined',
+  'document',
+  'delay',
+  'database',
+]);
+
+function getInstruction(node: Node): string {
+  return str(node.data?.code) || str(node.data?.label);
+}
+
+function looksLikeRawCpp(value: string): boolean {
+  return /[;{}]|<<|>>|\b(cout|cin|printf|scanf|return|int|float|double|char|bool|string|vector|while|for)\b/.test(value);
+}
+
+function startsLikePseudocode(value: string, starters: RegExp): boolean {
+  const cleaned = value.trim().replace(/^\s*(?:then|next|finally)\s+/i, '');
+  return starters.test(cleaned);
+}
+
+function pseudocodeStyleIssue(node: Node): string | null {
+  const type = String(node.type ?? '');
+  if (!PSEUDOCODE_NODE_TYPES.has(type)) return null;
+
+  const instruction = getInstruction(node);
+  if (!instruction || EXECUTABLE_PLACEHOLDERS.has(instruction.toLowerCase())) return null;
+  if (looksLikeRawCpp(instruction)) {
+    return 'Use pseudocode-style wording inside flowchart nodes instead of raw C++ syntax. Example: "set score to score plus 10" instead of "score = score + 10;".';
+  }
+
+  switch (type) {
+    case 'manual_input':
+      return startsLikePseudocode(instruction, /^(ask|read|get|input|enter)\b/i)
+        ? null
+        : 'Input shapes should read like an input step. Example: "ask the user for their name".';
+    case 'io':
+      return startsLikePseudocode(instruction, /^(display|show|print|output|tell|write)\b/i)
+        ? null
+        : 'Output shapes should read like an output step. Example: "display the result".';
+    case 'decision':
+      return null;
+    case 'predefined':
+      return startsLikePseudocode(instruction, /^(call|run|use|execute)\b/i)
+        ? null
+        : 'Function-call shapes should read like a call step. Example: "call calculate result".';
+    case 'delay':
+      return startsLikePseudocode(instruction, /^(wait|pause|delay)\b/i)
+        ? null
+        : 'Delay shapes should read like a wait step. Example: "wait 2 seconds".';
+    case 'document':
+      return startsLikePseudocode(instruction, /^(write|save|open|read|create|load)\b/i)
+        ? null
+        : 'Document shapes should describe file/report work. Example: "write report.txt".';
+    case 'database':
+      return startsLikePseudocode(instruction, /^(create|store|save|load|read|update|set up|make)\b/i)
+        ? null
+        : 'Data-store shapes should describe stored data. Example: "create a list of scores".';
+    default:
+      return startsLikePseudocode(instruction, /^(set|let|create|declare|make|store|save|calculate|compute|find|increase|decrease|add|subtract|update|change|increment|decrement)\b/i)
+        ? null
+        : 'Process shapes should describe one algorithm step. Example: "set total to price plus tax".';
+  }
+}
+
 /** BFS from startId, returns all reachable node ids. */
 function reachableFrom(startId: string, edges: Edge[]): Set<string> {
   const adj = new Map<string, string[]>();
@@ -389,7 +456,21 @@ export function validateGraph(nodes: Node[], edges: Edge[]): ValidationResult {
     );
   }
 
-  // ── 11. Placeholder nodes with no real code ───────────────────────────────
+  // ── 11. Pseudocode-style guidance ─────────────────────────────────────────
+  const pseudocodeIssues = nodes
+    .map(node => ({ node, message: pseudocodeStyleIssue(node) }))
+    .filter((entry): entry is { node: Node; message: string } => !!entry.message);
+
+  if (pseudocodeIssues.length > 0) {
+    push(
+      'warning',
+      'PSEUDOCODE_STYLE_GUIDANCE',
+      `${pseudocodeIssues.length} node(s) should be rewritten in pseudocode style. ${pseudocodeIssues[0].message}`,
+      { nodeIds: pseudocodeIssues.map(entry => entry.node.id) },
+    );
+  }
+
+  // ── 12. Placeholder nodes with no real code ───────────────────────────────
   const REQUIRED_CODE_NODE_TYPES = new Set(['process', 'io', 'manual_input', 'predefined',
                                             'delay', 'database', 'document']);
   const missingCode = nodes.filter(n => {
@@ -402,13 +483,13 @@ export function validateGraph(nodes: Node[], edges: Edge[]): ValidationResult {
 
     if (placeholders.length > 0) {
       push('warning', 'MISSING_NODE_CODE',
-        `${placeholders.length} executable node(s) still use a placeholder and have no C++ code. The generator will emit a safe comment or default statement; double-click them for better output.`,
+        `${placeholders.length} executable node(s) still use a placeholder and have no pseudocode step. Double-click them and write a simple instruction, for example "set score to zero".`,
         { nodeIds: placeholders.map(n => n.id) });
     }
 
     if (labelled.length > 0) {
       push('warning', 'NODE_CODE_FROM_LABEL',
-        `${labelled.length} executable node(s) have no code field, so generation will use their labels as the source text. Add explicit C++ code if the label is only descriptive.`,
+        `${labelled.length} executable node(s) have no separate pseudocode step, so generation will use their labels as the instruction. Add a clear pseudocode step if the label is only a title.`,
         { nodeIds: labelled.map(n => n.id) });
     }
   }

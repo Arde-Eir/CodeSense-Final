@@ -63,7 +63,6 @@ const CPP_INCLUDES: Record<string, string> = {
   'array':         'array',
   'map':           'map',
   'unordered_map': 'unordered_map',
-  'set':           'set',
   'unordered_set': 'unordered_set',
   'stack':         'stack',
   'queue':         'queue',
@@ -148,6 +147,21 @@ function toIdentifier(value: string, fallback = 'value'): string {
   return isValidIdentifier(camel) ? camel : fallback;
 }
 
+function cleanHumanTarget(value: string): string {
+  return value
+    .trim()
+    .replace(/\?+$/g, '')
+    .replace(/^(?:the|a|an)\s+/i, '')
+    .replace(/^(?:their|his|her|my|your|its|the)\s+/i, '')
+    .replace(/^(?:value|variable|number|text|string|answer)\s+(?:of|for)\s+/i, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function normalizeVariableName(value: string, fallback = 'value'): string {
+  return toIdentifier(cleanHumanTarget(value), fallback);
+}
+
 function normalizeTypeWord(value: string): string | null {
   const lower = value.toLowerCase().trim();
   const typeMap: Record<string, string> = {
@@ -187,15 +201,31 @@ function quoteIfPlainText(value: string): string {
 function normalizeEnglishExpression(value: string): string {
   return value
     .trim()
+    .replace(/\bzero\b/gi, '0')
+    .replace(/\bone\b/gi, '1')
+    .replace(/\btwo\b/gi, '2')
+    .replace(/\bthree\b/gi, '3')
+    .replace(/\bfour\b/gi, '4')
+    .replace(/\bfive\b/gi, '5')
+    .replace(/\bsix\b/gi, '6')
+    .replace(/\bseven\b/gi, '7')
+    .replace(/\beight\b/gi, '8')
+    .replace(/\bnine\b/gi, '9')
+    .replace(/\bten\b/gi, '10')
     .replace(/\bis equal to\b/gi, '==')
     .replace(/\bequals\b/gi, '==')
+    .replace(/\bis\b(?=\s+(?:not|greater|less|above|below|at least|at most))/gi, '')
     .replace(/\bis not equal to\b/gi, '!=')
     .replace(/\bnot equal to\b/gi, '!=')
     .replace(/\bis greater than or equal to\b/gi, '>=')
     .replace(/\bgreater than or equal to\b/gi, '>=')
+    .replace(/\bis greater or equal to\b/gi, '>=')
+    .replace(/\bgreater or equal to\b/gi, '>=')
     .replace(/\bat least\b/gi, '>=')
     .replace(/\bis less than or equal to\b/gi, '<=')
     .replace(/\bless than or equal to\b/gi, '<=')
+    .replace(/\bis less or equal to\b/gi, '<=')
+    .replace(/\bless or equal to\b/gi, '<=')
     .replace(/\bat most\b/gi, '<=')
     .replace(/\bis greater than\b/gi, '>')
     .replace(/\bgreater than\b/gi, '>')
@@ -203,6 +233,8 @@ function normalizeEnglishExpression(value: string): string {
     .replace(/\bless than\b/gi, '<')
     .replace(/\bis above\b/gi, '>')
     .replace(/\bis below\b/gi, '<')
+    .replace(/\babove\b/gi, '>')
+    .replace(/\bbelow\b/gi, '<')
     .replace(/\band\b/gi, '&&')
     .replace(/\bor\b/gi, '||')
     .replace(/\bplus\b/gi, '+')
@@ -210,6 +242,7 @@ function normalizeEnglishExpression(value: string): string {
     .replace(/\btimes\b/gi, '*')
     .replace(/\bmultiplied by\b/gi, '*')
     .replace(/\bdivided by\b/gi, '/')
+    .replace(/\bmodulo\b|\bmod\b/gi, '%')
     .replace(/\s+/g, ' ')
     .trim();
 }
@@ -219,7 +252,7 @@ function normalizeConditionOperand(value: string): string {
   if (!trimmed || /^(true|false)$/i.test(trimmed) || /^-?\d+(\.\d+)?$/.test(trimmed)) return trimmed;
   if (/^["'].*["']$/.test(trimmed)) return trimmed;
   if (/^[a-zA-Z_][a-zA-Z0-9_]*$/.test(trimmed)) return trimmed;
-  return toIdentifier(trimmed);
+  return normalizeVariableName(trimmed);
 }
 
 function normalizeConditionOperands(value: string): string {
@@ -233,7 +266,7 @@ function normalizeConditionOperands(value: string): string {
 function normalizeEnglishCondition(value: string): string | null {
   const cleaned = value
     .trim()
-    .replace(/^(if|when|while|check if|decide if)\s+/i, '')
+    .replace(/^(if|when|while|repeat while|loop while|as long as|check if|decide if)\s+/i, '')
     .replace(/\?+$/g, '');
   const normalized = normalizeConditionOperands(normalizeEnglishExpression(cleaned))
     .replace(/\s*(&&|\|\|)\s*/g, ' $1 ');
@@ -246,53 +279,71 @@ function normalizeHumanStatement(text: string, nodeType = 'process'): string | n
 
   const lower = source.toLowerCase();
 
-  const declaration = source.match(/^(?:create|declare|make|initialize|init|set up)\s+(?:a\s+|an\s+|the\s+)?(?:(integer|int|number|whole|decimal|double|float|text|string|word|sentence|character|char|boolean|bool)\s+)?(?:variable\s+)?(?:named\s+|called\s+)?(.+?)(?:\s+(?:equal to|equals|with value|as|to)\s+(.+))?$/i);
+  const listDeclaration = source.match(/^(?:create|declare|make|set up)\s+(?:a\s+|an\s+|the\s+)?(?:list|array|collection)\s+(?:of\s+)?(.+)$/i);
+  if (listDeclaration) {
+    const name = normalizeVariableName(listDeclaration[1].replace(/s$/i, ''), 'items');
+    const pluralName = name.endsWith('s') ? name : `${name}s`;
+    return `vector<int> ${pluralName};`;
+  }
+
+  const declaration = source.match(/^(?:create|declare|make|initialize|init|set up|let)\s+(?:a\s+|an\s+|the\s+)?(?:(integer|int|number|whole|decimal|double|float|text|string|word|sentence|character|char|boolean|bool)\s+)?(?:variable\s+)?(?:named\s+|called\s+)?(.+?)(?:\s+(?:equal to|equals|with value|as|to|be)\s+(.+))?$/i);
   if (declaration) {
     const explicitType = normalizeTypeWord(declaration[1] ?? '');
-    const name = toIdentifier(declaration[2]);
+    const name = normalizeVariableName(declaration[2]);
     const rawValue = declaration[3]?.trim();
+    const normalizedValue = rawValue ? normalizeEnglishExpression(rawValue) : '';
     const inferredType = rawValue
-      ? /^["'].*["']$/.test(rawValue) || /\s/.test(rawValue) && !/^[a-zA-Z_][a-zA-Z0-9_]*$/.test(rawValue)
+      ? /^["'].*["']$/.test(normalizedValue) || /\s/.test(normalizedValue) && !/^[a-zA-Z_][a-zA-Z0-9_]*$/.test(normalizedValue)
         ? 'string'
-        : /^(true|false)$/i.test(rawValue)
+        : /^(true|false)$/i.test(normalizedValue)
         ? 'bool'
-        : /^-?\d+$/.test(rawValue)
+        : /^-?\d+$/.test(normalizedValue)
         ? 'int'
-        : /^-?\d+\.\d+$/.test(rawValue)
+        : /^-?\d+\.\d+$/.test(normalizedValue)
         ? 'double'
         : 'auto'
       : 'int';
     const type = explicitType ?? inferredType;
-    const value = rawValue ? ` = ${quoteIfPlainText(normalizeEnglishExpression(rawValue))}` : '';
+    const value = rawValue ? ` = ${quoteIfPlainText(normalizedValue)}` : '';
     return `${type} ${name}${value};`;
   }
 
-  const assignment = source.match(/^(?:set|change|update|put)\s+(.+?)\s+(?:to|as|equal to|equals)\s+(.+)$/i);
+  const assignment = source.match(/^(?:set|change|update|put|make)\s+(.+?)\s+(?:to|as|equal to|equals|be)\s+(.+)$/i);
   if (assignment) {
-    return `${toIdentifier(assignment[1])} = ${quoteIfPlainText(normalizeEnglishExpression(assignment[2]))};`;
+    return `${normalizeVariableName(assignment[1])} = ${quoteIfPlainText(normalizeEnglishExpression(assignment[2]))};`;
+  }
+
+  const storeIn = source.match(/^(?:store|save|put)\s+(.+?)\s+in(?:to)?\s+(.+)$/i);
+  if (storeIn) {
+    return `${normalizeVariableName(storeIn[2])} = ${quoteIfPlainText(normalizeEnglishExpression(storeIn[1]))};`;
+  }
+
+  const calculate = source.match(/^(?:calculate|compute|find)\s+(.+?)\s+(?:as|by|from|with)\s+(.+)$/i);
+  if (calculate) {
+    return `${normalizeVariableName(calculate[1])} = ${quoteIfPlainText(normalizeEnglishExpression(calculate[2]))};`;
   }
 
   const addTo = source.match(/^(?:add|increase)\s+(.+?)\s+by\s+(.+)$/i);
-  if (addTo) return `${toIdentifier(addTo[1])} += ${normalizeEnglishExpression(addTo[2])};`;
+  if (addTo) return `${normalizeVariableName(addTo[1])} += ${normalizeEnglishExpression(addTo[2])};`;
 
   const subtractFrom = source.match(/^(?:subtract|decrease|reduce)\s+(.+?)\s+by\s+(.+)$/i);
-  if (subtractFrom) return `${toIdentifier(subtractFrom[1])} -= ${normalizeEnglishExpression(subtractFrom[2])};`;
+  if (subtractFrom) return `${normalizeVariableName(subtractFrom[1])} -= ${normalizeEnglishExpression(subtractFrom[2])};`;
 
   const increment = source.match(/^(?:increment|increase)\s+(.+)$/i);
-  if (increment) return `${toIdentifier(increment[1])}++;`;
+  if (increment) return `${normalizeVariableName(increment[1])}++;`;
 
   const decrement = source.match(/^(?:decrement|decrease)\s+(.+)$/i);
-  if (decrement) return `${toIdentifier(decrement[1])}--;`;
+  if (decrement) return `${normalizeVariableName(decrement[1])}--;`;
 
-  const inputMatch = source.match(/^(?:ask for|get|read|input|enter)\s+(.+)$/i);
+  const inputMatch = source.match(/^(?:ask(?:\s+(?:the\s+)?(?:user|student|player|customer|person))?\s+for|get|read|input|enter)\s+(.+)$/i);
   if (inputMatch || nodeType === 'manual_input') {
     const target = inputMatch ? inputMatch[1] : source;
-    return `cin >> ${toIdentifier(target)};`;
+    return `cin >> ${normalizeVariableName(target)};`;
   }
 
-  const output = source.match(/^(?:print|show|display|output|write)\s+(.+)$/i);
+  const output = source.match(/^(?:print|show|display|output|write|tell(?:\s+(?:the\s+)?(?:user|student|player|customer|person))?)\s+(.+)$/i);
   if (output || nodeType === 'io') {
-    const target = output ? output[1] : source;
+    const target = cleanHumanTarget(output ? output[1] : source).replace(/^(?:message|text)\s+/i, '');
     return `cout << ${quoteIfPlainText(normalizeEnglishExpression(target))} << endl;`;
   }
 
@@ -513,6 +564,15 @@ function emitPredefined(label: string, code: string): string {
     return `// Call: ${l}`;
   }
 
+  const humanCall = c.match(/^(?:call|run|use|execute)\s+(.+?)(?:\s+with\s+(.+))?$/i);
+  if (humanCall) {
+    const fnName = normalizeVariableName(humanCall[1], 'helper');
+    const args = humanCall[2]
+      ? humanCall[2].split(/\s*(?:,|and)\s*/).map(arg => normalizeVariableName(arg)).join(', ')
+      : '';
+    return `${fnName}(${args});`;
+  }
+
   // Already looks like a function call
   if (/\w+\s*\(/.test(c)) return normalizeStatement(c);
 
@@ -548,12 +608,12 @@ function emitDocument(label: string, code: string): string {
 /** delay node → grammar ExpressionStatement (sleep / pause) */
 function emitDelay(label: string, code: string): string {
   const c = code.trim();
-  const l = label.toLowerCase();
+  const source = (c || label).toLowerCase();
 
   if (!c) {
     // Try to extract a duration from the label
-    const msMatch = l.match(/(\d+)\s*ms/);
-    const sMatch  = l.match(/(\d+)\s*s/);
+    const msMatch = source.match(/(\d+)\s*(?:ms|millisecond|milliseconds)/);
+    const sMatch  = source.match(/(\d+)\s*(?:s|sec|second|seconds)/);
     if (msMatch) return `sleep(${msMatch[1]});  // ${msMatch[1]}ms delay`;
     if (sMatch)  return `sleep(${sMatch[1]});`;
     return `sleep(1);  // Delay / Wait`;
@@ -562,6 +622,9 @@ function emitDelay(label: string, code: string): string {
   if (c.includes('sleep') || c.includes('usleep') || c.includes('this_thread')) {
     return normalizeStatement(c);
   }
+
+  const naturalDelay = normalizeEnglishExpression(c).match(/(?:wait|pause|delay)\s+(\d+)\s*(?:s|sec|second|seconds)?/i);
+  if (naturalDelay) return `sleep(${naturalDelay[1]});`;
 
   // Bare number → treat as seconds
   if (/^\d+$/.test(c)) return `sleep(${c});`;

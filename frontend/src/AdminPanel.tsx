@@ -12,6 +12,7 @@ import {
   loadHintsForEdit, serializeHints, HINT_ACTIVITY_OPTIONS,
   type HintFormRow,
 } from './admin/adminHelpers'
+import { extractTextFromPdf, generateQuestDraftFromText } from './admin/questAutoGenerator'
 import { generateAutoHints } from './campaign/generateAutoHints'
 import type { ActivityTab, Quest } from './types/campaign'
 
@@ -400,6 +401,8 @@ export const AdminPanel: React.FC = () => {
   const [questStatusFilter, setQuestStatusFilter] = useState<'all' | 'active' | 'inactive'>('all')
   const [fixingPop,      setFixingPop]      = useState(false)
   const [fixPopResult,   setFixPopResult]   = useState<string | null>(null)
+  const [autoQuestLoading, setAutoQuestLoading] = useState(false)
+  const [autoQuestResult, setAutoQuestResult] = useState<string | null>(null)
   const qSet = (patch: Partial<QuestFormState>) => setQuestForm(p => ({ ...p, ...patch }))
 
   const addObjectivesFromDraft = (replace = false) => {
@@ -452,6 +455,50 @@ export const AdminPanel: React.FC = () => {
     qSet({ hints: replace ? rows : [...questForm.hints, ...rows] })
     const skipped = emptyTabs.length ? ` Skipped empty: ${emptyTabs.map(tabLabel).join(', ')}.` : ''
     showToast(`${replace ? 'Generated' : 'Added'} ${rows.length} editable hints for ${tabs.map(tabLabel).join(', ')}.${skipped}`, 'success')
+  }
+
+  const generateQuestFromPdf = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0]
+    event.target.value = ''
+    if (!file) return
+    if (file.type !== 'application/pdf' && !file.name.toLowerCase().endsWith('.pdf')) {
+      showToast('Please upload a PDF file', 'error')
+      return
+    }
+
+    setAutoQuestLoading(true)
+    setAutoQuestResult(null)
+    try {
+      const text = await extractTextFromPdf(file)
+      if (text.trim().length < 120) {
+        throw new Error('Could not extract enough readable text from this PDF.')
+      }
+
+      const draft = generateQuestDraftFromText(text, file.name)
+      setQuestForm(prev => ({
+        ...defaultQF(),
+        ...draft,
+        level: prev.level,
+        difficulty: prev.difficulty,
+        basexp: prev.basexp,
+        requiredxp: prev.requiredxp,
+        sortorder: prev.sortorder,
+        isactive: prev.isactive,
+        game_items: [],
+        drop_zones: [],
+      }))
+      setReplaceTarget('')
+      setAutoQuestResult(
+        `Generated ${draft.theory_sections.length} theory section(s), ${draft.objectives.length} objective(s), ${draft.mc_questions.length} quiz question(s), ${draft.drag_problems[0]?.items.length ?? 0} drag match(es), ${draft.ordering_problems[0]?.items.length ?? 0} ordering item(s), and ${draft.code_fill_items.length} code-fill item(s).`
+      )
+      showToast('PDF quest draft generated. Review it, then save.', 'success')
+    } catch (err: any) {
+      const message = err?.message ?? 'PDF quest generation failed'
+      setAutoQuestResult(message)
+      showToast(message, 'error')
+    } finally {
+      setAutoQuestLoading(false)
+    }
   }
 
   const managedQuests = useMemo(() => {
@@ -1564,6 +1611,38 @@ export const AdminPanel: React.FC = () => {
                     <div className="row">
                       {/* ── Left: config ── */}
                       <div className="col-md-5">
+
+                        {/* Automated PDF generator */}
+                        <div className="card mb-3">
+                          <div className="card-header">
+                            <div>
+                              <h3 className="card-title mb-1">Quest Automated Generated</h3>
+                              <div className="text-muted" style={{ fontSize: '12px' }}>Upload learning material and fill the quest builder automatically.</div>
+                            </div>
+                          </div>
+                          <div className="card-body">
+                            <label className="form-label">PDF Learning Material</label>
+                            <input
+                              type="file"
+                              className="form-control"
+                              accept="application/pdf,.pdf"
+                              disabled={autoQuestLoading}
+                              onChange={generateQuestFromPdf}
+                            />
+                            <div className="d-flex align-items-center gap-2 mt-2 flex-wrap">
+                              <span className="text-muted" style={{ fontSize: '11px' }}>
+                                {autoQuestLoading
+                                  ? 'Reading PDF and generating editable quest content...'
+                                  : 'Generated content replaces the current draft, but keeps level, XP, sort order, and active status.'}
+                              </span>
+                            </div>
+                            {autoQuestResult && (
+                              <div className={`alert ${autoQuestResult.toLowerCase().includes('failed') || autoQuestResult.toLowerCase().includes('could not') ? 'alert-danger' : 'alert-success'} py-2 mt-2 mb-0`} style={{ fontSize: '12px' }}>
+                                {autoQuestResult}
+                              </div>
+                            )}
+                          </div>
+                        </div>
 
                         {/* Basic Info */}
                         <div className="card mb-3">

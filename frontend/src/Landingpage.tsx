@@ -1,24 +1,15 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from './components/AuthScreen';
-import { supabase } from './services/supabase';
 
 export const LandingPage: React.FC = () => {
   const navigate = useNavigate();
   const { isAuthenticated } = useAuth();
-  const [playerCount, setPlayerCount] = useState<number | null>(null);
 
   // Authenticated users who land here (e.g. via the "About" button) go home
   useEffect(() => {
     if (isAuthenticated) navigate('/home', { replace: true });
   }, [isAuthenticated, navigate]);
-
-  useEffect(() => {
-    supabase
-      .from('users')
-      .select('id', { count: 'exact', head: true })
-      .then(({ count }) => setPlayerCount(count ?? 0));
-  }, []);
 
   // Override layout.css overflow:hidden so page can scroll
   useEffect(() => {
@@ -198,12 +189,6 @@ export const LandingPage: React.FC = () => {
 
           {/* Live stats bar */}
           <div className="stat-bar">
-            <div className="stat-item">
-              <span className="stat-value">
-                {playerCount === null ? '—' : playerCount.toLocaleString()}
-              </span>
-              <span className="stat-label">Players</span>
-            </div>
             <div className="stat-item">
               <span className="stat-value">4</span>
               <span className="stat-label">Patch</span>

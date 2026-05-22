@@ -113,40 +113,41 @@ const EDITOR_TITLE: Record<string, string> = {
 };
 
 const CODE_PLACEHOLDER: Record<string, string> = {
-  process:            'e.g.  create integer age equals 18',
-  decision:           'e.g.  if age is greater than 17',
-  io:                 'e.g.  print score',
-  predefined:         'e.g.  calculateDamage(hp, atk);',
+  process:            'e.g.  let score be zero',
+  decision:           'e.g.  repeat while score is below 75',
+  io:                 'e.g.  display hello world',
+  predefined:         'e.g.  call calculate result',
   connector:          '',
   off_page_connector: '',
-  document:           'e.g.  label or filename',
-  manual_input:       'e.g.  ask for name',
-  delay:              'e.g.  sleep(1000);',
-  database:           'e.g.  create integer score equals 0',
+  document:           'e.g.  write report.txt',
+  manual_input:       'e.g.  ask the user for their name',
+  delay:              'e.g.  wait 2 seconds',
+  database:           'e.g.  create a list of scores',
   terminator:         '',
   junction:           '',
 };
 
 const NODE_TEMPLATES: Record<string, { label: string; code: string }[]> = {
   process: [
-    { label: 'Create age', code: 'create integer age equals 18' },
-    { label: 'Update score', code: 'set score to 100' },
-    { label: 'Increment counter', code: 'increase counter by 1' },
+    { label: 'Set score', code: 'let score be zero' },
+    { label: 'Update score', code: 'set score to score plus 10' },
+    { label: 'Count one more', code: 'increase counter by one' },
+    { label: 'Store answer', code: 'store 75 in passing score' },
     { label: 'Create class', code: 'class Student {\npublic:\n    string name;\n    int age;\n};' },
   ],
   decision: [
     { label: 'Age is adult', code: 'if age is greater than 17' },
-    { label: 'HP remains', code: 'if hp is greater than 0' },
-    { label: 'Passing score', code: 'if score is greater than or equal to passingScore' },
+    { label: 'Keep looping', code: 'repeat while score is below 75' },
+    { label: 'Passing score', code: 'if score is at least passing score' },
   ],
   io: [
-    { label: 'Print value', code: 'print value' },
-    { label: 'Print message', code: 'print Done' },
-    { label: 'Print result', code: 'print result' },
+    { label: 'Display value', code: 'display the value of score' },
+    { label: 'Display message', code: 'display hello world' },
+    { label: 'Show result', code: 'show the result' },
   ],
   manual_input: [
-    { label: 'Read value', code: 'ask for value' },
-    { label: 'Read name', code: 'ask for name' },
+    { label: 'Ask name', code: 'ask the user for their name' },
+    { label: 'Ask age', code: 'ask the user for their age' },
   ],
   predefined: [
     { label: 'Call calculate', code: 'calculateResult()' },
@@ -1064,7 +1065,7 @@ const GenerateCodePanel: React.FC<{
 
           {(!showValidation || !hasIssues) && !isDirty && (
             <div style={{ fontSize: 9, color: '#484f58', lineHeight: 1.6, padding: '5px 8px', background: 'rgba(168,85,247,0.06)', borderRadius: 6, border: '1px solid rgba(168,85,247,0.2)' }}>
-              Build your flowchart → label decision edges{' '}
+              Build with pseudocode steps → label decision edges{' '}
               <strong style={{ color: '#4caf50' }}>true</strong> /{' '}
               <strong style={{ color: '#ff6b6b' }}>false</strong>{' '}
               → click Generate
@@ -1243,10 +1244,10 @@ const NodeEditor: React.FC<{
             <div>
               <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, marginBottom: 7 }}>
                 <label style={{ fontSize: 10, fontWeight: 700, color: '#6e7681', textTransform: 'uppercase', letterSpacing: '0.8px', fontFamily: "'IBM Plex Mono', monospace" }}>
-                  C++ Code
+                  Pseudocode step
                 </label>
                 <span style={{ fontSize: 10, color: '#3d444d', fontFamily: "'IBM Plex Mono', monospace" }}>
-                  — written into the generated output
+                  — one simple algorithm instruction
                 </span>
               </div>
               <textarea
@@ -1968,6 +1969,7 @@ const FlowGraphInner: React.FC<Props> = ({
         edgesFocusable={isBuildMode && !isLocked}
         panOnDrag={!isLocked}
         panOnScroll={false}
+        panActivationKeyCode={null}
         selectionOnDrag={isBuildMode && !isLocked}
         selectionKeyCode={null}
         multiSelectionKeyCode="Shift"
