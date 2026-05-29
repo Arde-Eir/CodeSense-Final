@@ -395,6 +395,7 @@ const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
     if      (msg === 'USERNAME_TAKEN')          setErrors({ username: 'This player name is already taken.' });
     else if (msg === 'EMAIL_TAKEN')             setErrors({ email: 'An account with this email already exists.' });
     else if (msg === 'EMAIL_ORPHANED')           setErrors({ email: 'This email is already registered. If this is your account, try logging in instead.' });
+    else if (msg === 'PROFILE_SETUP_BLOCKED')   setErrors({ submit: 'Account auth was created, but profile setup is blocked by database security rules. Please apply the signup RLS fix in Supabase.' });
     else if (msg === 'SERVER_ERROR')            setErrors({ submit: 'A server error occurred. Please try again in a moment.' });
     else {
       setErrors({ submit: msg || 'An unexpected error occurred. Please try again.' });

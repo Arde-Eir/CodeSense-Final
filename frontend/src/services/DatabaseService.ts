@@ -78,6 +78,7 @@ export const DatabaseService = {
         options: {
           data: {
             playername: playerName,
+            user_type: userType,
             // charactertype omitted: trigger enum cast fails; set via update after auth succeeds
           },
         },
@@ -177,6 +178,9 @@ export const DatabaseService = {
         if (msg.includes('database error saving new user') || msg.includes('unexpected_failure')) {
           throw new Error('SERVER_ERROR')
         }
+        if (isProfilePolicyError(error)) {
+          throw new Error('PROFILE_SETUP_BLOCKED')
+        }
         throw new Error(error.message)
       }
 
@@ -234,7 +238,10 @@ export const DatabaseService = {
               throw new Error('USERNAME_TAKEN')
             }
           } else {
-            throw new Error(insertErr.message)
+            if (isProfilePolicyError(insertErr)) {
+              throw new Error('PROFILE_SETUP_BLOCKED')
+            }
+            throw new Error('SERVER_ERROR')
           }
         } else {
           profile = inserted
@@ -477,4 +484,14 @@ function mapProfile(profile: any): ExplorerProfile {
     createdAt:     new Date(profile.createdat),
     lastActive:    new Date(profile.lastactive),
   } as ExplorerProfile
+}
+
+function isProfilePolicyError(error: any): boolean {
+  const msg = String(error?.message ?? '').toLowerCase()
+  return (
+    error?.code === '42501' ||
+    msg.includes('row-level security') ||
+    msg.includes('violates row-level security policy') ||
+    msg.includes('permission denied')
+  )
 }
