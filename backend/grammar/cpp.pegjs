@@ -699,6 +699,7 @@ BaseType
   / "unsigned" __ "short"                 !IdentChar { return "unsigned short"; }
   / "unsigned" __ "char"                  !IdentChar { return "unsigned char"; }
   / name:("int" / "float" / "double" / "char" / "bool" / "void" / "string"
+     / "ifstream" / "ofstream" / "fstream"
      / "auto" / "typename" / "class" / "struct" / "enum"
      / "long" / "short" / "size_t" / "ptrdiff_t") !IdentChar { return name; }
 

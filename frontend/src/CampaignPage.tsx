@@ -81,6 +81,7 @@ export const CampaignPage: React.FC = () => {
 
   const [visible,   setVisible]   = useState(false);
   const [progress,  setProgress]  = useState<Record<Phase, PhaseProgress>>(EMPTY_PROGRESS);
+  const [progressLoaded, setProgressLoaded] = useState(false);
   const [levelInfo, setLevelInfo] = useState<Record<string, LevelInfoRow>>({});
 
   useEffect(() => {
@@ -112,6 +113,7 @@ export const CampaignPage: React.FC = () => {
   useEffect(() => {
     if (!user?.id) return;
     let cancelled = false;
+    setProgressLoaded(false);
 
     const fetchProgress = async () => {
       const { data: quests } = await supabase
@@ -119,7 +121,12 @@ export const CampaignPage: React.FC = () => {
         .select('id, phase')
         .eq('isactive', true)
         .eq('mode', 'campaign');
-      if (cancelled || !quests) return;
+      if (cancelled) return;
+      if (!quests) {
+        setProgress(EMPTY_PROGRESS);
+        setProgressLoaded(true);
+        return;
+      }
 
       const idsByPhase: Record<Phase, string[]> = { beginner: [], intermediate: [], advanced: [] };
       for (const q of quests) {
@@ -151,6 +158,7 @@ export const CampaignPage: React.FC = () => {
       });
 
       setProgress(next);
+      setProgressLoaded(true);
     };
 
     fetchProgress();
@@ -160,7 +168,7 @@ export const CampaignPage: React.FC = () => {
   // ── Status derivation ───────────────────────────────────────────────────
   const isLevelComplete = (phase: Phase): boolean => {
     const p = progress[phase];
-    return p.total > 0 && p.finished >= p.total;
+    return progressLoaded && p.finished >= p.total;
   };
   const isLevelUnlocked = (id: 1 | 2 | 3): boolean => {
     if (id === 1) return true;
@@ -233,6 +241,7 @@ export const CampaignPage: React.FC = () => {
                   index={i}
                   status={statusFor(level)}
                   progress={progress[level.phase]}
+                  isProgressLoading={!progressLoaded}
                   onClick={(el) => handleLevelClick(level, el)}
                 />
               );
@@ -282,8 +291,9 @@ const LevelCard: React.FC<{
   index:    number;
   status:   LevelStatus;
   progress: PhaseProgress;
+  isProgressLoading: boolean;
   onClick:  (el: HTMLElement) => void;
-}> = ({ config, index, status, progress, onClick }) => {
+}> = ({ config, index, status, progress, isProgressLoading, onClick }) => {
   const unlocked = status !== 'locked';
   const accent   = status === 'complete' ? '#3fb950' : config.color;
 
@@ -356,7 +366,9 @@ const LevelCard: React.FC<{
       {/* Footer: quest count + CTA */}
       <div className="level-card-foot">
         <div className="level-card-quest-count">
-          {progress.total > 0 ? (
+          {isProgressLoading ? (
+            <span style={{ color: '#6e7681' }}>Loading quests...</span>
+          ) : progress.total > 0 ? (
             <>
               <span className="level-card-icon-mini" aria-hidden>{unlocked ? config.icon : '🔒'}</span>
               <span>
@@ -365,7 +377,7 @@ const LevelCard: React.FC<{
               </span>
             </>
           ) : (
-            <span style={{ color: '#6e7681' }}>Loading quests…</span>
+            <span style={{ color: '#6e7681' }}>No active quests</span>
           )}
         </div>
         <div className="level-card-cta" style={{ color: unlocked ? accent : '#6e7681' }}>

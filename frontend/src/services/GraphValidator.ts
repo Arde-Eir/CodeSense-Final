@@ -10,6 +10,7 @@
  */
 
 import type { Node, Edge } from '@xyflow/react';
+import { translateFlowchartInstruction } from './CodeGenerator';
 
 // ─── Public types ─────────────────────────────────────────────────────────────
 
@@ -92,12 +93,115 @@ const PSEUDOCODE_NODE_TYPES = new Set([
   'database',
 ]);
 
+const UNSUPPORTED_CPP_PATTERNS: Array<{ code: string; re: RegExp; message: string }> = [
+  {
+    code: 'UNSUPPORTED_TEMPLATE',
+    re: /\btemplate\s*</,
+    message: 'Templates are outside this foundational CP1/selected-CP2 scope.',
+  },
+  {
+    code: 'UNSUPPORTED_STL',
+    re: /#include\s*<(?:vector|map|unordered_map|set|list|deque|queue|stack|algorithm|utility|tuple|array|functional|memory|optional|variant|bitset|numeric|iterator|ranges)>|\bstd::(?:vector|map|unordered_map|set|unordered_set|list|deque|queue|stack|pair|tuple|array)\b|\b(?:vector|map|set|queue|stack|list|deque|pair)\s*</,
+    message: 'STL containers and advanced STL headers are outside this foundational analyzer scope. Use basic arrays instead.',
+  },
+  {
+    code: 'UNSUPPORTED_OOP',
+    re: /\b(class|struct)\s+[A-Za-z_][A-Za-z0-9_]*\s*(?::[^{]+)?\{|\b(public|private|protected)\s*:|\bthis\s*(?:->|\.)/,
+    message: 'OOP/class-style code is outside this foundational analyzer scope.',
+  },
+  {
+    code: 'UNSUPPORTED_OPERATOR_OVERLOAD',
+    re: /\boperator\s*(==|!=|<=|>=|<|>|\+|-|\*|\/|%|<<|>>|\[\]|\(\)|=|\+=|-=|\*=|\/=)/,
+    message: 'Operator overloading is outside this foundational analyzer scope.',
+  },
+  {
+    code: 'UNSUPPORTED_LAMBDA',
+    re: /\[\s*(?:[&=]|\w+)?(?:\s*,\s*(?:[&=]|\w+))*\s*\]\s*\(/,
+    message: 'Lambda expressions are outside this foundational analyzer scope.',
+  },
+  {
+    code: 'UNSUPPORTED_COROUTINE',
+    re: /\bco_await\b|\bco_yield\b|\bco_return\b/,
+    message: 'Coroutines are outside this foundational analyzer scope.',
+  },
+  {
+    code: 'UNSUPPORTED_CONCEPTS',
+    re: /\bconcept\b|\brequires\b/,
+    message: 'C++20 concepts/requires are outside this foundational analyzer scope.',
+  },
+  {
+    code: 'UNSUPPORTED_VIRTUAL',
+    re: /\bvirtual\s+\w/,
+    message: 'Virtual functions and polymorphism are outside this foundational analyzer scope.',
+  },
+  {
+    code: 'NO_COMPILATION_REQUEST',
+    re: /\b(?:compile|build|run|execute)\s+(?:the\s+)?(?:code|program|cpp|c\+\+)\b/i,
+    message: 'Flowchart-to-code does not compile or run programs.',
+  },
+];
+
 function getInstruction(node: Node): string {
   return str(node.data?.code) || str(node.data?.label);
 }
 
 function looksLikeRawCpp(value: string): boolean {
   return /[;{}]|<<|>>|\b(cout|cin|printf|scanf|return|int|float|double|char|bool|string|vector|while|for)\b/.test(value);
+}
+
+function rawInstruction(node: Node): string {
+  return [str(node.data?.code), str(node.data?.label)].filter(Boolean).join('\n');
+}
+
+function detectUnsupportedCpp(node: Node): ValidationIssue[] {
+  const instruction = rawInstruction(node);
+  if (!instruction) return [];
+  return UNSUPPORTED_CPP_PATTERNS
+    .filter(pattern => pattern.re.test(instruction))
+    .map(pattern => ({
+      severity: 'error' as const,
+      code: pattern.code,
+      message: `${pattern.message} Rewrite this node using basic variables, arrays, decisions, loops, I/O, or simple helper calls.`,
+      nodeIds: [node.id],
+    }));
+}
+
+function normalizeSignatureType(type: string): string {
+  return type.replace(/\s+/g, ' ').trim();
+}
+
+function detectFunctionOverloadNodes(nodes: Node[]): ValidationIssue[] {
+  const seen = new Map<string, { signatures: Set<string>; nodeId: string }>();
+  const issues: ValidationIssue[] = [];
+
+  for (const node of nodes) {
+    const instruction = rawInstruction(node);
+    const matches = instruction.matchAll(/\b([A-Za-z_][A-Za-z0-9_:<>\s*&]+?)\s+([A-Za-z_][A-Za-z0-9_]*)\s*\(([^;{}]*)\)\s*(?:\{|;)/g);
+    for (const match of matches) {
+      const returnType = match[1].trim();
+      const name = match[2];
+      if (['if', 'while', 'for', 'switch'].includes(returnType) || name === 'main') continue;
+      const params = match[3].trim()
+        ? match[3].split(',').map(param => normalizeSignatureType(param.replace(/\b[A-Za-z_][A-Za-z0-9_]*\s*$/, '').trim())).join(',')
+        : '';
+      const known = seen.get(name);
+      if (known && !known.signatures.has(params)) {
+        issues.push({
+          severity: 'error',
+          code: 'UNSUPPORTED_FUNCTION_OVERLOADING',
+          message: `Function overloading is outside this foundational analyzer scope. "${name}" appears with multiple parameter lists.`,
+          nodeIds: [known.nodeId, node.id],
+        });
+      }
+      if (!known) {
+        seen.set(name, { signatures: new Set([params]), nodeId: node.id });
+      } else {
+        known.signatures.add(params);
+      }
+    }
+  }
+
+  return issues;
 }
 
 function startsLikePseudocode(value: string, starters: RegExp): boolean {
@@ -112,24 +216,29 @@ function pseudocodeStyleIssue(node: Node): string | null {
   const instruction = getInstruction(node);
   if (!instruction || EXECUTABLE_PLACEHOLDERS.has(instruction.toLowerCase())) return null;
   if (looksLikeRawCpp(instruction)) {
-    return 'Use pseudocode-style wording inside flowchart nodes instead of raw C++ syntax. Example: "set score to score plus 10" instead of "score = score + 10;".';
+    return 'This works, but friendly wording is easier here. Try "set score to score plus 10" instead of "score = score + 10;".';
+  }
+
+  const generated = translateFlowchartInstruction(instruction, type as Parameters<typeof translateFlowchartInstruction>[1]);
+  if (generated) {
+    return null;
   }
 
   switch (type) {
     case 'manual_input':
       return startsLikePseudocode(instruction, /^(ask|read|get|input|enter)\b/i)
         ? null
-        : 'Input shapes should read like an input step. Example: "ask the user for their name".';
+        : 'Input shapes should say what to read. Example: "ask the user for their name" or just "enter age".';
     case 'io':
       return startsLikePseudocode(instruction, /^(display|show|print|output|tell|write)\b/i)
         ? null
-        : 'Output shapes should read like an output step. Example: "display the result".';
+        : 'Output shapes should say what to show. Example: "display hello world" or "show the value of total".';
     case 'decision':
       return null;
     case 'predefined':
       return startsLikePseudocode(instruction, /^(call|run|use|execute)\b/i)
         ? null
-        : 'Function-call shapes should read like a call step. Example: "call calculate result".';
+        : 'Function-call shapes should name one helper call. Example: "call calculate result with score".';
     case 'delay':
       return startsLikePseudocode(instruction, /^(wait|pause|delay)\b/i)
         ? null
@@ -137,15 +246,13 @@ function pseudocodeStyleIssue(node: Node): string | null {
     case 'document':
       return startsLikePseudocode(instruction, /^(write|save|open|read|create|load)\b/i)
         ? null
-        : 'Document shapes should describe file/report work. Example: "write report.txt".';
+        : 'Document shapes should describe file or report work. Example: "write report.txt".';
     case 'database':
       return startsLikePseudocode(instruction, /^(create|store|save|load|read|update|set up|make)\b/i)
         ? null
-        : 'Data-store shapes should describe stored data. Example: "create a list of scores".';
+        : 'Data-store shapes should describe stored data. Example: "create a list of scores" or "store 75 in score".';
     default:
-      return startsLikePseudocode(instruction, /^(set|let|create|declare|make|store|save|calculate|compute|find|increase|decrease|add|subtract|update|change|increment|decrement)\b/i)
-        ? null
-        : 'Process shapes should describe one algorithm step. Example: "set total to price plus tax".';
+      return 'Process shapes should describe one simple step. Examples: "score starts at zero", "add 1 to score", or "set total to price plus tax".';
   }
 }
 
@@ -195,6 +302,12 @@ export function validateGraph(nodes: Node[], edges: Edge[]): ValidationResult {
     if (!inEdges.has(e.target)) inEdges.set(e.target, []);
     inEdges.get(e.target)!.push(e);
   }
+
+  const unsupportedCppIssues = [
+    ...nodes.flatMap(detectUnsupportedCpp),
+    ...detectFunctionOverloadNodes(nodes),
+  ];
+  unsupportedCppIssues.forEach(issue => issues.push(issue));
 
   const selfLoops = edges.filter(e => e.source === e.target);
   if (selfLoops.length > 0) {
@@ -384,7 +497,7 @@ export function validateGraph(nodes: Node[], edges: Edge[]): ValidationResult {
     const condition = dCode || dLabel;
     if (isInvalidCondition(condition)) {
       push('error', 'DECISION_EMPTY_CONDITION',
-        'Decision node needs a valid C++ condition. Double-click it and enter only the expression, for example: hp > 0 || i < n.',
+        'Decision node needs one clear condition. You can type friendly wording like "if age is greater than 17" or C++ like "age > 17".',
         { nodeIds: [d.id] });
     }
   }
@@ -483,13 +596,13 @@ export function validateGraph(nodes: Node[], edges: Edge[]): ValidationResult {
 
     if (placeholders.length > 0) {
       push('warning', 'MISSING_NODE_CODE',
-        `${placeholders.length} executable node(s) still use a placeholder and have no pseudocode step. Double-click them and write a simple instruction, for example "set score to zero".`,
+        `${placeholders.length} executable node(s) still use a placeholder and have no instruction. Double-click them and write one simple sentence, for example "set score to zero", "ask for age", or "display hello".`,
         { nodeIds: placeholders.map(n => n.id) });
     }
 
     if (labelled.length > 0) {
       push('warning', 'NODE_CODE_FROM_LABEL',
-        `${labelled.length} executable node(s) have no separate pseudocode step, so generation will use their labels as the instruction. Add a clear pseudocode step if the label is only a title.`,
+        `${labelled.length} executable node(s) have no separate instruction, so generation will use the label text. Add a simple sentence if the label is only a title.`,
         { nodeIds: labelled.map(n => n.id) });
     }
   }

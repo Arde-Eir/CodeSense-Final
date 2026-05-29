@@ -4,6 +4,30 @@ import { basename } from 'node:path'
 import { existsSync, readFileSync } from 'node:fs'
 import { generateQuestDraftFromText } from '../questAutoGenerator'
 
+const DEFAULT_PDF_TEXT_FIXTURE = `
+  C++ Input and Output Fundamentals
+  Overview:
+  C++ programs communicate with users by reading input and displaying output. A program often begins in the main function, where statements execute in order and return a final status code when the task is complete.
+
+  Input:
+  Input is data received by the program from a user or another source. The standard input stream cin reads values into variables so that the program can work with information supplied during execution.
+
+  Output:
+  Output is information the program displays to the user. The standard output stream cout presents results, instructions, and feedback so that a user understands what the program has done.
+
+  Variables:
+  A variable is named storage for a value used by the program. Variables should be declared with an appropriate data type before input is stored or calculations are performed.
+
+  Operators:
+  An operator is a symbol that performs an operation on values. The stream extraction operator reads input with cin, while the stream insertion operator sends output with cout.
+
+  Example: int score = 10;
+  Example: cout << score;
+
+  Condition:
+  A condition decides whether a code block executes, allowing a program to respond differently when the stored input changes.
+`
+
 const extractPdfTextInNode = async (pdfPath: string): Promise<string> => {
   ;(globalThis as any).DOMMatrix ??= class DOMMatrix {}
   ;(globalThis as any).ImageData ??= class ImageData {}
@@ -53,12 +77,16 @@ describe('generateQuestDraftFromText', () => {
     expect(dragLabels).toContain('Information displayed by the program, usually with cout.')
   })
 
-  it.runIf(process.env.CODESENSE_PDF_FIXTURE && existsSync(process.env.CODESENSE_PDF_FIXTURE))(
-    'generates organized quest content from the provided PDF fixture',
+  it(
+    'generates organized quest content from lesson fixture text or a provided PDF fixture',
     async () => {
-      const pdfPath = process.env.CODESENSE_PDF_FIXTURE!
-      const text = await extractPdfTextInNode(pdfPath)
-      const draft = generateQuestDraftFromText(text, basename(pdfPath))
+      const externalPdf = process.env.CODESENSE_PDF_FIXTURE
+      const useExternalPdf = Boolean(externalPdf && existsSync(externalPdf))
+      const text = useExternalPdf
+        ? await extractPdfTextInNode(externalPdf!)
+        : DEFAULT_PDF_TEXT_FIXTURE
+      const filename = useExternalPdf ? basename(externalPdf!) : 'input-output-fundamentals.pdf'
+      const draft = generateQuestDraftFromText(text, filename)
       const mcOptionSets = draft.mc_questions.map(q => new Set(q.options).size)
       const codeFillText = draft.code_fill_items.map(item => item.code_lines).join('\n')
       const dragLabels = draft.drag_problems[0]?.drop_zones.map(zone => zone.label) ?? []

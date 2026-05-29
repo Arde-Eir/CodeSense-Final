@@ -21,12 +21,73 @@ const STD_LIB_SYMBOLS = [
   'pow', 'sqrt', 'abs', 'fabs', 'ceil', 'floor', 'round',
   'stoi', 'stod', 'stof', 'stol', 'stoul', 'to_string',
   'ifstream', 'ofstream', 'fstream',
+  'system', 'exit', 'rand', 'srand',
+];
+
+const DEPENDENCY_RULES: Array<{
+  header: string;
+  alternateHeaders?: string[];
+  legacyHeaders?: string[];
+  pattern: RegExp;
+  message: string;
+}> = [
+  {
+    header: 'iostream',
+    legacyHeaders: ['iostream.h', 'stdio.h', 'cstdio'],
+    pattern: /\b(?:std::)?(cout|cin|cerr|clog|endl)\b/,
+    message: "I/O objects/manipulators (cout, cin, cerr, endl, etc.) require '#include <iostream>'",
+  },
+  {
+    header: 'iomanip',
+    legacyHeaders: ['iomanip.h'],
+    pattern: /\b(?:std::)?(setw|setprecision|setfill|fixed|showpoint|left|right|boolalpha|noboolalpha)\b/,
+    message: "Formatting manipulators (setw, setprecision, fixed, etc.) require '#include <iomanip>'",
+  },
+  {
+    header: 'string',
+    legacyHeaders: ['string.h', 'cstring'],
+    pattern: /\b(?:std::)?string\b|\b(?:std::)?(getline|stoi|stod|stof|stol|stoul|to_string)\s*\(/,
+    message: "String types/functions (string, getline, stoi, to_string, etc.) require '#include <string>'",
+  },
+  {
+    header: 'cmath',
+    alternateHeaders: ['math.h'],
+    pattern: /\b(?:std::)?(pow|sqrt|abs|fabs|ceil|floor|round|fmod|log|log2|log10|exp|sin|cos|tan|asin|acos|atan|atan2)\s*\(/,
+    message: "Math functions (pow, sqrt, etc.) require '#include <cmath>'",
+  },
+  {
+    header: 'fstream',
+    legacyHeaders: ['fstream.h'],
+    pattern: /\b(?:std::)?(ifstream|ofstream|fstream)\b/,
+    message: "File stream types (ifstream, ofstream, fstream) require '#include <fstream>'",
+  },
+  {
+    header: 'cstdlib',
+    legacyHeaders: ['stdlib.h'],
+    pattern: /\b(?:std::)?(rand|srand|exit|system)\s*\(/,
+    message: "C standard utility functions (rand, srand, exit, system) require '#include <cstdlib>'",
+  },
 ];
 
 router.post('/analyze', (req, res) => {
-  const { sourceCode, hintsUsed = 0 } = req.body;
+  const { sourceCode: rawSourceCode, hintsUsed = 0 } = req.body;
 
-  if (!sourceCode || typeof sourceCode !== 'string') {
+  if (!rawSourceCode || typeof rawSourceCode !== 'string') {
+    return res.status(400).json({
+      success: false,
+      errors: [{ type: 'semantic', severity: 'error', message: 'No source code provided.', line: 0 }],
+      warnings: [],
+      explanations: ['❌ **Status:** No source code received.'],
+      tokens: [], ast: null, symbolTable: {}, safetyChecks: [], cfg: { nodes: [], edges: [] },
+      cognitiveComplexity: 0, cyclomaticComplexity: { score: 0, rating: 'low', interpretation: '' },
+      symbolicExecution: [], logs: [],
+      gamification: { xpEarned: 0, qualityBonus: 0, levelTitle: 'Squire' },
+    });
+  }
+
+  const sourceCode = normalizePastedSourceCode(rawSourceCode);
+
+  if (!sourceCode.trim()) {
     return res.status(400).json({
       success: false,
       errors: [{ type: 'semantic', severity: 'error', message: 'No source code provided.', line: 0 }],
@@ -49,9 +110,15 @@ router.post('/analyze', (req, res) => {
       msg: 'STL headers (<vector>, <map>, <algorithm>, etc.) are not supported by the analyzer.' },
     { re: /\boperator\s*(==|!=|<=|>=|<|>|\+|-|\*|\/|%|<<|>>|\[\]|\(\)|=|\+=|-=|\*=|\/=)/,
       msg: 'Operator overloading is not supported.' },
+    { re: /\b(class|struct)\s+[A-Za-z_][A-Za-z0-9_]*\s*(?::[^{]+)?\{/,
+      msg: 'Classes/structs and OOP-style code are not supported — this analyzer focuses on foundational procedural C++.' },
+    { re: /\b(public|private|protected)\s*:/,
+      msg: 'Access specifiers are part of OOP and are not supported by the foundational analyzer.' },
+    { re: /\bthis\s*(?:->|\.)/,
+      msg: "'this' member access is part of OOP and is not supported by the foundational analyzer." },
     { re: /\bvirtual\s+\w/,
       msg: 'Virtual functions / polymorphism are not fully analyzed.' },
-    { re: /\[\s*(?:&|=|\w+)\s*\]\s*\(/,
+    { re: /\[\s*(?:[&=]|\w+)?(?:\s*,\s*(?:[&=]|\w+))*\s*\]\s*\(/,
       msg: 'Lambda expressions are not fully supported.' },
     { re: /\bco_await\b|\bco_yield\b|\bco_return\b/,
       msg: 'Coroutines (co_await, co_yield, co_return) are not supported.' },
@@ -98,7 +165,7 @@ router.post('/analyze', (req, res) => {
   }
 
   const unsupportedFatal = unsupportedWarnings.some(w =>
-    /Templates|STL containers|STL headers|Lambda expressions|concepts|Coroutines/.test(w.message)
+    /Templates|STL containers|STL headers|Classes\/structs|Access specifiers|'this' member access|Lambda expressions|concepts|Coroutines/.test(w.message)
   );
   if (unsupportedFatal) {
     return res.status(200).json({
@@ -169,73 +236,69 @@ router.post('/analyze', (req, res) => {
     });
   }
 
+  const overloadErrors = detectFunctionOverloads(ast);
+  if (overloadErrors.length > 0) {
+    return res.status(200).json({
+      success: false,
+      tokens: lexResult.tokens,
+      errors: overloadErrors,
+      warnings: [],
+      ast: getCleanAST(ast),
+      symbolTable: {},
+      safetyChecks: [],
+      cfg: { nodes: [], edges: [] },
+      cognitiveComplexity: 0,
+      cyclomaticComplexity: { score: 0, rating: 'low', interpretation: '' },
+      symbolicExecution: [],
+      logs: [],
+      gamification: { xpEarned: 0, qualityBonus: 0, levelTitle: 'Squire' },
+      explanations: [
+        '❌ **Status:** Unsupported C++ Feature',
+        ...overloadErrors.map(e => `⚠️ **Unsupported Feature:** ${e.message}`),
+        '💡 **Tip:** Use one function name per behavior. This analyzer teaches foundational procedural C++, so function overloading is intentionally excluded.',
+      ],
+    });
+  }
+
   try {
     // ─── PHASE 3: Dependency Validation (FEU CP1/CP2 Strict Rules) ──────────
-    const usesIo = /\b(cout|cin|endl|cerr)\b/.test(sourceCode);
-    const usesStdPrefix = /\bstd::/.test(sourceCode);
+    const sourceForDependencyScan = stripCommentsAndLiterals(sourceCode);
+    const usesIo = /\b(cout|cin|endl|cerr|clog|getline)\b/.test(sourceForDependencyScan);
+    const usesStdPrefix = /\bstd::/.test(sourceForDependencyScan);
     const hasUsingStd = ast.namespace?.name === 'std' || usesStdPrefix;
 
+    const includedHeaders = new Set(
+      (ast.directives || [])
+        .filter((d: any) => d.type === 'Include')
+        .map((d: any) => d.name),
+    );
+
     // Helper: check if a header is in the directive list
-    const hasHeader = (name: string) =>
-      ast.directives?.some((d: any) => d.type === 'Include' && d.name === name);
+    const hasHeader = (name: string) => includedHeaders.has(name);
 
     const depErrors: AnalysisError[] = [];
 
-    // iostream
-    if (usesIo && !hasHeader('iostream')) {
-      depErrors.push({
-        type: 'semantic', severity: 'error',
-        message: "Strict Error: 'cout/cin/cerr' requires '#include <iostream>'",
-        line: 1, column: 1,
-      });
-    }
+    DEPENDENCY_RULES.forEach(rule => {
+      const headers = [rule.header, ...(rule.alternateHeaders || [])];
+      if (rule.pattern.test(sourceForDependencyScan) && !headers.some(hasHeader)) {
+        const wrongHeader = (rule.legacyHeaders || []).find(hasHeader);
+        depErrors.push({
+          type: 'semantic',
+          severity: 'error',
+          message: wrongHeader
+            ? `Wrong preprocessor directive: '#include <${wrongHeader}>' does not satisfy this C++ use. Use '#include <${rule.header}>'.`
+            : `Missing preprocessor directive: ${rule.message}`,
+          line: 1,
+          column: 1,
+        });
+      }
+    });
+
     if (usesIo && !hasUsingStd) {
       depErrors.push({
         type: 'semantic', severity: 'error',
         message: "Strict Error: 'cout/cin/cerr' requires 'using namespace std;' (or 'std::' prefix)",
         line: 2, column: 1,
-      });
-    }
-
-    // cmath
-    const CMATH_FNS = ['pow','sqrt','abs','fabs','ceil','floor','round','fmod',
-                        'log','log2','log10','exp','sin','cos','tan','asin','acos','atan','atan2'];
-    const usesCmath = CMATH_FNS.some(fn => new RegExp(`\\b${fn}\\s*\\(`).test(sourceCode));
-    if (usesCmath && !hasHeader('cmath') && !hasHeader('math.h')) {
-      depErrors.push({
-        type: 'semantic', severity: 'error',
-        message: "Math functions (pow, sqrt, etc.) require '#include <cmath>'",
-        line: 1, column: 1,
-      });
-    }
-
-    // iomanip
-    const usesIomanip = /\b(setw|setprecision|setfill)\s*\(/.test(sourceCode);
-    if (usesIomanip && !hasHeader('iomanip')) {
-      depErrors.push({
-        type: 'semantic', severity: 'error',
-        message: "Formatting functions (setw, setprecision, setfill) require '#include <iomanip>'",
-        line: 1, column: 1,
-      });
-    }
-
-    // string conversions
-    const usesStringFns = /\b(stoi|stod|stof|stol|stoul|to_string)\s*\(/.test(sourceCode);
-    if (usesStringFns && !hasHeader('string')) {
-      depErrors.push({
-        type: 'semantic', severity: 'error',
-        message: "String conversion functions (stoi, stod, to_string, etc.) require '#include <string>'",
-        line: 1, column: 1,
-      });
-    }
-
-    // fstream
-    const usesFstream = /\b(ifstream|ofstream|fstream)\b/.test(sourceCode);
-    if (usesFstream && !hasHeader('fstream')) {
-      depErrors.push({
-        type: 'semantic', severity: 'error',
-        message: "File stream types (ifstream, ofstream, fstream) require '#include <fstream>'",
-        line: 1, column: 1,
       });
     }
 
@@ -574,4 +637,77 @@ function dedupeWarnings(warnings: AnalysisError[]): AnalysisError[] {
     out.push(w);
   }
   return out;
+}
+
+function detectFunctionOverloads(ast: any): AnalysisError[] {
+  const signaturesByName = new Map<string, Set<string>>();
+  const firstLineByName = new Map<string, number>();
+  const errors: AnalysisError[] = [];
+
+  const scan = (nodes: any[]) => {
+    nodes.forEach(node => {
+      if (!node || (node.type !== 'FunctionDecl' && node.type !== 'FunctionPrototype')) return;
+      const params = Array.isArray(node.params) ? node.params : [];
+      const signature = params
+        .map((param: any) => normalizeTypeForSignature(param?.varType || 'unknown'))
+        .join(',');
+      const known = signaturesByName.get(node.name) || new Set<string>();
+      const firstLine = firstLineByName.get(node.name) || node.line || 0;
+
+      if (known.size > 0 && !known.has(signature)) {
+        errors.push({
+          type: 'semantic',
+          severity: 'error',
+          message: `Unsupported feature: Function overloading is not included in the CP1/CP2 foundations scope. '${node.name}' was already declared with a different parameter list on line ${firstLine}.`,
+          line: node.line || 0,
+          column: node.column || 0,
+        });
+      }
+
+      known.add(signature);
+      signaturesByName.set(node.name, known);
+      if (!firstLineByName.has(node.name)) firstLineByName.set(node.name, node.line || 0);
+    });
+  };
+
+  if (Array.isArray(ast?.body)) scan(ast.body);
+  if (Array.isArray(ast?.namespace?.body)) scan(ast.namespace.body);
+  return errors;
+}
+
+function normalizeTypeForSignature(type: string): string {
+  return String(type).replace(/\s+/g, ' ').trim();
+}
+
+function stripCommentsAndLiterals(source: string): string {
+  return source
+    .replace(/\/\*[\s\S]*?\*\//g, match => ' '.repeat(match.length))
+    .replace(/\/\/[^\n\r]*/g, match => ' '.repeat(match.length))
+    .replace(/(?:u8|u|U|L)?R"([^(]*)\([\s\S]*?\)\1"/g, match => ' '.repeat(match.length))
+    .replace(/(?:u8|u|U|L)?"(?:\\[\s\S]|[^"\\])*"/g, match => ' '.repeat(match.length))
+    .replace(/(?:u|U|L)?'(?:\\[\s\S]|[^'\\])*'/g, match => ' '.repeat(match.length));
+}
+
+function normalizePastedSourceCode(source: string): string {
+  let normalized = source
+    .replace(/<br\s*\/?>/gi, '\n')
+    .replace(/<\/p\s*>/gi, '\n')
+    .replace(/<\/div\s*>/gi, '\n')
+    .replace(/<\/?(?:span|code|pre|div|p|table|thead|tbody|tr|td|th|strong|em|b|i|section|article|blockquote)(?:\s[^>]*)?>/gi, '')
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&amp;/g, '&')
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'")
+    .trim();
+
+  const fenced = normalized.match(/^```(?:cpp|c\+\+|cxx|cc)?\s*([\s\S]*?)\s*```$/i);
+  if (fenced) normalized = fenced[1].trim();
+
+  const lines = normalized.split(/\r?\n/);
+  if (/^(?:cpp|c\+\+|cxx|cc)$/i.test(lines[0]?.trim() ?? '')) {
+    normalized = lines.slice(1).join('\n').trim();
+  }
+
+  return normalized;
 }

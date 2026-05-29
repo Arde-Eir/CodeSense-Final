@@ -445,20 +445,129 @@ describe('validateGraph', () => {
   it('warns when node wording does not match the flowchart shape', () => {
     const nodes = [
       makeNode('s', 'terminator', 'Start'),
-      makeNode('i', 'manual_input', 'Name', { code: 'name' }),
-      makeNode('o', 'io', 'Result', { code: 'result' }),
+      makeNode('p', 'process', 'Vague step', { code: 'prepare everything nicely' }),
       makeNode('e', 'terminator', 'End'),
     ];
     const edges = [
-      makeEdge('e1', 's', 'i'),
-      makeEdge('e2', 'i', 'o'),
-      makeEdge('e3', 'o', 'e'),
+      makeEdge('e1', 's', 'p'),
+      makeEdge('e2', 'p', 'e'),
     ];
 
     const result = validateGraph(nodes, edges);
 
     expect(result.isValid).toBe(true);
     expect(result.warnings.some(w => w.code === 'PSEUDOCODE_STYLE_GUIDANCE')).toBe(true);
+  });
+
+  it('allows friendly sentence and command inputs without style warnings', () => {
+    const nodes = [
+      makeNode('s', 'terminator', 'Start'),
+      makeNode('p1', 'process', 'Start score', { code: 'score starts at zero' }),
+      makeNode('p2', 'process', 'Add score', { code: 'add one to score' }),
+      makeNode('i', 'manual_input', 'Age', { code: 'enter age' }),
+      makeNode('o', 'io', 'Hello', { code: 'hello beginner' }),
+      makeNode('e', 'terminator', 'End'),
+    ];
+    const edges = [
+      makeEdge('e1', 's', 'p1'),
+      makeEdge('e2', 'p1', 'p2'),
+      makeEdge('e3', 'p2', 'i'),
+      makeEdge('e4', 'i', 'o'),
+      makeEdge('e5', 'o', 'e'),
+    ];
+
+    const result = validateGraph(nodes, edges);
+
+    expect(result.isValid).toBe(true);
+    expect(result.warnings.some(w => w.code === 'PSEUDOCODE_STYLE_GUIDANCE')).toBe(false);
+  });
+
+  it('teaches the user when a process sentence is too vague to translate', () => {
+    const nodes = [
+      makeNode('s', 'terminator', 'Start'),
+      makeNode('p', 'process', 'Do something', { code: 'prepare everything nicely' }),
+      makeNode('e', 'terminator', 'End'),
+    ];
+    const edges = [
+      makeEdge('e1', 's', 'p'),
+      makeEdge('e2', 'p', 'e'),
+    ];
+
+    const result = validateGraph(nodes, edges);
+
+    expect(result.isValid).toBe(true);
+    expect(result.warnings.some(w => w.code === 'PSEUDOCODE_STYLE_GUIDANCE')).toBe(true);
+    expect(result.warnings.find(w => w.code === 'PSEUDOCODE_STYLE_GUIDANCE')?.message).toContain('score starts at zero');
+  });
+
+  it('rejects requests to compile or run code from flowchart nodes', () => {
+    const nodes = [
+      makeNode('s', 'terminator', 'Start'),
+      makeNode('p', 'process', 'Compile', { code: 'compile the program' }),
+      makeNode('e', 'terminator', 'End'),
+    ];
+    const edges = [
+      makeEdge('e1', 's', 'p'),
+      makeEdge('e2', 'p', 'e'),
+    ];
+
+    const result = validateGraph(nodes, edges);
+
+    expect(result.isValid).toBe(false);
+    expect(result.errors.some(err => err.code === 'NO_COMPILATION_REQUEST')).toBe(true);
+  });
+
+  it('rejects raw STL container code because generated code must match analyzer scope', () => {
+    const nodes = [
+      makeNode('s', 'terminator', 'Start'),
+      makeNode('p', 'process', 'Use vector', { code: 'vector<int> scores;' }),
+      makeNode('e', 'terminator', 'End'),
+    ];
+    const edges = [
+      makeEdge('e1', 's', 'p'),
+      makeEdge('e2', 'p', 'e'),
+    ];
+
+    const result = validateGraph(nodes, edges);
+
+    expect(result.isValid).toBe(false);
+    expect(result.errors.some(err => err.code === 'UNSUPPORTED_STL')).toBe(true);
+  });
+
+  it('rejects OOP class snippets in flowchart nodes', () => {
+    const nodes = [
+      makeNode('s', 'terminator', 'Start'),
+      makeNode('p', 'process', 'Class', { code: 'class Player { public: int hp; };' }),
+      makeNode('e', 'terminator', 'End'),
+    ];
+    const edges = [
+      makeEdge('e1', 's', 'p'),
+      makeEdge('e2', 'p', 'e'),
+    ];
+
+    const result = validateGraph(nodes, edges);
+
+    expect(result.isValid).toBe(false);
+    expect(result.errors.some(err => err.code === 'UNSUPPORTED_OOP')).toBe(true);
+  });
+
+  it('rejects helper function overloading in flowchart code snippets', () => {
+    const nodes = [
+      makeNode('s', 'terminator', 'Start'),
+      makeNode('f1', 'predefined', 'Helper 1', { code: 'int add(int a) { return a; }' }),
+      makeNode('f2', 'predefined', 'Helper 2', { code: 'double add(double a) { return a; }' }),
+      makeNode('e', 'terminator', 'End'),
+    ];
+    const edges = [
+      makeEdge('e1', 's', 'f1'),
+      makeEdge('e2', 'f1', 'f2'),
+      makeEdge('e3', 'f2', 'e'),
+    ];
+
+    const result = validateGraph(nodes, edges);
+
+    expect(result.isValid).toBe(false);
+    expect(result.errors.some(err => err.code === 'UNSUPPORTED_FUNCTION_OVERLOADING')).toBe(true);
   });
 
   // Happy path

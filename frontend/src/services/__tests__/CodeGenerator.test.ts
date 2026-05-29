@@ -82,11 +82,11 @@ describe('generateCppFromGraph', () => {
     expect(code).not.toContain('1;');
   });
 
-  it('detects includes from real C++ tokens instead of substring matches', () => {
+  it('keeps includes inside the analyzer-supported header set', () => {
     const nodes = [
       makeNode('s', 'terminator', 'Start'),
       makeNode('p1', 'process', 'assignment', 'maximum = 10;'),
-      makeNode('p2', 'process', 'vector setup', 'vector<int> values;'),
+      makeNode('p2', 'process', 'array setup', 'int values[3];'),
       makeNode('e', 'terminator', 'End'),
     ];
     const edges = [
@@ -97,8 +97,9 @@ describe('generateCppFromGraph', () => {
 
     const code = generateCppFromGraph(nodes, edges);
 
-    expect(code).toContain('#include <vector>');
+    expect(code).not.toContain('#include <vector>');
     expect(code).not.toContain('#include <algorithm>');
+    expect(code).toContain('int values[3];');
   });
 
   it('emits output expressions with endl and normalizes text conditions', () => {
@@ -169,8 +170,43 @@ describe('generateCppFromGraph', () => {
 
     expect(code).toContain('cin >> userAge;');
     expect(code).toContain('if (userAge > 17)');
-    expect(code).toContain('cout << allowed << endl;');
+    expect(code).toContain('cout << "allowed" << endl;');
     expect(code).toContain('cout << "too young" << endl;');
+  });
+
+  it('declares variables read from simple input nodes', () => {
+    const nodes = [
+      makeNode('s', 'terminator', 'Start'),
+      makeNode('p', 'process', 'Enter number'),
+      makeNode('e', 'terminator', 'End'),
+    ];
+    const edges = [
+      makeEdge('e1', 's', 'p'),
+      makeEdge('e2', 'p', 'e'),
+    ];
+
+    const code = generateCppFromGraph(nodes, edges);
+
+    expect(code).toMatch(/int main\(\) \{\n    int number;\n\n    cin >> number;/);
+  });
+
+  it('does not redeclare input variables that already exist', () => {
+    const nodes = [
+      makeNode('s', 'terminator', 'Start'),
+      makeNode('d', 'process', 'Declare number', 'int number;'),
+      makeNode('i', 'manual_input', 'Enter number'),
+      makeNode('e', 'terminator', 'End'),
+    ];
+    const edges = [
+      makeEdge('e1', 's', 'd'),
+      makeEdge('e2', 'd', 'i'),
+      makeEdge('e3', 'i', 'e'),
+    ];
+
+    const code = generateCppFromGraph(nodes, edges);
+
+    expect(code.match(/\bint number;/g)).toHaveLength(1);
+    expect(code).toContain('cin >> number;');
   });
 
   it('accepts more conversational English in flowchart nodes', () => {
@@ -205,7 +241,98 @@ describe('generateCppFromGraph', () => {
     expect(code).toContain('score = score + 10;');
   });
 
-  it('generates friendly snippets for lists, helper calls, and wait instructions', () => {
+  it('accepts literal sentences, command-style steps, and pseudocode without AI or compilation', () => {
+    const nodes = [
+      makeNode('s', 'terminator', 'Start'),
+      makeNode('p1', 'process', 'Start score', 'score starts at zero'),
+      makeNode('p2', 'process', 'Add point', 'add one to score'),
+      makeNode('p3', 'process', 'Multiply', 'multiply score by two'),
+      makeNode('p4', 'process', 'Total', 'total gets price plus tax'),
+      makeNode('i', 'manual_input', 'Age', 'enter age'),
+      makeNode('o1', 'io', 'Message', 'hello beginner'),
+      makeNode('o2', 'io', 'Show total', 'show the value of total'),
+      makeNode('e', 'terminator', 'End'),
+    ];
+    const edges = [
+      makeEdge('e1', 's', 'p1'),
+      makeEdge('e2', 'p1', 'p2'),
+      makeEdge('e3', 'p2', 'p3'),
+      makeEdge('e4', 'p3', 'p4'),
+      makeEdge('e5', 'p4', 'i'),
+      makeEdge('e6', 'i', 'o1'),
+      makeEdge('e7', 'o1', 'o2'),
+      makeEdge('e8', 'o2', 'e'),
+    ];
+
+    const code = generateCppFromGraph(nodes, edges);
+
+    expect(code).toContain('int score = 0;');
+    expect(code).toContain('score += 1;');
+    expect(code).toContain('score *= 2;');
+    expect(code).toContain('total = price + tax;');
+    expect(code).toContain('cin >> age;');
+    expect(code).toContain('cout << "hello beginner" << endl;');
+    expect(code).toContain('cout << total << endl;');
+  });
+
+  it('turns beginner array storage wording into indexed assignment', () => {
+    const nodes = [
+      makeNode('s', 'terminator', 'Start'),
+      makeNode('db', 'database', 'Create scores', 'create an array of scores'),
+      makeNode('p', 'process', 'Store first score', 'store score at index zero of scores'),
+      makeNode('e', 'terminator', 'End'),
+    ];
+    const edges = [
+      makeEdge('e1', 's', 'db'),
+      makeEdge('e2', 'db', 'p'),
+      makeEdge('e3', 'p', 'e'),
+    ];
+
+    const code = generateCppFromGraph(nodes, edges);
+
+    expect(code).toContain('int scores[10];');
+    expect(code).toContain('scores[0] = score;');
+  });
+
+  it('generates 2D arrays from friendly flowchart wording', () => {
+    const nodes = [
+      makeNode('s', 'terminator', 'Start'),
+      makeNode('db', 'database', 'Create grid', 'create a 2D array of scores with two rows and three columns'),
+      makeNode('p', 'process', 'Store score', 'store score at row one column two of scores'),
+      makeNode('e', 'terminator', 'End'),
+    ];
+    const edges = [
+      makeEdge('e1', 's', 'db'),
+      makeEdge('e2', 'db', 'p'),
+      makeEdge('e3', 'p', 'e'),
+    ];
+
+    const code = generateCppFromGraph(nodes, edges);
+
+    expect(code).toContain('int scores[2][3];');
+    expect(code).toContain('scores[1][2] = score;');
+  });
+
+  it('generates 3D arrays from friendly flowchart wording', () => {
+    const nodes = [
+      makeNode('s', 'terminator', 'Start'),
+      makeNode('db', 'database', 'Create cube', 'create a 3D array of cubes with two layers and three rows and four columns'),
+      makeNode('p', 'process', 'Store value', 'store value at layer one row two column three of cubes'),
+      makeNode('e', 'terminator', 'End'),
+    ];
+    const edges = [
+      makeEdge('e1', 's', 'db'),
+      makeEdge('e2', 'db', 'p'),
+      makeEdge('e3', 'p', 'e'),
+    ];
+
+    const code = generateCppFromGraph(nodes, edges);
+
+    expect(code).toContain('int cubes[2][3][4];');
+    expect(code).toContain('cubes[1][2][3] = value;');
+  });
+
+  it('generates friendly snippets for arrays, helper calls, and wait comments', () => {
     const nodes = [
       makeNode('s', 'terminator', 'Start'),
       makeNode('db', 'database', 'Create scores', 'create a list of scores'),
@@ -222,13 +349,13 @@ describe('generateCppFromGraph', () => {
 
     const code = generateCppFromGraph(nodes, edges);
 
-    expect(code).toContain('#include <vector>');
-    expect(code).toContain('vector<int> scores;');
+    expect(code).not.toContain('#include <vector>');
+    expect(code).toContain('int scores[10];');
     expect(code).toContain('calculateResult(score, passingScore);');
-    expect(code).toContain('sleep(2);');
+    expect(code).toContain('// wait 2 second(s)');
   });
 
-  it('emits complete classes and helper functions above main', () => {
+  it('emits complete helper functions above main but leaves class snippets inside main for validator rejection', () => {
     const nodes = [
       makeNode('s', 'terminator', 'Start'),
       makeNode('cls', 'process', 'Student class', 'class Student {\npublic:\n    string name;\n};'),
@@ -245,9 +372,9 @@ describe('generateCppFromGraph', () => {
 
     const code = generateCppFromGraph(nodes, edges);
 
-    expect(code).toMatch(/class Student[\s\S]+};[\s\S]+int main/);
+    expect(code).not.toMatch(/class Student[\s\S]+};[\s\S]+int main/);
     expect(code).toMatch(/int add\(int a, int b\)[\s\S]+int main/);
-    expect(code).toContain('// Top-level declaration emitted above main: Student class');
+    expect(code).toContain('class Student {');
     expect(code).toContain('int total = add(1, 2);');
   });
 });

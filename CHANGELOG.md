@@ -1,5 +1,85 @@
 # CodeSense Changelog
 
+## Session 3 — 2026-05-26
+
+### Full Test Verification
+
+#### Cypress Status
+
+**Location:** repository root  
+**Runner:** Cypress 13.17.0  
+**Command:** `.\node_modules\.bin\cypress.cmd run`  
+**Result:** Unable to start on the current Windows environment
+
+Cypress reached its installed executable but failed during startup:
+
+```text
+Cypress.exe: bad option: --smoke-test
+Cypress.exe: bad option: --ping=951
+```
+
+This confirms the previously recorded Cypress Electron/V8 incompatibility. The maintained fallback suites below were run instead.
+
+---
+
+### Frontend Tests
+
+**Location:** `frontend/`  
+**Runner:** Vitest 4.1.0  
+**Command:** `.\node_modules\.bin\vitest.cmd run --config=vitest.browser.config.ts`  
+**Result:** 297/297 tests passing across 16 test files; no skipped tests
+
+| Metric | Result |
+|---|---|
+| Test Files | 16 passed |
+| Tests | 297 passed |
+| Skipped | 0 |
+| Failures | 0 |
+| Duration | 23.53 seconds |
+
+The PDF-content test in `src/admin/__tests__/questAutoGenerator.test.ts` now executes with a deterministic built-in lesson fixture by default and uses an external PDF when `CODESENSE_PDF_FIXTURE` is provided.
+
+---
+
+### Backend Tests
+
+**Build Command:** `npm.cmd run build` (run from `backend/`)  
+**Build Result:** Successful  
+**Location:** `tests/run-integration-tests.mjs`  
+**Runner:** Node.js native test runner (`node --test`)  
+**Command:** `node --test tests/run-integration-tests.mjs` (with the built backend running on port 3000)  
+**Result:** 50/50 passing across 14 suites
+
+| Suite | Tests |
+|---|---|
+| Input Validation | 3 |
+| Response Shape | 2 |
+| Lexical Analysis | 3 |
+| Syntactic Analysis | 3 |
+| Semantic Analysis | 4 |
+| Dependency Validation | 7 |
+| Symbolic Execution | 6 |
+| CFG Generation | 3 |
+| Mentor Explanations | 3 |
+| Gamification | 5 |
+| Path Analysis | 2 |
+| Health Check | 1 |
+| Unsupported Feature Detection | 4 |
+| Complexity Metrics | 4 |
+
+---
+
+### Supplemental Backend Validation
+
+**Location:** `backend/test-backend.js`  
+**Runner:** Node.js script  
+**Command:** `node backend/test-backend.js` (with the built backend running on port 3000)  
+**Result:** 16/16 internal checks passing
+
+The variable-declaration translation check now verifies the current output contract, and the script returns a nonzero exit code if any internal check fails.
+
+---
+
 ## Session 2 — 2026-05-11
 
 ### Backend Fixes

@@ -126,6 +126,33 @@ function withTimeout<T>(thenable: PromiseLike<T>, ms = FETCH_TIMEOUT_MS): Promis
   ]);
 }
 
+async function saveMissionProgressRow(
+  userid: string,
+  questid: string,
+  payload: Record<string, unknown>,
+): Promise<{ id?: string }> {
+  const { data: updated, error: updateErr } = await withTimeout(
+    supabase
+      .from('mission_progress')
+      .update(payload)
+      .eq('userid', userid)
+      .eq('questid', questid)
+      .select('id')
+  );
+  if (updateErr) throw new Error(updateErr.message);
+  if (updated?.length) return updated[0] as { id?: string };
+
+  const { data: inserted, error: insertErr } = await withTimeout(
+    supabase
+      .from('mission_progress')
+      .insert({ userid, questid, ...payload })
+      .select('id')
+      .single()
+  );
+  if (insertErr) throw new Error(insertErr.message);
+  return (inserted ?? {}) as { id?: string };
+}
+
 // ─── XP Toast ─────────────────────────────────────────────────────────────
 const XPToast: React.FC<{
   visible:    boolean;
@@ -577,6 +604,7 @@ export const LessonActivity: React.FC = () => {
           .select('id,hintsused,status,xp_gained,completed_activities,first_completed_at')
           .eq('userid', user.id)
           .eq('questid', questId)
+          .limit(1)
           .maybeSingle()
       );
 
@@ -607,18 +635,14 @@ export const LessonActivity: React.FC = () => {
         }
       } else {
         // Seed an empty progress row so subsequent UPDATEs find it.
-        const { data: ins } = await withTimeout(
-          supabase
-            .from('mission_progress')
-            .upsert({
-              userid: user.id, questid: questId, status: 'active',
-              attempts: 0, hintsused: 0, completed_activities: [],
-              startedat: new Date().toISOString(),
-            }, { onConflict: 'userid,questid' })
-            .select('id')
-            .single()
-        );
-        if (ins) setProgressId(ins.id);
+        const ins = await saveMissionProgressRow(user.id, questId, {
+          status: 'active',
+          attempts: 0,
+          hintsused: 0,
+          completed_activities: [],
+          startedat: new Date().toISOString(),
+        });
+        if (ins.id) setProgressId(ins.id);
         priorXpGainedRef.current         = 0;
         hasEverFullyCompletedRef.current = false;
       }
@@ -835,23 +859,19 @@ export const LessonActivity: React.FC = () => {
             .select('first_completed_at')
             .eq('userid', user.id)
             .eq('questid', quest.id)
+            .limit(1)
             .maybeSingle();
           firstCompletedAt = existingProgress?.first_completed_at ?? new Date().toISOString();
         }
-        const { error: fallbackProgressErr } = await supabase
-          .from('mission_progress')
-          .upsert({
-            userid:               user.id,
-            questid:              quest.id,
-            status:               allDone ? 'completed' : 'active',
-            xp_gained:            xpRowValue,
-            completed_activities: newFinished,
-            hintsused:            hintsUsedRef.current,
-            completedat:          allDone ? firstCompletedAt : null,
-            first_completed_at:   allDone ? firstCompletedAt : null,
-            updatedat:            new Date().toISOString(),
-          }, { onConflict: 'userid,questid' });
-        if (fallbackProgressErr) throw new Error(fallbackProgressErr.message);
+        await saveMissionProgressRow(user.id, quest.id, {
+          status:               allDone ? 'completed' : 'active',
+          xp_gained:            xpRowValue,
+          completed_activities: newFinished,
+          hintsused:            hintsUsedRef.current,
+          completedat:          allDone ? firstCompletedAt : null,
+          first_completed_at:   allDone ? firstCompletedAt : null,
+          updatedat:            new Date().toISOString(),
+        });
 
         const { data: userRow, error: userFetchErr } = await supabase
           .from('users')
@@ -883,6 +903,7 @@ export const LessonActivity: React.FC = () => {
           .select('first_completed_at')
           .eq('userid', user.id)
           .eq('questid', quest.id)
+          .limit(1)
           .maybeSingle();
         if (progressFetchErr) throw new Error(progressFetchErr.message);
 
@@ -1014,15 +1035,9 @@ export const LessonActivity: React.FC = () => {
         .eq('questid', quest.id);
       if (resetErr) throw new Error(resetErr.message);
 
-      // Ensure a row exists for this quest after retake.
-      const { error: upsertErr } = await supabase
-        .from('mission_progress')
-        .upsert({
-          userid: user.id,
-          questid: quest.id,
-          ...resetPayload,
-        }, { onConflict: 'userid,questid' });
-      if (upsertErr) throw new Error(upsertErr.message);
+      // Ensure a row exists for this quest after retake without relying on a
+      // DB-side unique constraint for (userid, questid).
+      await saveMissionProgressRow(user.id, quest.id, resetPayload);
 
       // Verify we really moved out of completed state.
       const { data: verifyRows, error: verifyErr } = await supabase

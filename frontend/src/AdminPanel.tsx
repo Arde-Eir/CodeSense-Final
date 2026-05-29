@@ -237,6 +237,15 @@ const campaignDifficultyFromForm = (
   return 'hard'
 }
 
+const campaignDifficultyToForm = (
+  difficulty: string | null | undefined
+): QuestFormState['difficulty'] => {
+  if (difficulty === 'easy' || difficulty === 'beginner') return 'beginner'
+  if (difficulty === 'medium' || difficulty === 'intermediate') return 'intermediate'
+  if (difficulty === 'hard' || difficulty === 'advanced') return 'advanced'
+  return 'beginner'
+}
+
 const questPreviewFromForm = (form: QuestFormState): Quest => {
   const dragItems = form.drag_problems.flatMap(p => p.items)
   const dropZones = form.drag_problems.flatMap(p => p.drop_zones)
@@ -943,7 +952,7 @@ export const AdminPanel: React.FC = () => {
 
     const questData = {
       title: questForm.title.trim(), description: questForm.description.trim() || null,
-      difficulty: questForm.difficulty, level: questForm.level, phase, mode: 'campaign',
+      difficulty: campaignDifficultyFromForm(questForm.difficulty), level: questForm.level, phase, mode: 'campaign',
       basexp: questForm.basexp, requiredxp: questForm.requiredxp,
       sortorder: questForm.sortorder, isactive: questForm.isactive,
       question_type,
@@ -1027,7 +1036,7 @@ export const AdminPanel: React.FC = () => {
 
     setQuestForm({
       title: q.title ?? '', description: q.description ?? '',
-      difficulty: q.difficulty ?? 'beginner', level: q.level ?? 1,
+      difficulty: campaignDifficultyToForm(q.difficulty), level: q.level ?? 1,
       basexp: q.basexp ?? 100, requiredxp: q.requiredxp ?? 0,
       sortorder: q.sortorder ?? 99, isactive: q.isactive ?? true,
       tutorial_title: q.tutorial_title ?? '', tutorial_body: q.tutorial_body ?? '',

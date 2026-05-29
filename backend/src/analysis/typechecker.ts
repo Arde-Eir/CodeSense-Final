@@ -108,10 +108,13 @@ export class TypeChecker {
     sin: 'cmath', cos: 'cmath', tan: 'cmath',
     asin: 'cmath', acos: 'cmath', atan: 'cmath', atan2: 'cmath',
     setw: 'iomanip', setprecision: 'iomanip', setfill: 'iomanip',
+    fixed: 'iomanip', showpoint: 'iomanip', left: 'iomanip', right: 'iomanip',
+    boolalpha: 'iomanip', noboolalpha: 'iomanip',
+    string: 'string',
     stoi: 'string', stod: 'string', stof: 'string',
     stol: 'string', stoul: 'string', to_string: 'string',
     ifstream: 'fstream', ofstream: 'fstream', fstream: 'fstream',
-    getline: 'iostream',
+    getline: 'string',
     rand: 'cstdlib', srand: 'cstdlib', exit: 'cstdlib', system: 'cstdlib',
   };
 
@@ -484,6 +487,8 @@ export class TypeChecker {
     if (isConstExpr && !initialized) {
       this.addError(node, `'constexpr' variable '${varNode.name}' must be initialized at declaration.`, 'error');
     }
+
+    this.validateHeaderForType(varNode.varType, node);
 
     // ── auto type inference ─────────────────────────────────────────────────
     if (varNode.varType === 'auto') {
@@ -1294,6 +1299,7 @@ export class TypeChecker {
 
 if (['&', '|', '^', '<<', '>>'].includes(bin.operator)) {
   const streamTypes = ['ostream', 'istream', 'manipulator', 'unknown', 
+                       'ifstream', 'ofstream', 'fstream',
                        'string', 'int', 'float', 'double', 'char', 'bool', 'long'];
   const isStreamOp =
     (bin.operator === '<<' || bin.operator === '>>') &&
@@ -1326,7 +1332,11 @@ if (['&', '|', '^', '<<', '>>'].includes(bin.operator)) {
   if (typeof name === 'string' && name.startsWith('std::')) {
     const plainName = name.replace('std::', '');
     const stdSymbol = this.lookupSymbol(plainName);
-    if (stdSymbol) return stdSymbol.type;
+    if (stdSymbol) {
+      this.validateHeaderForSymbol(plainName, node);
+      this.markRead(plainName);
+      return stdSymbol.type;
+    }
     return 'unknown'; 
   }
 
@@ -1345,6 +1355,7 @@ if (['&', '|', '^', '<<', '>>'].includes(bin.operator)) {
   }
 
   // 5. Usage Tracking
+  this.validateHeaderForSymbol(name, node);
   this.markRead(name);
 
   return symbol.type;
@@ -1551,10 +1562,18 @@ if (['&', '|', '^', '<<', '>>'].includes(bin.operator)) {
     if (!this.includedHeaders.has(required)) {
       this.addError(
         node,
-        `'${name}' requires '#include <${required}>'`,
+        `Missing preprocessor directive: '${name}' requires '#include <${required}>'`,
         'error',
       );
     }
+  }
+
+  private validateHeaderForType(type: string, node: any): void {
+    const baseType = type
+      .replace(/\b(const|constexpr|static|extern|volatile|unsigned|signed|inline|virtual)\b/g, '')
+      .replace(/[*&]/g, '')
+      .trim();
+    if (baseType) this.validateHeaderForSymbol(baseType, node);
   }
 
   // =========================================================================

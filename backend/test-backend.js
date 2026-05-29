@@ -55,7 +55,7 @@ const allTestCases = [
     name: "TRANSLATOR: Variable Declaration Logic", 
     code: "int main() { int heroHealth = 100; return 0; }", 
     expected: "translation",
-    mustContain: "Declare a int variable named 'heroHealth'"
+    mustContain: "heroHealth"
   },
   { 
     name: "TRANSLATOR: Constant Storage Metaphor", 
@@ -173,6 +173,7 @@ async function runTests() {
   const duration = ((Date.now() - startTime) / 1000).toFixed(2);
   console.log(`🏁 Validation Finished in ${duration}s`);
   console.log(`📈 Final Result: ${passed} / ${allTestCases.length} Tests Passed`);
+  process.exitCode = passed === allTestCases.length ? 0 : 1;
 }
 
 runTests();

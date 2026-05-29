@@ -9,15 +9,15 @@ interface NodeData {
 }
 
 export const FLOWCHART_CODE_TOPICS = [
+  'Friendly sentence commands such as "ask for age", "display hello", and "set score to zero"',
   'Variables, constants, assignment, and arithmetic',
   'cin input and cout output',
   'if / else decisions from true/false branches',
   'while-style loops from branches that return to a Decision',
   'arrays and basic indexed storage',
-  'function calls and predefined-process shapes',
+  'single-name helper function calls and predefined-process shapes',
   'file/document placeholders and basic fstream snippets',
-  'raw C++ snippets, including structs/classes/functions above main when entered as complete declarations',
-  'STL declarations and calls when typed as C++ code',
+  'raw C++ snippets only when they stay inside the same CP1/selected-CP2 foundations scope',
 ];
 
 // ─── Grammar-Aligned Reserved Words ──────────────────────────────────────────
@@ -38,12 +38,11 @@ const RESERVED_WORDS = new Set([
 const BASE_TYPES = [
   'long long', 'long double', 'unsigned int',
   'int', 'float', 'double', 'char', 'bool', 'void', 'string', 'auto',
-  'typename', 'class', 'struct', 'enum',
 ];
 
 const TYPE_MODIFIERS = [
   'const', 'static', 'extern', 'volatile', 'unsigned', 'signed',
-  'inline', 'virtual', 'public', 'private', 'protected', 'override', 'final',
+  'inline',
 ];
 
 // ─── Auto-Include Detection ───────────────────────────────────────────────────
@@ -59,17 +58,6 @@ const CPP_INCLUDES: Record<string, string> = {
   'stod':          'string',
   'stof':          'string',
   'to_string':     'string',
-  'vector':        'vector',
-  'array':         'array',
-  'map':           'map',
-  'unordered_map': 'unordered_map',
-  'unordered_set': 'unordered_set',
-  'stack':         'stack',
-  'queue':         'queue',
-  'deque':         'deque',
-  'list':          'list',
-  'pair':          'utility',
-  'make_pair':     'utility',
   'sqrt':          'cmath',
   'pow':           'cmath',
   'abs':           'cmath',
@@ -84,42 +72,31 @@ const CPP_INCLUDES: Record<string, string> = {
   'rand':          'cstdlib',
   'srand':         'cstdlib',
   'exit':          'cstdlib',
-  'sleep':         'cstdlib',   // delay nodes
-  'printf':        'cstdio',
-  'scanf':         'cstdio',
-  'sprintf':       'cstdio',
-  'strlen':        'cstring',
-  'strcpy':        'cstring',
-  'strcmp':        'cstring',
-  'sort':          'algorithm',
-  'reverse':       'algorithm',
-  'find':          'algorithm',
-  'min':           'algorithm',
-  'max':           'algorithm',
-  'fill':          'algorithm',
-  'count':         'algorithm',
-  'accumulate':    'numeric',
-  'iota':          'numeric',
   'INT_MAX':       'climits',
   'INT_MIN':       'climits',
-  'FLT_MAX':       'cfloat',
   'setw':          'iomanip',
   'setprecision':  'iomanip',
   'fixed':         'iomanip',
   'fstream':       'fstream',   // document nodes
   'ofstream':      'fstream',
   'ifstream':      'fstream',
-  'chrono':        'chrono',    // delay nodes (std::chrono)
 };
 
 const INCLUDE_ORDER = [
-  'iostream', 'fstream', 'string', 'vector', 'array', 'map', 'unordered_map',
-  'set', 'unordered_set', 'stack', 'queue', 'deque', 'list',
-  'utility', 'algorithm', 'numeric', 'cmath', 'cstdlib',
-  'cstdio', 'cstring', 'climits', 'cfloat', 'iomanip', 'chrono',
+  'iostream', 'fstream', 'string', 'cmath', 'cstdlib', 'climits', 'iomanip',
 ];
 
 const str = (v: unknown): string => String(v ?? '').trim();
+
+export type FlowchartInstructionKind =
+  | 'process'
+  | 'decision'
+  | 'io'
+  | 'manual_input'
+  | 'predefined'
+  | 'document'
+  | 'delay'
+  | 'database';
 
 function escapeRegExp(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
@@ -198,6 +175,24 @@ function quoteIfPlainText(value: string): string {
   return JSON.stringify(trimmed);
 }
 
+function quoteOutputValue(value: string): string {
+  const cleaned = cleanHumanTarget(value).replace(/^(?:message|text)\s+/i, '').trim();
+  const normalized = normalizeEnglishExpression(cleaned);
+  if (/^(?:the\s+)?(?:value|variable|number|text|string|answer|result)\s+(?:of|for)\s+/i.test(value)) {
+    return normalizeVariableName(value.replace(/^(?:the\s+)?(?:value|variable|number|text|string|answer|result)\s+(?:of|for)\s+/i, ''));
+  }
+  if (/^(?:value|variable)\s+[A-Za-z_][A-Za-z0-9_\s]*$/i.test(value)) {
+    return normalizeVariableName(value.replace(/^(?:value|variable)\s+/i, ''));
+  }
+  if (/^[A-Za-z_][A-Za-z0-9_]*$/.test(normalized) && /(?:result|total|score|age|count|counter|name|price|amount|grade|average|sum|difference|product|quotient|remainder)$/i.test(normalized)) {
+    return normalized;
+  }
+  if (/^[A-Za-z_][A-Za-z0-9_]*$/.test(normalized)) {
+    return JSON.stringify(normalized);
+  }
+  return quoteIfPlainText(normalized);
+}
+
 function normalizeEnglishExpression(value: string): string {
   return value
     .trim()
@@ -247,6 +242,20 @@ function normalizeEnglishExpression(value: string): string {
     .trim();
 }
 
+function pluralizeIdentifier(name: string): string {
+  return name.endsWith('s') ? name : `${name}s`;
+}
+
+function normalizeDimensionSize(value: string | undefined, fallback = '10'): string {
+  if (!value) return fallback;
+  const normalized = normalizeEnglishExpression(value).trim();
+  return /^-?\d+$/.test(normalized) ? normalized : fallback;
+}
+
+function normalizeArrayIndex(value: string): string {
+  return normalizeEnglishExpression(value).trim();
+}
+
 function normalizeConditionOperand(value: string): string {
   const trimmed = value.trim();
   if (!trimmed || /^(true|false)$/i.test(trimmed) || /^-?\d+(\.\d+)?$/.test(trimmed)) return trimmed;
@@ -279,11 +288,28 @@ function normalizeHumanStatement(text: string, nodeType = 'process'): string | n
 
   const lower = source.toLowerCase();
 
+  const sized3dArray = source.match(/^(?:create|declare|make|set up)\s+(?:a\s+|an\s+|the\s+)?(?:3d|three dimensional|three-dimensional)\s+(?:array|table|grid|cube)\s+(?:of\s+)?(.+?)(?:\s+with\s+(.+?)\s+(?:layers?|depth)\s+and\s+(.+?)\s+rows?\s+and\s+(.+?)\s+columns?)?$/i);
+  if (sized3dArray) {
+    const name = pluralizeIdentifier(normalizeVariableName(sized3dArray[1].replace(/s$/i, ''), 'items'));
+    const depth = normalizeDimensionSize(sized3dArray[2]);
+    const rows = normalizeDimensionSize(sized3dArray[3]);
+    const columns = normalizeDimensionSize(sized3dArray[4]);
+    return `int ${name}[${depth}][${rows}][${columns}];`;
+  }
+
+  const sized2dArray = source.match(/^(?:create|declare|make|set up)\s+(?:a\s+|an\s+|the\s+)?(?:2d|two dimensional|two-dimensional)\s+(?:array|table|grid|matrix)\s+(?:of\s+)?(.+?)(?:\s+with\s+(.+?)\s+rows?\s+and\s+(.+?)\s+columns?)?$/i);
+  if (sized2dArray) {
+    const name = pluralizeIdentifier(normalizeVariableName(sized2dArray[1].replace(/s$/i, ''), 'items'));
+    const rows = normalizeDimensionSize(sized2dArray[2]);
+    const columns = normalizeDimensionSize(sized2dArray[3]);
+    return `int ${name}[${rows}][${columns}];`;
+  }
+
   const listDeclaration = source.match(/^(?:create|declare|make|set up)\s+(?:a\s+|an\s+|the\s+)?(?:list|array|collection)\s+(?:of\s+)?(.+)$/i);
   if (listDeclaration) {
     const name = normalizeVariableName(listDeclaration[1].replace(/s$/i, ''), 'items');
-    const pluralName = name.endsWith('s') ? name : `${name}s`;
-    return `vector<int> ${pluralName};`;
+    const pluralName = pluralizeIdentifier(name);
+    return `int ${pluralName}[10];`;
   }
 
   const declaration = source.match(/^(?:create|declare|make|initialize|init|set up|let)\s+(?:a\s+|an\s+|the\s+)?(?:(integer|int|number|whole|decimal|double|float|text|string|word|sentence|character|char|boolean|bool)\s+)?(?:variable\s+)?(?:named\s+|called\s+)?(.+?)(?:\s+(?:equal to|equals|with value|as|to|be)\s+(.+))?$/i);
@@ -308,14 +334,50 @@ function normalizeHumanStatement(text: string, nodeType = 'process'): string | n
     return `${type} ${name}${value};`;
   }
 
-  const assignment = source.match(/^(?:set|change|update|put|make)\s+(.+?)\s+(?:to|as|equal to|equals|be)\s+(.+)$/i);
+  const startsAt = source.match(/^(.+?)\s+(?:starts?\s+(?:at|as|with)|begins?\s+(?:at|as|with))\s+(.+)$/i);
+  if (startsAt) {
+    const name = normalizeVariableName(startsAt[1]);
+    const value = normalizeEnglishExpression(startsAt[2]);
+    const type = /^["'].*["']$/.test(value) || /\s/.test(value) && !/^[a-zA-Z_][a-zA-Z0-9_]*$/.test(value)
+      ? 'string'
+      : /^(true|false)$/i.test(value)
+      ? 'bool'
+      : /^-?\d+$/.test(value)
+      ? 'int'
+      : /^-?\d+\.\d+$/.test(value)
+      ? 'double'
+      : 'auto';
+    return `${type} ${name} = ${quoteIfPlainText(value)};`;
+  }
+
+  const assignment = source.match(/^(?:set|change|update|put|make)\s+(.+?)\s+(?:to|as|equal to|equals|be|get|gets|become|becomes)\s+(.+)$/i);
   if (assignment) {
     return `${normalizeVariableName(assignment[1])} = ${quoteIfPlainText(normalizeEnglishExpression(assignment[2]))};`;
+  }
+
+  const plainAssignment = source.match(/^(.+?)\s+(?:gets|becomes|is now)\s+(.+)$/i);
+  if (plainAssignment) {
+    return `${normalizeVariableName(plainAssignment[1])} = ${quoteIfPlainText(normalizeEnglishExpression(plainAssignment[2]))};`;
   }
 
   const storeIn = source.match(/^(?:store|save|put)\s+(.+?)\s+in(?:to)?\s+(.+)$/i);
   if (storeIn) {
     return `${normalizeVariableName(storeIn[2])} = ${quoteIfPlainText(normalizeEnglishExpression(storeIn[1]))};`;
+  }
+
+  const store3d = source.match(/^(?:set|store|save|put)\s+(.+?)\s+(?:at|in)\s+(?:layer|depth)\s+(.+?)\s+(?:row)\s+(.+?)\s+(?:column|col)\s+(.+?)\s+(?:of|in)\s+(.+)$/i);
+  if (store3d) {
+    return `${normalizeVariableName(store3d[5])}[${normalizeArrayIndex(store3d[2])}][${normalizeArrayIndex(store3d[3])}][${normalizeArrayIndex(store3d[4])}] = ${quoteIfPlainText(normalizeEnglishExpression(store3d[1]))};`;
+  }
+
+  const store2d = source.match(/^(?:set|store|save|put)\s+(.+?)\s+(?:at|in)\s+(?:row)\s+(.+?)\s+(?:column|col)\s+(.+?)\s+(?:of|in)\s+(.+)$/i);
+  if (store2d) {
+    return `${normalizeVariableName(store2d[4])}[${normalizeArrayIndex(store2d[2])}][${normalizeArrayIndex(store2d[3])}] = ${quoteIfPlainText(normalizeEnglishExpression(store2d[1]))};`;
+  }
+
+  const arrayStore = source.match(/^(?:set|store|save|put)\s+(.+?)\s+(?:at|in)\s+(?:index|position)\s+(.+?)\s+(?:of|in)\s+(.+)$/i);
+  if (arrayStore) {
+    return `${normalizeVariableName(arrayStore[3])}[${normalizeEnglishExpression(arrayStore[2])}] = ${quoteIfPlainText(normalizeEnglishExpression(arrayStore[1]))};`;
   }
 
   const calculate = source.match(/^(?:calculate|compute|find)\s+(.+?)\s+(?:as|by|from|with)\s+(.+)$/i);
@@ -326,8 +388,20 @@ function normalizeHumanStatement(text: string, nodeType = 'process'): string | n
   const addTo = source.match(/^(?:add|increase)\s+(.+?)\s+by\s+(.+)$/i);
   if (addTo) return `${normalizeVariableName(addTo[1])} += ${normalizeEnglishExpression(addTo[2])};`;
 
+  const addValueTo = source.match(/^add\s+(.+?)\s+to\s+(.+)$/i);
+  if (addValueTo) return `${normalizeVariableName(addValueTo[2])} += ${normalizeEnglishExpression(addValueTo[1])};`;
+
   const subtractFrom = source.match(/^(?:subtract|decrease|reduce)\s+(.+?)\s+by\s+(.+)$/i);
   if (subtractFrom) return `${normalizeVariableName(subtractFrom[1])} -= ${normalizeEnglishExpression(subtractFrom[2])};`;
+
+  const subtractValueFrom = source.match(/^subtract\s+(.+?)\s+from\s+(.+)$/i);
+  if (subtractValueFrom) return `${normalizeVariableName(subtractValueFrom[2])} -= ${normalizeEnglishExpression(subtractValueFrom[1])};`;
+
+  const multiplyBy = source.match(/^(?:multiply|times)\s+(.+?)\s+by\s+(.+)$/i);
+  if (multiplyBy) return `${normalizeVariableName(multiplyBy[1])} *= ${normalizeEnglishExpression(multiplyBy[2])};`;
+
+  const divideBy = source.match(/^divide\s+(.+?)\s+by\s+(.+)$/i);
+  if (divideBy) return `${normalizeVariableName(divideBy[1])} /= ${normalizeEnglishExpression(divideBy[2])};`;
 
   const increment = source.match(/^(?:increment|increase)\s+(.+)$/i);
   if (increment) return `${normalizeVariableName(increment[1])}++;`;
@@ -343,8 +417,7 @@ function normalizeHumanStatement(text: string, nodeType = 'process'): string | n
 
   const output = source.match(/^(?:print|show|display|output|write|tell(?:\s+(?:the\s+)?(?:user|student|player|customer|person))?)\s+(.+)$/i);
   if (output || nodeType === 'io') {
-    const target = cleanHumanTarget(output ? output[1] : source).replace(/^(?:message|text)\s+/i, '');
-    return `cout << ${quoteIfPlainText(normalizeEnglishExpression(target))} << endl;`;
+    return `cout << ${quoteOutputValue(output ? output[1] : source)} << endl;`;
   }
 
   if (lower.startsWith('return ')) {
@@ -352,6 +425,13 @@ function normalizeHumanStatement(text: string, nodeType = 'process'): string | n
   }
 
   return null;
+}
+
+export function translateFlowchartInstruction(
+  text: string,
+  nodeType: FlowchartInstructionKind = 'process',
+): string | null {
+  return normalizeHumanStatement(text, nodeType);
 }
 
 function detectIncludes(allCode: string[]): string[] {
@@ -362,12 +442,6 @@ function detectIncludes(allCode: string[]): string[] {
     const tokenPattern = new RegExp(`(?:^|[^A-Za-z0-9_])(?:std::)?${escapeRegExp(keyword)}(?:$|[^A-Za-z0-9_])`);
     if (tokenPattern.test(combined)) needed.add(header);
   }
-  if (/\bvector\s*</.test(combined))   needed.add('vector');
-  if (/\bmap\s*</.test(combined))      needed.add('map');
-  if (/\bset\s*</.test(combined))      needed.add('set');
-  if (/\bstack\s*</.test(combined))    needed.add('stack');
-  if (/\bqueue\s*</.test(combined))    needed.add('queue');
-  if (/\bpair\s*</.test(combined))     needed.add('utility');
   if (/\bofstream\b|\bifstream\b/.test(combined)) needed.add('fstream');
 
   const sorted = INCLUDE_ORDER.filter(h => needed.has(h));
@@ -467,15 +541,12 @@ function normalizeStatement(code: string): string {
 
 function isTopLevelDeclaration(code: string): boolean {
   const s = code.trim();
-  return /^(template\s*<[\s\S]+>\s*)?(class|struct|enum)\s+\w[\s\S]*};?\s*$/.test(s) ||
-         /^[\w:<>,\s*&]+?\s+\w+\s*\([^;]*\)\s*\{[\s\S]*\}\s*$/.test(s);
+  if (/^(template\s*<[\s\S]+>\s*)?(class|struct|enum)\s+\w[\s\S]*};?\s*$/.test(s)) return false;
+  return /^[\w:<>,\s*&]+?\s+\w+\s*\([^;]*\)\s*\{[\s\S]*\}\s*$/.test(s);
 }
 
 function normalizeTopLevelDeclaration(code: string): string {
   const s = code.trim();
-  if (/^(class|struct|enum)\b/.test(s) || /^template\s*</.test(s)) {
-    return s.endsWith(';') ? s : `${s};`;
-  }
   return s;
 }
 
@@ -510,7 +581,7 @@ function emitIO(label: string, code: string): string {
 
   if (human) return human;
 
-  if (c.includes('cout') || c.includes('cin') || c.includes('printf') || c.includes('scanf')) {
+  if (c.includes('cout') || c.includes('cin')) {
     return normalizeStatement(c);
   }
   if (l.includes('output') || l.includes('print') || l.includes('display') || l.includes('write')) {
@@ -614,20 +685,20 @@ function emitDelay(label: string, code: string): string {
     // Try to extract a duration from the label
     const msMatch = source.match(/(\d+)\s*(?:ms|millisecond|milliseconds)/);
     const sMatch  = source.match(/(\d+)\s*(?:s|sec|second|seconds)/);
-    if (msMatch) return `sleep(${msMatch[1]});  // ${msMatch[1]}ms delay`;
-    if (sMatch)  return `sleep(${sMatch[1]});`;
-    return `sleep(1);  // Delay / Wait`;
+    if (msMatch) return `// wait ${msMatch[1]}ms`;
+    if (sMatch)  return `// wait ${sMatch[1]} second(s)`;
+    return `// Delay / Wait`;
   }
 
   if (c.includes('sleep') || c.includes('usleep') || c.includes('this_thread')) {
-    return normalizeStatement(c);
+    return `// ${c.replace(/;$/, '')}`;
   }
 
   const naturalDelay = normalizeEnglishExpression(c).match(/(?:wait|pause|delay)\s+(\d+)\s*(?:s|sec|second|seconds)?/i);
-  if (naturalDelay) return `sleep(${naturalDelay[1]});`;
+  if (naturalDelay) return `// wait ${naturalDelay[1]} second(s)`;
 
   // Bare number → treat as seconds
-  if (/^\d+$/.test(c)) return `sleep(${c});`;
+  if (/^\d+$/.test(c)) return `// wait ${c} second(s)`;
 
   return normalizeStatement(c);
 }
@@ -638,14 +709,15 @@ function emitDatabase(label: string, code: string): string {
   const l = label.trim();
   const human = normalizeHumanStatement(c || label, 'database');
 
-  if (!c) {
-    if (human) return human;
-    // Suggest a vector declaration based on label
+    if (!c) {
+      if (human) return human;
+    // Suggest a fixed-size array declaration based on label. STL containers are
+    // intentionally outside the foundational analyzer scope.
     const words = l.replace(/[^a-zA-Z0-9\s]/g, '').split(/\s+/).filter(Boolean);
     const varName = words
       .map((w, i) => i === 0 ? w.toLowerCase() : w.charAt(0).toUpperCase() + w.slice(1).toLowerCase())
       .join('') || 'dataStore';
-    if (isValidIdentifier(varName)) return `// Data Store: ${varName}`;
+    if (isValidIdentifier(varName)) return `int ${varName}[10];`;
     return `// Database / Store: ${l}`;
   }
 
@@ -712,6 +784,38 @@ function collectTopLevelDeclarations(nodes: Node<NodeData>[]): string[] {
     seen.add(normalized);
     declarations.push(normalized);
   }
+  return declarations;
+}
+
+function collectDeclaredVariables(code: string): Set<string> {
+  const declarations = new Set<string>();
+  for (const line of code.split('\n')) {
+    const decl = parseVarDecl(line.trim());
+    if (decl) declarations.add(decl.name);
+  }
+  return declarations;
+}
+
+function inferInputType(name: string): string {
+  if (/(?:name|text|word|sentence|message|title|address|email)$/i.test(name)) return 'string';
+  if (/^(?:is|has|can|should)[A-Z_]/.test(name) || /(?:flag|valid|active|done|finished|allowed)$/i.test(name)) return 'bool';
+  if (/(?:price|amount|average|total|grade|score|rate|height|weight|temperature|distance)$/i.test(name)) return 'double';
+  return 'int';
+}
+
+function buildMissingInputDeclarations(bodyCode: string): string[] {
+  const declared = collectDeclaredVariables(bodyCode);
+  const declarations: string[] = [];
+  const seen = new Set<string>();
+  const inputPattern = /\bcin\s*>>\s*([A-Za-z_][A-Za-z0-9_]*)\s*;/g;
+
+  for (const match of bodyCode.matchAll(inputPattern)) {
+    const name = match[1];
+    if (declared.has(name) || seen.has(name)) continue;
+    seen.add(name);
+    declarations.push(`${inferInputType(name)} ${name};`);
+  }
+
   return declarations;
 }
 
@@ -1033,6 +1137,12 @@ export const generateCppFromGraph = (nodes: Node[], edges: Edge[]): string => {
   const allCode = collectAllCode(typedNodes);
   const topLevelDeclarations = collectTopLevelDeclarations(typedNodes);
   const includes = detectIncludes([...allCode, bodyLines]);
+  const missingInputDeclarations = buildMissingInputDeclarations(bodyLines);
+  const mainBody = [
+    ...missingInputDeclarations.map(line => `    ${line}`),
+    ...(missingInputDeclarations.length && bodyLines.trimEnd() ? [''] : []),
+    bodyLines.trimEnd() || '    // Empty graph — connect your nodes',
+  ].join('\n');
 
   return [
     ...includes.map(h => `#include <${h}>`),
@@ -1044,7 +1154,7 @@ export const generateCppFromGraph = (nodes: Node[], edges: Edge[]): string => {
         ]
       : []),
     'int main() {',
-    bodyLines.trimEnd() || '    // Empty graph — connect your nodes',
+    mainBody,
     '    return 0;',
     '}',
     '',

@@ -68,6 +68,13 @@ describe('Suite 1 – Input Validation', () => {
     const { status } = await post('int main() { return 0; }');
     assert.equal(status, 200);
   });
+
+  test('accepts code pasted with markdown/html formatting', async () => {
+    const pasted = 'cpp<br>#include &lt;iostream&gt;<br>using namespace std;<br><br>int main() {<br>    cout &lt;&lt; "Hello, CodeSense!" &lt;&lt; endl;<br>    return 0;<br>}';
+    const { status, body } = await post(pasted);
+    assert.equal(status, 200);
+    assert.equal(body.success, true);
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -189,8 +196,64 @@ describe('Suite 6 – Dependency Validation', () => {
     assert.ok(hasDepErr, 'Should require iostream');
   });
 
+  test('flags string variables without #include <string>', async () => {
+    const code = '#include <iostream>\nusing namespace std;\nint main() { string name = "Ada"; cout << name; return 0; }';
+    const { body } = await post(code);
+    assert.equal(body.success, false);
+    const hasStringErr = body.errors.some(
+      e => e.type === 'semantic' && e.message.includes('<string>'),
+    );
+    assert.ok(hasStringErr, 'Should require string header for string type usage');
+  });
+
+  test('flags formatting manipulators without #include <iomanip>', async () => {
+    const code = '#include <iostream>\nusing namespace std;\nint main() { cout << fixed << setprecision(2) << 3.14; return 0; }';
+    const { body } = await post(code);
+    assert.equal(body.success, false);
+    const hasIomanipErr = body.errors.some(
+      e => e.type === 'semantic' && e.message.includes('<iomanip>'),
+    );
+    assert.ok(hasIomanipErr, 'Should require iomanip for fixed/setprecision');
+  });
+
+  test('flags utility functions without #include <cstdlib>', async () => {
+    const code = '#include <iostream>\nusing namespace std;\nint main() { int value = rand(); cout << value; return 0; }';
+    const { body } = await post(code);
+    assert.equal(body.success, false);
+    const hasCstdlibErr = body.errors.some(
+      e => e.type === 'semantic' && e.message.includes('<cstdlib>'),
+    );
+    assert.ok(hasCstdlibErr, 'Should require cstdlib for rand');
+  });
+
+  test('flags wrong legacy preprocessor directive for string', async () => {
+    const code = '#include <iostream>\n#include <string.h>\nusing namespace std;\nint main() { string name = "Ada"; cout << name; return 0; }';
+    const { body } = await post(code);
+    assert.equal(body.success, false);
+    const hasWrongDirective = body.errors.some(
+      e => e.type === 'semantic' && e.message.includes('Wrong preprocessor directive') && e.message.includes('<string>'),
+    );
+    assert.ok(hasWrongDirective, 'Should explain that string.h is wrong for C++ string');
+  });
+
+  test('flags wrong preprocessor directive for cout', async () => {
+    const code = '#include <cstdio>\nusing namespace std;\nint main() { cout << "hello"; return 0; }';
+    const { body } = await post(code);
+    assert.equal(body.success, false);
+    const hasWrongDirective = body.errors.some(
+      e => e.type === 'semantic' && e.message.includes('Wrong preprocessor directive') && e.message.includes('<iostream>'),
+    );
+    assert.ok(hasWrongDirective, 'Should explain that cstdio is wrong for cout');
+  });
+
   test('passes code with proper includes and using namespace std', async () => {
     const code = '#include <iostream>\nusing namespace std;\nint main() { cout << "hello"; return 0; }';
+    const { body } = await post(code);
+    assert.equal(body.success, true);
+  });
+
+  test('passes file stream declarations with #include <fstream>', async () => {
+    const code = '#include <fstream>\nusing namespace std;\nint main() { ifstream input; ofstream output; fstream file; return 0; }';
     const { body } = await post(code);
     assert.equal(body.success, true);
   });
@@ -413,6 +476,33 @@ describe('Suite 13 – Unsupported Feature Detection', () => {
       body.errors?.some(e => e.message?.toLowerCase().includes('template')) ||
       body.explanations?.some(e => e.toLowerCase().includes('template'));
     assert.ok(mentionsTemplate, 'Should mention unsupported template feature');
+  });
+
+  test('rejects lambda expressions, including empty capture lists', async () => {
+    const { body } = await post('int main() { auto f = []() { return 1; }; return 0; }');
+    assert.equal(body.success, false);
+    const mentionsLambda =
+      body.errors?.some(e => e.message?.toLowerCase().includes('lambda')) ||
+      body.explanations?.some(e => e.toLowerCase().includes('lambda'));
+    assert.ok(mentionsLambda, 'Should mention unsupported lambda feature');
+  });
+
+  test('rejects function overloading as outside foundations scope', async () => {
+    const { body } = await post('int add(int a) { return a; } double add(double a) { return a; } int main() { return 0; }');
+    assert.equal(body.success, false);
+    const mentionsOverloading =
+      body.errors?.some(e => e.message?.toLowerCase().includes('overloading')) ||
+      body.explanations?.some(e => e.toLowerCase().includes('overloading'));
+    assert.ok(mentionsOverloading, 'Should mention unsupported function overloading');
+  });
+
+  test('rejects class-based OOP input', async () => {
+    const { body } = await post('class Player { public: int hp; }; int main() { return 0; }');
+    assert.equal(body.success, false);
+    const mentionsOop =
+      body.errors?.some(e => e.message?.toLowerCase().includes('oop') || e.message?.toLowerCase().includes('class')) ||
+      body.explanations?.some(e => e.toLowerCase().includes('oop') || e.toLowerCase().includes('class'));
+    assert.ok(mentionsOop, 'Should mention unsupported OOP/class input');
   });
 });
 

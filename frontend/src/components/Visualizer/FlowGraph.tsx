@@ -113,27 +113,27 @@ const EDITOR_TITLE: Record<string, string> = {
 };
 
 const CODE_PLACEHOLDER: Record<string, string> = {
-  process:            'e.g.  let score be zero',
-  decision:           'e.g.  repeat while score is below 75',
-  io:                 'e.g.  display hello world',
-  predefined:         'e.g.  call calculate result',
+  process:            'Type a simple sentence, e.g. score starts at zero',
+  decision:           'Type a condition, e.g. if age is greater than 17',
+  io:                 'Type what to show, e.g. display hello world',
+  predefined:         'Type a helper call, e.g. call calculate result',
   connector:          '',
   off_page_connector: '',
-  document:           'e.g.  write report.txt',
-  manual_input:       'e.g.  ask the user for their name',
-  delay:              'e.g.  wait 2 seconds',
-  database:           'e.g.  create a list of scores',
+  document:           'Type a file step, e.g. write report.txt',
+  manual_input:       'Type what to read, e.g. ask the user for their name',
+  delay:              'Type a wait step, e.g. wait 2 seconds',
+  database:           'Type a data step, e.g. create a 2D array of scores',
   terminator:         '',
   junction:           '',
 };
 
 const NODE_TEMPLATES: Record<string, { label: string; code: string }[]> = {
   process: [
-    { label: 'Set score', code: 'let score be zero' },
+    { label: 'Start score', code: 'score starts at zero' },
     { label: 'Update score', code: 'set score to score plus 10' },
-    { label: 'Count one more', code: 'increase counter by one' },
+    { label: 'Count one more', code: 'add one to counter' },
     { label: 'Store answer', code: 'store 75 in passing score' },
-    { label: 'Create class', code: 'class Student {\npublic:\n    string name;\n    int age;\n};' },
+    { label: 'Calculate total', code: 'set total to price plus tax' },
   ],
   decision: [
     { label: 'Age is adult', code: 'if age is greater than 17' },
@@ -150,16 +150,19 @@ const NODE_TEMPLATES: Record<string, { label: string; code: string }[]> = {
     { label: 'Ask age', code: 'ask the user for their age' },
   ],
   predefined: [
-    { label: 'Call calculate', code: 'calculateResult()' },
-    { label: 'Call validate', code: 'validateInput()' },
-    { label: 'Define helper', code: 'int add(int a, int b) {\n    return a + b;\n}' },
+    { label: 'Call calculate', code: 'call calculate result' },
+    { label: 'Call validate', code: 'call validate input' },
+    { label: 'Call display', code: 'call display summary with total' },
   ],
   delay: [
-    { label: 'Wait one second', code: 'sleep(1)' },
+    { label: 'Wait one second', code: 'wait one second' },
   ],
   database: [
-    { label: 'Create array', code: 'int values[10];' },
-    { label: 'Store score', code: 'scores[i] = score;' },
+    { label: 'Create array', code: 'create an array of scores' },
+    { label: 'Create 2D array', code: 'create a 2D array of scores' },
+    { label: 'Create 3D array', code: 'create a 3D array of cubes' },
+    { label: 'Store score', code: 'store score in scores' },
+    { label: 'Store in 2D', code: 'store score at row zero column one of scores' },
   ],
   document: [
     { label: 'Write report', code: 'report.txt' },
@@ -904,9 +907,9 @@ const FlowchartQuickGuide: React.FC<{ onClose: () => void }> = ({ onClose }) => 
         <div style={{ color: '#e6edf3', fontWeight: 700, marginBottom: 4 }}>Best workflow</div>
         <ol style={{ paddingLeft: 18, margin: 0 }}>
           <li>Add Start, actions, decisions, then End. New shapes auto-wire from the current loose endpoint.</li>
-          <li>Double-click each shape and type human sentences or C++.</li>
+          <li>Double-click each shape and type one simple sentence, command, or pseudocode step.</li>
           <li>Connect handles from top to bottom; decision edges auto-label true/false.</li>
-          <li>Click Generate C++ and fix only blocking validation errors.</li>
+          <li>Click Generate C++ and fix the validation messages. This does not compile or run the code.</li>
         </ol>
       </div>
       <div>
@@ -916,7 +919,8 @@ const FlowchartQuickGuide: React.FC<{ onClose: () => void }> = ({ onClose }) => 
 ask for user age
 if user age is greater than 17
 print too young
-increase score by 10`}
+score starts at zero
+add one to score`}
         </code>
       </div>
       <div>
@@ -1065,7 +1069,7 @@ const GenerateCodePanel: React.FC<{
 
           {(!showValidation || !hasIssues) && !isDirty && (
             <div style={{ fontSize: 9, color: '#484f58', lineHeight: 1.6, padding: '5px 8px', background: 'rgba(168,85,247,0.06)', borderRadius: 6, border: '1px solid rgba(168,85,247,0.2)' }}>
-              Build with pseudocode steps → label decision edges{' '}
+              Type simple sentence steps. No AI, no compilation. Label decision edges{' '}
               <strong style={{ color: '#4caf50' }}>true</strong> /{' '}
               <strong style={{ color: '#ff6b6b' }}>false</strong>{' '}
               → click Generate
@@ -1244,10 +1248,10 @@ const NodeEditor: React.FC<{
             <div>
               <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, marginBottom: 7 }}>
                 <label style={{ fontSize: 10, fontWeight: 700, color: '#6e7681', textTransform: 'uppercase', letterSpacing: '0.8px', fontFamily: "'IBM Plex Mono', monospace" }}>
-                  Pseudocode step
+                  Simple instruction
                 </label>
                 <span style={{ fontSize: 10, color: '#3d444d', fontFamily: "'IBM Plex Mono', monospace" }}>
-                  — one simple algorithm instruction
+                  — sentence, command, or pseudocode; one step only
                 </span>
               </div>
               <textarea
