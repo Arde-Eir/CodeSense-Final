@@ -178,6 +178,9 @@ export const DatabaseService = {
         if (msg.includes('database error saving new user') || msg.includes('unexpected_failure')) {
           throw new Error('SERVER_ERROR')
         }
+        if (msg.includes('error sending confirmation email') || msg.includes('confirmation email')) {
+          throw new Error('CONFIRMATION_EMAIL_FAILED')
+        }
         if (isProfilePolicyError(error)) {
           throw new Error('PROFILE_SETUP_BLOCKED')
         }

@@ -20,7 +20,6 @@ begin
     id,
     email,
     playername,
-    charactertype,
     user_type,
     lastactive
   )
@@ -31,7 +30,6 @@ begin
       nullif(new.raw_user_meta_data ->> 'playername', ''),
       split_part(new.email, '@', 1)
     ),
-    'squire',
     coalesce(nullif(new.raw_user_meta_data ->> 'user_type', ''), 'student'),
     now()
   )

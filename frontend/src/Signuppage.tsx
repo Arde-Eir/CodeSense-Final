@@ -396,6 +396,7 @@ const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
     else if (msg === 'EMAIL_TAKEN')             setErrors({ email: 'An account with this email already exists.' });
     else if (msg === 'EMAIL_ORPHANED')           setErrors({ email: 'This email is already registered. If this is your account, try logging in instead.' });
     else if (msg === 'PROFILE_SETUP_BLOCKED')   setErrors({ submit: 'Account auth was created, but profile setup is blocked by database security rules. Please apply the signup RLS fix in Supabase.' });
+    else if (msg === 'CONFIRMATION_EMAIL_FAILED') setErrors({ submit: 'Supabase could not send the confirmation email. Disable email confirmations or fix SMTP settings in Supabase Auth.' });
     else if (msg === 'SERVER_ERROR')            setErrors({ submit: 'A server error occurred. Please try again in a moment.' });
     else {
       setErrors({ submit: msg || 'An unexpected error occurred. Please try again.' });
