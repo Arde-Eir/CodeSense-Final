@@ -17,6 +17,7 @@ interface Props {
 
 const MCGameInner: React.FC<{ questions: MCQ[]; onComplete: (score: number, total: number) => void; onItemChange?: (index: number) => void }> = ({ questions, onComplete, onItemChange }) => {
   const [qIdx,     setQIdx]     = React.useState(0);
+  const [finalScore, setFinalScore] = React.useState(0);
 
   // Notify on mount + on every index change (including the initial 0).
   React.useEffect(() => { onItemChange?.(qIdx); }, [qIdx, onItemChange]);
@@ -40,16 +41,15 @@ const MCGameInner: React.FC<{ questions: MCQ[]; onComplete: (score: number, tota
   if (done) return (
     <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 16 }}>
       <div style={{ fontSize: 48 }}>🎓</div>
-      {/* Read scoreRef directly — useState lags one render behind on the last correct pick */}
       <div style={{ fontSize: 22, fontWeight: 800, color: '#facc15', fontFamily: 'Inter,sans-serif' }}>
-        {scoreRef.current}/{questions.length} correct
+        {finalScore}/{questions.length} correct
       </div>
       <div style={{ fontSize: 13, color: '#8b949e', fontFamily: 'Inter,sans-serif' }}>
-        {scoreRef.current === questions.length
+        {finalScore === questions.length
           ? '🏆 Perfect score!'
-          : scoreRef.current === 0
+          : finalScore === 0
             ? 'Better luck next time.'
-            : `${Math.round((scoreRef.current / questions.length) * 100)}% accuracy`}
+            : `${Math.round((finalScore / questions.length) * 100)}% accuracy`}
       </div>
     </div>
   );
@@ -68,9 +68,11 @@ const MCGameInner: React.FC<{ questions: MCQ[]; onComplete: (score: number, tota
 
   const next = () => {
     if (isLast) {
+      const score = scoreRef.current;
+      setFinalScore(score);
       setDone(true);
       // Small delay lets the "Finish" button feedback register visually
-      setTimeout(() => onComplete(scoreRef.current, questions.length), 400);
+      setTimeout(() => onComplete(score, questions.length), 400);
       return;
     }
     setQIdx(v => v + 1);

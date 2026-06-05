@@ -10,21 +10,26 @@
 //   • `isCompleted` is the durable "has this quest ever been completed"
 //     flag. In the DB-backed UI it is derived from first_completed_at.
 
-import type { ActivityTab, Phase } from '../types/campaign';
+import type { ActivityTab, CorePhase, Phase } from '../types/campaign';
+import { levelForPhase } from '../types/campaign';
 
 export const FIRST_COMPLETION_XP = 200;
 export const RETAKE_COMPLETION_XP = 20;
 export const HINT_XP_COST = 25;
 export const HINT_PENALTY_CAP_RATIO = 0.5;
 
-export const LEVEL_XP_CAP_BY_PHASE: Record<Phase, number> = {
+export const LEVEL_XP_CAP_BY_PHASE: Record<CorePhase, number> = {
   beginner: 1000,
   intermediate: 2000,
   advanced: 3000,
 };
 
 export function levelXpCapForPhase(phase: Phase | null | undefined): number {
-  return phase ? LEVEL_XP_CAP_BY_PHASE[phase] : 0;
+  if (!phase) return 0;
+  if (phase === 'beginner' || phase === 'intermediate' || phase === 'advanced') {
+    return LEVEL_XP_CAP_BY_PHASE[phase];
+  }
+  return levelForPhase(phase) * 1000;
 }
 
 export interface RetakeXpInputs {

@@ -20,7 +20,7 @@ const OrderingGameInner: React.FC<{ rawItems: OrderItem[]; onComplete: (score: n
       s = (1664525 * s + 1013904223) >>> 0;
       return s / 0x100000000;
     };
-    let arr = [...items];
+    const arr = [...items];
     for (let i = arr.length - 1; i > 0; i--) {
       const j = Math.floor(nextRand() * (i + 1));
       [arr[i], arr[j]] = [arr[j], arr[i]];

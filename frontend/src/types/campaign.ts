@@ -9,19 +9,42 @@
 // ============================================================================
 
 // ─── Phase / Level ──────────────────────────────────────────────────────────
-export type Phase = 'beginner' | 'intermediate' | 'advanced';
+export type CorePhase = 'beginner' | 'intermediate' | 'advanced';
+export type Phase = CorePhase | `level_${number}`;
 
-export const PHASE_TO_LEVEL: Record<Phase, 1 | 2 | 3> = {
+export const PHASE_TO_LEVEL: Record<CorePhase, 1 | 2 | 3> = {
   beginner:     1,
   intermediate: 2,
   advanced:     3,
 };
 
-export const LEVEL_TO_PHASE: Record<1 | 2 | 3, Phase> = {
+export const LEVEL_TO_PHASE: Record<1 | 2 | 3, CorePhase> = {
   1: 'beginner',
   2: 'intermediate',
   3: 'advanced',
 };
+
+export function phaseForLevel(level: number): Phase {
+  if (level === 1) return 'beginner';
+  if (level === 2) return 'intermediate';
+  if (level === 3) return 'advanced';
+  return `level_${Math.max(1, Math.trunc(level))}` as `level_${number}`;
+}
+
+export function levelForPhase(phase: Phase | string | null | undefined): number {
+  if (phase === 'beginner') return 1;
+  if (phase === 'intermediate') return 2;
+  if (phase === 'advanced') return 3;
+  const match = String(phase ?? '').match(/^level_([1-9][0-9]*)$/);
+  return match ? Number(match[1]) : 1;
+}
+
+export function isCampaignPhase(value: string | null | undefined): value is Phase {
+  return value === 'beginner' ||
+    value === 'intermediate' ||
+    value === 'advanced' ||
+    /^level_[1-9][0-9]*$/.test(value ?? '');
+}
 
 // ─── Activity tabs (mini-games inside a quest) ──────────────────────────────
 export type ActivityTab = 'drag' | 'code_fill' | 'balloon' | 'ordering' | 'mc';
@@ -80,7 +103,7 @@ export interface Quest {
   title: string;
   description: string | null;
   difficulty:     'easy' | 'medium' | 'hard' | null;
-  level:          1 | 2 | 3 | null;
+  level:          number | null;
   phase:          Phase | null;
   /** Discriminates campaign quests from other modes (e.g. 'sandbox'). Queried
    *  via `.eq('mode', 'campaign')` in AdminPanel and elsewhere. */
@@ -156,7 +179,7 @@ export interface LevelInfo {
   accent_color: string;
 }
 
-export const PHASE_DEFAULTS: Record<Phase, LevelInfo> = {
+export const PHASE_DEFAULTS: Record<CorePhase, LevelInfo> = {
   beginner: {
     title:        'The Core of Programming',
     subtitle:     'Beginner · Level 1',
@@ -179,6 +202,20 @@ export const PHASE_DEFAULTS: Record<Phase, LevelInfo> = {
     accent_color: '#f85149',
   },
 };
+
+export function defaultLevelInfoForPhase(phase: Phase): LevelInfo {
+  if (phase === 'beginner' || phase === 'intermediate' || phase === 'advanced') {
+    return PHASE_DEFAULTS[phase];
+  }
+  const level = levelForPhase(phase);
+  return {
+    title:        `Level ${level}`,
+    subtitle:     `Custom Level ${level}`,
+    description:  'New learning material and quests.',
+    banner_url:   null,
+    accent_color: '#a371f7',
+  };
+}
 
 // ─── Aggregate stats shown in the level dashboard sidebar ──────────────────
 export interface LevelStats {

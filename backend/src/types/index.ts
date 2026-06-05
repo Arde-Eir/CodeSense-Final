@@ -461,7 +461,7 @@ export interface AnalysisError {
 
 export interface ControlFlowNode {
   id: string;
-  type: 'start' | 'end' | 'process' | 'decision' | 'input' | 'output' | 'junction' | 'connector' | 'off_page_connector' | 'predefined';
+  type: 'start' | 'end' | 'process' | 'decision' | 'input' | 'output' | 'junction' | 'connector' | 'off_page_connector' | 'predefined' | 'document' | 'delay' | 'database';
   label: string;
   code?: string;
   line?: number;

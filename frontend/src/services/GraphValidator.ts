@@ -93,46 +93,46 @@ const PSEUDOCODE_NODE_TYPES = new Set([
   'database',
 ]);
 
-const UNSUPPORTED_CPP_PATTERNS: Array<{ code: string; re: RegExp; message: string }> = [
+const OUT_OF_SCOPE_CPP_PATTERNS: Array<{ code: string; re: RegExp; message: string }> = [
   {
     code: 'UNSUPPORTED_TEMPLATE',
     re: /\btemplate\s*</,
-    message: 'Templates are outside this foundational CP1/selected-CP2 scope.',
+    message: 'Templates are outside the CP1/CP2 flowchart scope. Use basic functions, arrays, decisions, loops, and I/O instead.',
   },
   {
     code: 'UNSUPPORTED_STL',
     re: /#include\s*<(?:vector|map|unordered_map|set|list|deque|queue|stack|algorithm|utility|tuple|array|functional|memory|optional|variant|bitset|numeric|iterator|ranges)>|\bstd::(?:vector|map|unordered_map|set|unordered_set|list|deque|queue|stack|pair|tuple|array)\b|\b(?:vector|map|set|queue|stack|list|deque|pair)\s*</,
-    message: 'STL containers and advanced STL headers are outside this foundational analyzer scope. Use basic arrays instead.',
+    message: 'STL containers and advanced STL headers are outside the CP1/CP2 flowchart scope. Use basic arrays instead.',
   },
   {
     code: 'UNSUPPORTED_OOP',
     re: /\b(class|struct)\s+[A-Za-z_][A-Za-z0-9_]*\s*(?::[^{]+)?\{|\b(public|private|protected)\s*:|\bthis\s*(?:->|\.)/,
-    message: 'OOP/class-style code is outside this foundational analyzer scope.',
+    message: 'OOP/class-style code is outside the CP1/CP2 flowchart scope.',
   },
   {
     code: 'UNSUPPORTED_OPERATOR_OVERLOAD',
     re: /\boperator\s*(==|!=|<=|>=|<|>|\+|-|\*|\/|%|<<|>>|\[\]|\(\)|=|\+=|-=|\*=|\/=)/,
-    message: 'Operator overloading is outside this foundational analyzer scope.',
+    message: 'Operator overloading is outside the CP1/CP2 flowchart scope.',
   },
   {
     code: 'UNSUPPORTED_LAMBDA',
     re: /\[\s*(?:[&=]|\w+)?(?:\s*,\s*(?:[&=]|\w+))*\s*\]\s*\(/,
-    message: 'Lambda expressions are outside this foundational analyzer scope.',
+    message: 'Lambda expressions are outside the CP1/CP2 flowchart scope.',
   },
   {
     code: 'UNSUPPORTED_COROUTINE',
     re: /\bco_await\b|\bco_yield\b|\bco_return\b/,
-    message: 'Coroutines are outside this foundational analyzer scope.',
+    message: 'Coroutines are outside the CP1/CP2 flowchart scope.',
   },
   {
     code: 'UNSUPPORTED_CONCEPTS',
     re: /\bconcept\b|\brequires\b/,
-    message: 'C++20 concepts/requires are outside this foundational analyzer scope.',
+    message: 'C++20 concepts/requires are outside the CP1/CP2 flowchart scope.',
   },
   {
     code: 'UNSUPPORTED_VIRTUAL',
     re: /\bvirtual\s+\w/,
-    message: 'Virtual functions and polymorphism are outside this foundational analyzer scope.',
+    message: 'Virtual functions and polymorphism are outside the CP1/CP2 flowchart scope.',
   },
   {
     code: 'NO_COMPILATION_REQUEST',
@@ -146,7 +146,7 @@ function getInstruction(node: Node): string {
 }
 
 function looksLikeRawCpp(value: string): boolean {
-  return /[;{}]|<<|>>|\b(cout|cin|printf|scanf|return|int|float|double|char|bool|string|vector|while|for)\b/.test(value);
+  return /[;{}]|<<|>>|\b(cout|cin|printf|scanf|return|int|float|double|char|bool|string|vector)\b|\b(?:while|for|if|switch)\s*\(/.test(value);
 }
 
 function rawInstruction(node: Node): string {
@@ -156,14 +156,23 @@ function rawInstruction(node: Node): string {
 function detectUnsupportedCpp(node: Node): ValidationIssue[] {
   const instruction = rawInstruction(node);
   if (!instruction) return [];
-  return UNSUPPORTED_CPP_PATTERNS
+  const preprocessorIssues: ValidationIssue[] = /#\s*include\b/.test(instruction)
+    ? [{
+        severity: 'error',
+        code: 'FLOWCHART_MANUAL_INCLUDE',
+        message: 'Do not place #include directives inside flowchart nodes. Flowchart-to-code adds the required preprocessor directives automatically from the generated C++.',
+        nodeIds: [node.id],
+      }]
+    : [];
+
+  return preprocessorIssues.concat(OUT_OF_SCOPE_CPP_PATTERNS
     .filter(pattern => pattern.re.test(instruction))
     .map(pattern => ({
       severity: 'error' as const,
       code: pattern.code,
-      message: `${pattern.message} Rewrite this node using basic variables, arrays, decisions, loops, I/O, or simple helper calls.`,
+      message: pattern.message,
       nodeIds: [node.id],
-    }));
+    })));
 }
 
 function normalizeSignatureType(type: string): string {
@@ -189,7 +198,7 @@ function detectFunctionOverloadNodes(nodes: Node[]): ValidationIssue[] {
         issues.push({
           severity: 'error',
           code: 'UNSUPPORTED_FUNCTION_OVERLOADING',
-          message: `Function overloading is outside this foundational analyzer scope. "${name}" appears with multiple parameter lists.`,
+          message: `Function overloading is outside the CP1/CP2 flowchart scope. "${name}" appears with multiple parameter lists.`,
           nodeIds: [known.nodeId, node.id],
         });
       }
@@ -207,6 +216,84 @@ function detectFunctionOverloadNodes(nodes: Node[]): ValidationIssue[] {
 function startsLikePseudocode(value: string, starters: RegExp): boolean {
   const cleaned = value.trim().replace(/^\s*(?:then|next|finally)\s+/i, '');
   return starters.test(cleaned);
+}
+
+function shapeMismatchIssue(node: Node): string | null {
+  const type = String(node.type ?? '');
+  const instruction = getInstruction(node);
+  if (!instruction || EXECUTABLE_PLACEHOLDERS.has(instruction.toLowerCase())) {
+    return null;
+  }
+
+  const cleaned = instruction.trim().replace(/^\s*(?:then|next|finally)\s+/i, '');
+  const lower = cleaned.toLowerCase();
+  const rawInput = /\b(?:cin\s*>>|scanf\s*\()/.test(lower);
+  const rawOutput = /\b(?:cout\s*<<|printf\s*\()/.test(lower);
+  const rawFile = /\b(?:fstream|ofstream|ifstream)\b/.test(lower);
+  const rawData = /\bnew\s+\w|\bdelete(?:\s*\[\])?\b|\w+\s*\[[^\]]+\]/.test(lower);
+  const rawCallMatch = cleaned.match(/^([A-Za-z_][A-Za-z0-9_]*)\s*\([^;{}]*\)\s*;?$/);
+  const rawCall = !!rawCallMatch && !['if', 'while', 'for', 'switch', 'return', 'sizeof'].includes(rawCallMatch[1]);
+
+  if (type !== 'manual_input' && rawInput) {
+    return 'This raw C++ reads input. Use Manual Input for cin/read steps.';
+  }
+  if (type !== 'io' && rawOutput) {
+    return 'This raw C++ writes output. Use Output for cout/display steps.';
+  }
+  if ((type === 'process' || type === 'io' || type === 'manual_input') && rawFile) {
+    return 'This raw C++ uses file streams. Use the Document shape for file work.';
+  }
+  if (type !== 'database' && rawData && !rawInput && !rawOutput) {
+    return 'This raw C++ represents array/storage or dynamic memory work. Use the Stored Data shape.';
+  }
+  if (type !== 'predefined' && type !== 'off_page_connector' && rawCall && !rawInput && !rawOutput) {
+    return 'This raw C++ is a helper/function call. Use the Predefined Process shape. On-page and off-page connectors are routing references, not function-call shapes.';
+  }
+  if (type === 'off_page_connector' && rawCall && !rawInput && !rawOutput) {
+    return 'Off-page connectors are cross-page references, not function calls. Use the Predefined Process shape for helper/function calls.';
+  }
+
+  if (looksLikeRawCpp(instruction)) {
+    return null;
+  }
+
+  const isInput = /^(ask|read|get|input|enter)\b/i.test(cleaned);
+  const isOutput = /^(display|show|print|output|tell)\b/i.test(cleaned);
+  const isFile = /^(write|save|open|read|create|load)\b/i.test(cleaned) && /\.(?:txt|csv|json|xml|log)\b/i.test(cleaned);
+  const isDelay = /^(wait|pause|delay)\b/i.test(cleaned);
+  const isCall = /^(call|run|use|execute)\b/i.test(cleaned) || /^[A-Za-z_][A-Za-z0-9_]*\s*\(/.test(cleaned);
+  const isData = /\b(array|list|table|grid|matrix|cube|data store|database)\b/i.test(cleaned)
+    || /\b(?:index|position|row|column|col|layer|depth)\b/i.test(cleaned);
+
+  if (type !== 'manual_input' && isInput) {
+    return 'This is an input step. Use Manual Input for cin/read steps.';
+  }
+  if (type !== 'io' && isOutput) {
+    return 'This is an output step. Use Output for cout/display steps.';
+  }
+  if ((type === 'process' || type === 'io' || type === 'manual_input') && isFile) {
+    return 'This is a file/document step. Use the Document shape for report or file work.';
+  }
+  if (type !== 'delay' && isDelay) {
+    return 'This is a wait/delay step. Use the Delay shape.';
+  }
+  if (type !== 'predefined' && type !== 'off_page_connector' && isCall) {
+    return 'This is a helper/function call. Use the Predefined Process shape. On-page and off-page connectors are routing references, not function-call shapes.';
+  }
+  if (type === 'off_page_connector' && isCall) {
+    return 'Off-page connectors are cross-page references, not function calls. Use the Predefined Process shape for helper/function calls.';
+  }
+  if (type !== 'database' && isData && !isFile) {
+    return 'This is a stored-data/array step. Use the Stored Data shape.';
+  }
+  if (type === 'predefined' && (isInput || isOutput || isFile || isDelay || isData)) {
+    return 'This shape is for a helper/function call. Use the matching input, output, document, delay, or stored-data shape instead.';
+  }
+  if (type === 'delay' && (isInput || isOutput || isFile || isCall || isData)) {
+    return 'This shape is for a wait/delay step. Use the matching shape for this instruction.';
+  }
+
+  return null;
 }
 
 function pseudocodeStyleIssue(node: Node): string | null {
@@ -250,7 +337,7 @@ function pseudocodeStyleIssue(node: Node): string | null {
     case 'database':
       return startsLikePseudocode(instruction, /^(create|store|save|load|read|update|set up|make)\b/i)
         ? null
-        : 'Data-store shapes should describe stored data. Example: "create a list of scores" or "store 75 in score".';
+        : 'Stored Data shapes should describe stored data. Example: "create a list of scores" or "store 75 in score".';
     default:
       return 'Process shapes should describe one simple step. Examples: "score starts at zero", "add 1 to score", or "set total to price plus tax".';
   }
@@ -446,17 +533,18 @@ export function validateGraph(nodes: Node[], edges: Edge[]): ValidationResult {
       continue; // remaining checks require edges
     }
 
-    // 8b. ISO-style code generation supports exactly two decision exits:
-    // true/yes and false/no. Anything else is ambiguous and used to be silently
-    // truncated by the generator.
-    if (out.length !== 2) {
+    // 8b. Decision exits:
+    // One exit is a valid one-arm if. Two exits produce if/else. More than two
+    // is ambiguous and would be silently truncated by the generator.
+    if (out.length > 2) {
       push('error', 'DECISION_REQUIRES_TWO_BRANCHES',
-        `Decision "${lbl}" has ${out.length} outgoing edge(s). Use exactly two outgoing edges: one labelled "true" and one labelled "false".`,
+        `Decision "${lbl}" has ${out.length} outgoing edge(s). Use one outgoing edge for a one-arm if, or exactly two edges labelled "true" and "false" for if/else.`,
         { nodeIds: [d.id], edgeIds: out.map(e => e.id) });
     }
 
-    // 8c. Edges must be labelled true/false
-    if (out.length > 0) {
+    // 8c. Two-way decisions must be labelled true/false. A one-way decision may
+    // be unlabelled; the generator treats it as the condition being true.
+    if (out.length > 1) {
       const unlabelled = out.filter(e => !isBranchLabel(str(e.label).toLowerCase()));
 
       if (unlabelled.length > 0) {
@@ -465,10 +553,12 @@ export function validateGraph(nodes: Node[], edges: Edge[]): ValidationResult {
           'Label each decision edge so code generation can map the branches correctly.',
           { nodeIds: [d.id], edgeIds: unlabelled.map(e => e.id) });
       }
+    }
 
+    if (out.length > 0) {
       const trueEdges  = out.filter(e => isTrueLabel(str(e.label).toLowerCase()));
       const falseEdges = out.filter(e => isFalseLabel(str(e.label).toLowerCase()));
-      if (trueEdges.length === 0) {
+      if (out.length > 1 && trueEdges.length === 0) {
         push('error', 'DECISION_MISSING_TRUE',
           `Decision "${lbl}" is missing a "true" branch.`,
           { nodeIds: [d.id] });
@@ -477,7 +567,7 @@ export function validateGraph(nodes: Node[], edges: Edge[]): ValidationResult {
           `Decision "${lbl}" has ${trueEdges.length} edges labelled "true". Only one "true" branch is allowed.`,
           { nodeIds: [d.id], edgeIds: trueEdges.map(e => e.id) });
       }
-      if (falseEdges.length === 0) {
+      if (out.length > 1 && falseEdges.length === 0) {
         push('error', 'DECISION_MISSING_FALSE',
           `Decision "${lbl}" is missing a "false" branch.`,
           { nodeIds: [d.id] });
@@ -503,16 +593,21 @@ export function validateGraph(nodes: Node[], edges: Edge[]): ValidationResult {
   }
 
   // ── 9. Non-decision nodes with no outgoing edge (dead ends) ───────────────
+  const reachableFromStart = startNodes.length === 1
+    ? reachableFrom(startNodes[0].id, edges)
+    : null;
+
   const deadEnds = nodes.filter(n => {
     if (n.type === 'terminator') return false; // End nodes are intentional dead ends
+    if (reachableFromStart && !reachableFromStart.has(n.id)) return false; // already reported by reachability
     const out = outEdges.get(n.id) ?? [];
     return out.length === 0 && connectedIds.has(n.id); // connected but no output
   });
   if (deadEnds.length > 0) {
     push('error', 'DEAD_END_NODES',
-      `${deadEnds.length} non-terminator node(s) have no outgoing edge — execution gets stuck: ` +
+      `${deadEnds.length} reachable non-terminator node(s) have no outgoing edge — execution gets stuck on that path: ` +
       deadEnds.map(n => `"${str(n.data?.label) || n.type}"`).join(', ') +
-      '. Connect each one to the next step or to the End node.',
+      '. Connect each one to the next step, a merge point, or the End node.',
       { nodeIds: deadEnds.map(n => n.id) });
   }
 
@@ -570,6 +665,19 @@ export function validateGraph(nodes: Node[], edges: Edge[]): ValidationResult {
   }
 
   // ── 11. Pseudocode-style guidance ─────────────────────────────────────────
+  const shapeMismatches = nodes
+    .map(node => ({ node, message: shapeMismatchIssue(node) }))
+    .filter((entry): entry is { node: Node; message: string } => !!entry.message);
+
+  if (shapeMismatches.length > 0) {
+    push(
+      'error',
+      'FLOWCHART_SHAPE_MISMATCH',
+      `${shapeMismatches.length} node(s) use the wrong flowchart shape. ${shapeMismatches[0].message}`,
+      { nodeIds: shapeMismatches.map(entry => entry.node.id) },
+    );
+  }
+
   const pseudocodeIssues = nodes
     .map(node => ({ node, message: pseudocodeStyleIssue(node) }))
     .filter((entry): entry is { node: Node; message: string } => !!entry.message);
@@ -595,8 +703,8 @@ export function validateGraph(nodes: Node[], edges: Edge[]): ValidationResult {
     const labelled = missingCode.filter(n => hasUsableLabel(n));
 
     if (placeholders.length > 0) {
-      push('warning', 'MISSING_NODE_CODE',
-        `${placeholders.length} executable node(s) still use a placeholder and have no instruction. Double-click them and write one simple sentence, for example "set score to zero", "ask for age", or "display hello".`,
+      push('error', 'MISSING_NODE_CODE',
+        `${placeholders.length} executable node(s) still use a placeholder and have no instruction. Add the missing step text before generating, for example "set score to zero", "ask for age", or "display hello".`,
         { nodeIds: placeholders.map(n => n.id) });
     }
 

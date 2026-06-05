@@ -331,10 +331,14 @@ export class SymbolicExecutor {
     const tracedLabel = isReference ? `(reference to ${this.expressionToString(node.value)})` : '';
     const tracedVal = finalVal.type === 'concrete'
       ? (finalVal as any).value
-      : `${node.varType} ${tracedLabel}`;
+      : `${node.varType} ${tracedLabel}`.trim();
+
+    const dimsLabel = (node.dimensions || [])
+      .map((d: any) => `[${this.expressionToString(d)}]`)
+      .join('');
 
     this.valueTrace.push({
-      expression: `${node.varType} ${node.name} = ${this.expressionToString(node.value)}`,
+      expression: `${node.varType} ${node.name}${dimsLabel} = ${this.expressionToString(node.value)}`,
       value: tracedVal,
       line: (node as any).line,
     });
@@ -436,6 +440,10 @@ export class SymbolicExecutor {
     const condValue = this.evalConcreteCondition(node.condition);
     if (condValue === false) {
       node.elseBranch?.forEach(s => this.visit(s));
+      return { type: 'unknown' as const };
+    }
+    if (condValue === true) {
+      node.thenBranch.forEach(s => this.visit(s));
       return { type: 'unknown' as const };
     }
 
@@ -553,6 +561,11 @@ export class SymbolicExecutor {
       const v = this.state.variables.get(node.name);
       if (v?.type === 'concrete' && typeof v.value === 'number') return v.value;
     }
+    if (node.type === 'ArrayAccess') {
+      const key = this.arrayElementKey(node as ArrayAccessNode);
+      const v = key ? this.state.variables.get(key) : undefined;
+      if (v?.type === 'concrete' && typeof v.value === 'number') return v.value;
+    }
     return null;
   }
 
@@ -591,6 +604,35 @@ export class SymbolicExecutor {
           'Potential infinite loop: for-loop condition variable(s) are never modified.',
         );
       }
+    }
+
+    const maxConcreteIterations = 100;
+    let ranConcreteLoop = false;
+    let completedConcreteLoop = false;
+    const concreteStartState = this.cloneState();
+
+    if (node.condition) {
+      for (let iteration = 0; iteration < maxConcreteIterations; iteration++) {
+        const condValue = this.evalConcreteCondition(node.condition);
+        if (condValue === false) {
+          ranConcreteLoop = true;
+          completedConcreteLoop = true;
+          break;
+        }
+        if (condValue !== true) break;
+
+        ranConcreteLoop = true;
+        node.body.forEach(s => this.visit(s));
+        if (this.returned) break;
+        if (node.update) this.visit(node.update as ASTNode);
+      }
+    }
+
+    if (ranConcreteLoop && completedConcreteLoop) {
+      return { type: 'unknown' as const };
+    }
+    if (ranConcreteLoop) {
+      this.state = concreteStartState;
     }
 
     const preState = this.cloneState();
@@ -999,17 +1041,39 @@ export class SymbolicExecutor {
   }
 
   private visitFunctionCall(node: FunctionCallNode): SymbolicValue {
-  if (node.name === this.currentFunction) {
-    this.addSafetyCheck(
-      (node as any).line || 0,
-      'recursion',
-      'WARNING',
-      `Recursive call to '${node.name}' detected. Verify a base case exists to prevent a stack overflow.`,
-    );
+    if (node.name === this.currentFunction) {
+      this.addSafetyCheck(
+        (node as any).line || 0,
+        'recursion',
+        'WARNING',
+        `Recursive call to '${node.name}' detected. Verify a base case exists to prevent a stack overflow.`,
+      );
+    }
+
+    const args = (node.arguments || []).map((arg: ASTNode) => this.visit(arg));
+    const concreteArgs = args.map(arg => arg.type === 'concrete' ? arg.value : null);
+
+    if (concreteArgs.every(value => value !== null)) {
+      const [a, b] = concreteArgs as number[];
+      switch (node.name) {
+        case 'abs':
+        case 'fabs':
+          return { type: 'concrete', value: Math.abs(a) };
+        case 'sqrt':
+          return a >= 0 ? { type: 'concrete', value: Math.sqrt(a) } : { type: 'unknown' };
+        case 'pow':
+          return { type: 'concrete', value: Math.pow(a, b) };
+        case 'ceil':
+          return { type: 'concrete', value: Math.ceil(a) };
+        case 'floor':
+          return { type: 'concrete', value: Math.floor(a) };
+        case 'round':
+          return { type: 'concrete', value: Math.round(a) };
+      }
+    }
+
+    return { type: 'unknown' as const };
   }
-  (node.arguments || []).forEach((arg: ASTNode) => this.visit(arg));
-  return { type: 'unknown' as const };
-}
 
   private visitMultipleVariableDecl(node: any): SymbolicValue {
     (node.declarations || []).forEach((decl: ASTNode) => this.visit(decl));
@@ -1436,6 +1500,7 @@ export class SymbolicExecutor {
   private expressionToString(node: any): string {
     if (!node) return '';
     if (typeof node === 'string') return node;
+    if (typeof node !== 'object') return String(node);
     switch (node.type) {
       case 'BinaryOp':
         return `${this.expressionToString(node.left)} ${node.operator} ${this.expressionToString(node.right)}`;
@@ -1447,11 +1512,26 @@ export class SymbolicExecutor {
         const idxStr = node.indices.map((i: any) => `[${this.expressionToString(i)}]`).join('');
         return `${node.name}${idxStr}`;
       }
-      case 'PostIncrement': return `${node.operand}++`;
-      case 'PreIncrement':  return `++${node.operand}`;
-      case 'PostDecrement': return `${node.operand}--`;
-      case 'PreDecrement':  return `--${node.operand}`;
-      default: return 'expr';
+      case 'InitializerList':
+        return `{${(node.values || []).map((v: any) => this.expressionToString(v)).join(', ')}}`;
+      case 'Assignment': {
+        const target = typeof node.target === 'string'
+          ? node.target
+          : this.expressionToString(node.target);
+        return `${target} ${node.operator} ${this.expressionToString(node.value)}`;
+      }
+      case 'FunctionCall':
+        return `${node.name}(${(node.arguments || []).map((arg: any) => this.expressionToString(arg)).join(', ')})`;
+      case 'UnaryOp':
+        return `${node.operator}${this.expressionToString(node.operand)}`;
+      case 'PostIncrement': return `${this.expressionToString(node.operand)}++`;
+      case 'PreIncrement':  return `++${this.expressionToString(node.operand)}`;
+      case 'PostDecrement': return `${this.expressionToString(node.operand)}--`;
+      case 'PreDecrement':  return `--${this.expressionToString(node.operand)}`;
+      default:
+        if (node.name !== undefined && node.name !== null) return String(node.name);
+        if (node.value !== undefined && node.value !== null) return String(node.value);
+        return node.type || 'expr';
     }
   }
 

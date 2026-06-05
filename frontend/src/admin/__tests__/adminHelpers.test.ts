@@ -114,6 +114,10 @@ describe('levelToPhase', () => {
   it('maps 3 → advanced', () => {
     expect(levelToPhase(3)).toBe('advanced');
   });
+  it('maps custom levels to stable generated phase keys', () => {
+    expect(levelToPhase(4)).toBe('level_4');
+    expect(levelToPhase(8)).toBe('level_8');
+  });
 });
 
 // ─── fixPopLanguageInQuestion ─────────────────────────────────────────────

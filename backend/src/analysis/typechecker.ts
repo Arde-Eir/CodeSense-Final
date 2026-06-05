@@ -515,8 +515,9 @@ export class TypeChecker {
       // ── REFERENCE DECLARATIONS are always type-compatible ──────────────
       const normalizedDeclType = varNode.varType.replace(/\s+/g, '');
       const isReferenceDecl = normalizedDeclType.includes('&');
+      const isValidConstructorInit = this.isConstructorInitializationCompatible(varNode, valueType);
 
-      if (!isReferenceDecl && valueType && !this.isTypeCompatible(varNode.varType, valueType, varNode.value)) {
+      if (!isReferenceDecl && valueType && !isValidConstructorInit && !this.isTypeCompatible(varNode.varType, valueType, varNode.value)) {
         this.addError(node, `Type mismatch: cannot assign '${valueType}' to '${varNode.varType}'`);
       } else if (isReferenceDecl && valueType) {
         const baseTarget = normalizedDeclType.replace(/&+$/, '').replace(/^const/, '').replace(/\s+/g, '');
@@ -819,14 +820,23 @@ export class TypeChecker {
     }
 
     this.returnDepth++;
+    const beforeBranchDirty = new Map(this.dirtyAssignment);
+
     this.enterScope('if');
     ifn.thenBranch.forEach((s: ASTNode) => this.visit(s));
     this.exitScope();
+    const thenDirty = new Map(this.dirtyAssignment);
+
+    this.dirtyAssignment = new Map(beforeBranchDirty);
+    let elseDirty = new Map(beforeBranchDirty);
     if (ifn.elseBranch) {
       this.enterScope('else');
       ifn.elseBranch.forEach((s: ASTNode) => this.visit(s));
       this.exitScope();
+      elseDirty = new Map(this.dirtyAssignment);
     }
+
+    this.dirtyAssignment = this.mergeBranchDirtyAssignments(thenDirty, elseDirty);
     this.returnDepth--;
     return null;
   }
@@ -858,10 +868,11 @@ export class TypeChecker {
   }
 
   private visitLabelStatement(node: any): string | null {
-    if (this.definedLabels.has(node.name)) {
-      this.addError(node, `Duplicate label '${node.name}' in the same function.`, 'error');
+    const label = node.label ?? node.name;
+    if (this.definedLabels.has(label)) {
+      this.addError(node, `Duplicate label '${label}' in the same function.`, 'error');
     } else {
-      this.definedLabels.add(node.name);
+      this.definedLabels.add(label);
     }
     if (node.statement) this.visit(node.statement);
     return null;
@@ -1636,6 +1647,19 @@ if (['&', '|', '^', '<<', '>>'].includes(bin.operator)) {
   // =========================================================================
   // Redundant-assignment & usage tracking
   // =========================================================================
+  private mergeBranchDirtyAssignments(
+    thenDirty: Map<string, { line: number; overwritten: boolean }>,
+    elseDirty: Map<string, { line: number; overwritten: boolean }>,
+  ): Map<string, { line: number; overwritten: boolean }> {
+    const merged = new Map<string, { line: number; overwritten: boolean }>();
+    thenDirty.forEach((thenValue, key) => {
+      const elseValue = elseDirty.get(key);
+      if (!elseValue) return;
+      merged.set(key, thenValue.line >= elseValue.line ? thenValue : elseValue);
+    });
+    return merged;
+  }
+
   private markWrite(name: string, line: number): void {
   const full = this.getFullyScopedName(name);
   if (!full) return;
@@ -1895,6 +1919,18 @@ if (['&', '|', '^', '<<', '>>'].includes(bin.operator)) {
   // =========================================================================
   // Type compatibility & promotion helpers
   // =========================================================================
+  private isConstructorInitializationCompatible(varNode: VariableDeclNode, valueType: string | null): boolean {
+    if ((varNode as any).initStyle !== 'constructor' || !valueType) return false;
+
+    const declType = varNode.varType.replace(/\s+/g, '');
+    const fileStreamTypes = new Set(['ifstream', 'ofstream', 'fstream']);
+    if (fileStreamTypes.has(declType)) {
+      return valueType === 'string';
+    }
+
+    return false;
+  }
+
 private isTypeCompatible(target: string, source: string, sourceNode?: any): boolean {
   // Step 1: Strip ALL whitespace, then normalize references and const
   const stripRef = (t: string) =>

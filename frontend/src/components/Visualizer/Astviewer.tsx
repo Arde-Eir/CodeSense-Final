@@ -62,8 +62,11 @@ function describeNode(node: any): string {
   switch (node.type) {
     case 'FunctionDecl':
       return `defines a function called "${node.name}" that returns ${node.returnType}${node.params?.length ? ` with ${node.params.length} parameter(s)` : ' with no parameters'}`;
-    case 'VariableDecl':
-      return `creates a ${node.varType} variable named "${node.name}"${node.value ? ` set to ${describeValue(node.value)}` : ' (not initialized)'}`;
+    case 'VariableDecl': {
+      const dims = formatDimensions(node.dimensions);
+      const kind = dims ? 'array' : 'variable';
+      return `creates a ${node.varType} ${kind} named "${node.name}${dims}"${node.value ? ` set to ${describeValue(node.value)}` : ' (not initialized)'}`;
+    }
     case 'Assignment':
       return `sets "${typeof node.target === 'string' ? node.target : node.target?.name ?? '?'}" to ${describeValue(node.value)}`;
     case 'IfStatement':
@@ -116,8 +119,16 @@ function describeValue(val: any): string {
     case 'BinaryOp': return `(${describeValue(val.left)} ${val.operator} ${describeValue(val.right)})`;
     case 'UnaryOp': return `${val.operator}${describeValue(val.operand)}`;
     case 'Identifier': return val.name ?? '?';
+    case 'ArrayAccess':
+      return `${val.name}${(val.indices ?? []).map((i: any) => `[${describeValue(i)}]`).join('')}`;
+    case 'InitializerList':
+      return `{${(val.values ?? []).map((v: any) => describeValue(v)).join(', ')}}`;
     default: return val.name ?? val.type ?? '?';
   }
+}
+
+function formatDimensions(dimensions?: any[]): string {
+  return (dimensions ?? []).map(d => `[${describeValue(d)}]`).join('');
 }
 
 // ─── Summary builder ──────────────────────────────────────────────────────────
@@ -229,7 +240,7 @@ function getShortLabel(node: any): string {
     case 'FunctionDecl':
     case 'FunctionPrototype':
     case 'MethodDecl':      return `${node.name}()`;
-    case 'VariableDecl':    return `${node.varType} ${node.name}${node.value ? ` = ${describeValue(node.value)}` : ''}`;
+    case 'VariableDecl':    return `${node.varType} ${node.name}${formatDimensions(node.dimensions)}${node.value ? ` = ${describeValue(node.value)}` : ''}`;
     case 'Assignment':      return `${typeof node.target === 'string' ? node.target : node.target?.name ?? '?'} ${node.operator} ${describeValue(node.value)}`;
     case 'BinaryOp':        return `${describeValue(node.left)} ${node.operator} ${describeValue(node.right)}`;
     case 'ReturnStatement': return node.value ? `return ${describeValue(node.value)}` : 'return';

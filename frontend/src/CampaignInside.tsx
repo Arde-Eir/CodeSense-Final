@@ -23,7 +23,7 @@ import type {
   Phase, Quest, MissionProgress, QuestRow,
   LevelInfo, LevelStats,
 } from './types/campaign';
-import { PHASE_DEFAULTS, PHASE_TO_LEVEL } from './types/campaign';
+import { defaultLevelInfoForPhase, isCampaignPhase, levelForPhase, phaseForLevel } from './types/campaign';
 import { buildQuests } from './campaign/buildQuests';
 import { FIRST_COMPLETION_XP, RETAKE_COMPLETION_XP, levelXpCapForPhase } from './campaign/retakeXp';
 
@@ -244,6 +244,14 @@ const ActivityTypesPanel: React.FC<{ quests: QuestRow[] }> = ({ quests }) => {
   );
 };
 
+const QuestMixRow: React.FC<{ icon: string; label: string; value: string | number }> = ({ icon, label, value }) => (
+  <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 7 }}>
+    <span style={{ fontSize: 13, width: 18, textAlign: 'center' }}>{icon}</span>
+    <span style={{ fontSize: 11, color: '#c9d1d9', fontFamily: "'Syne',sans-serif" }}>{label}</span>
+    <span style={{ marginLeft: 'auto', fontSize: 11, color: '#e6edf3', fontWeight: 700, fontFamily: "'JetBrains Mono',monospace" }}>{value}</span>
+  </div>
+);
+
 const QuestMixPanel: React.FC<{ quests: QuestRow[] }> = ({ quests }) => {
   const lessons  = quests.filter(q => activityTypesForQuest(q).some(t => t === 'drag_drop' || t === 'code_fill' || t === 'ordering')).length;
   const quizzes  = quests.filter(q => activityTypesForQuest(q).includes('multiple_choice')).length;
@@ -254,22 +262,14 @@ const QuestMixPanel: React.FC<{ quests: QuestRow[] }> = ({ quests }) => {
     activityTypesForQuest(q).forEach(t => seen.add(t));
   }
 
-  const Row = ({ icon, label, value }: { icon: string; label: string; value: string | number }) => (
-    <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 7 }}>
-      <span style={{ fontSize: 13, width: 18, textAlign: 'center' }}>{icon}</span>
-      <span style={{ fontSize: 11, color: '#c9d1d9', fontFamily: "'Syne',sans-serif" }}>{label}</span>
-      <span style={{ marginLeft: 'auto', fontSize: 11, color: '#e6edf3', fontWeight: 700, fontFamily: "'JetBrains Mono',monospace" }}>{value}</span>
-    </div>
-  );
-
   return (
     <div style={{ background: 'rgba(255,255,255,.02)', border: '1.5px solid rgba(255,255,255,.06)', borderRadius: 13, padding: '14px 16px', animation: 'questIn .5s ease .3s both' }}>
       <div style={{ fontSize: 9, fontWeight: 700, color: '#484f58', letterSpacing: '1.5px', textTransform: 'uppercase', marginBottom: 10, fontFamily: "'JetBrains Mono',monospace" }}>Quest Mix</div>
-      <Row icon="📚" label="Lessons"    value={lessons} />
-      <Row icon="🧠" label="Quizzes"    value={quizzes} />
-      {balloons > 0 && <Row icon="🎈" label="Balloon Pop" value={balloons} />}
-      <Row icon="⚡" label="Max XP"     value={totalXP.toLocaleString()} />
-      <Row icon="🎯" label="Activities" value={seen.size} />
+      <QuestMixRow icon="📚" label="Lessons"    value={lessons} />
+      <QuestMixRow icon="🧠" label="Quizzes"    value={quizzes} />
+      {balloons > 0 && <QuestMixRow icon="🎈" label="Balloon Pop" value={balloons} />}
+      <QuestMixRow icon="⚡" label="Max XP"     value={totalXP.toLocaleString()} />
+      <QuestMixRow icon="🎯" label="Activities" value={seen.size} />
     </div>
   );
 };
@@ -278,17 +278,17 @@ const QuestMixPanel: React.FC<{ quests: QuestRow[] }> = ({ quests }) => {
 // Note: pure gating logic (buildQuests) lives in ./campaign/buildQuests.ts so
 // it can be unit-tested without mounting this component.
 export const CampaignInside: React.FC = () => {
-  const { phase: phaseParam } = useParams<{ phase: Phase }>();
+  const { phase: phaseParam } = useParams<{ phase: string }>();
   const navigate = useNavigate();
   const { user } = useAuth();
 
-  const phase: Phase = (phaseParam === 'beginner' || phaseParam === 'intermediate' || phaseParam === 'advanced')
+  const phase: Phase = isCampaignPhase(phaseParam)
     ? phaseParam
     : 'beginner';
 
   const [quests,    setQuests]    = useState<QuestRow[]>([]);
   const [stats,     setStats]     = useState<LevelStats>({ finished: 0, total: 0, xpEarned: 0, xpTotal: 0, streak: 0 });
-  const [levelInfo, setLevelInfo] = useState<LevelInfo>(PHASE_DEFAULTS[phase]);
+  const [levelInfo, setLevelInfo] = useState<LevelInfo>(() => defaultLevelInfoForPhase(phase));
   const [loading,   setLoading]   = useState(true);
   const [error,     setError]     = useState<string | null>(null);
   const [userXP,    setUserXP]    = useState(0);
@@ -315,15 +315,16 @@ export const CampaignInside: React.FC = () => {
         .eq('phase', phase)
         .maybeSingle();
       if (lm) {
+        const fallback = defaultLevelInfoForPhase(phase);
         setLevelInfo({
-          title:        lm.title        ?? PHASE_DEFAULTS[phase].title,
-          subtitle:     lm.subtitle     ?? PHASE_DEFAULTS[phase].subtitle,
+          title:        lm.title        ?? fallback.title,
+          subtitle:     lm.subtitle     ?? fallback.subtitle,
           description:  lm.description  ?? null,
           banner_url:   lm.banner_url   ?? null,
-          accent_color: lm.accent_color ?? PHASE_DEFAULTS[phase].accent_color,
+          accent_color: lm.accent_color ?? fallback.accent_color,
         });
       } else {
-        setLevelInfo(PHASE_DEFAULTS[phase]);
+        setLevelInfo(defaultLevelInfoForPhase(phase));
       }
 
       // 3. Quests for this phase
@@ -385,7 +386,7 @@ export const CampaignInside: React.FC = () => {
 
   // ── Derived ─────────────────────────────────────────────────────────────
   const accent      = levelInfo.accent_color;
-  const levelNumber = PHASE_TO_LEVEL[phase];
+  const levelNumber = levelForPhase(phase);
   const pctDone     = stats.total > 0 ? Math.round((stats.finished / stats.total) * 100) : 0;
 
   // First active quest = "Continue" CTA target.
@@ -400,9 +401,7 @@ export const CampaignInside: React.FC = () => {
   const allDone = stats.total === 0 ? !loading : stats.finished >= stats.total;
 
   const goToNextLevel = () => {
-    if (phase === 'beginner')          navigate('/campaign/inside/intermediate');
-    else if (phase === 'intermediate') navigate('/campaign/inside/advanced');
-    else                                navigate('/home');
+    navigate(`/campaign/inside/${phaseForLevel(levelNumber + 1)}`);
   };
 
   return (

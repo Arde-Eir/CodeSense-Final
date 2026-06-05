@@ -16,6 +16,41 @@ function makeEdge(id: string, source: string, target: string, label?: string): E
 }
 
 describe('generateCppFromGraph', () => {
+  it('generates C++ from the same ISO shapes used by code-to-flowchart CFG output', () => {
+    const nodes = [
+      makeNode('s', 'terminator', 'Start'),
+      makeNode('db', 'database', 'Stored Data', 'int scores[5];'),
+      makeNode('doc', 'document', 'File Stream', 'ofstream reportFile("report.txt");'),
+      makeNode('out', 'io', 'Output (cout)', 'cout << "Enter student name: ";'),
+      makeNode('in', 'manual_input', 'Input (cin)', 'cin >> name;'),
+      makeNode('call', 'predefined', 'Call: showSummary', 'showSummary(total);'),
+      makeNode('fileOut', 'document', 'Document Output', 'reportFile << "Average: " << total << endl;'),
+      makeNode('delay', 'delay', 'Delay / Wait', 'wait 1 second'),
+      makeNode('e', 'terminator', 'End'),
+    ];
+    const edges = [
+      makeEdge('e1', 's', 'db'),
+      makeEdge('e2', 'db', 'doc'),
+      makeEdge('e3', 'doc', 'out'),
+      makeEdge('e4', 'out', 'in'),
+      makeEdge('e5', 'in', 'call'),
+      makeEdge('e6', 'call', 'fileOut'),
+      makeEdge('e7', 'fileOut', 'delay'),
+      makeEdge('e8', 'delay', 'e'),
+    ];
+
+    const code = generateCppFromGraph(nodes, edges);
+
+    expect(code).toContain('#include <fstream>');
+    expect(code).toContain('int scores[5];');
+    expect(code).toContain('ofstream reportFile("report.txt");');
+    expect(code).toContain('cout << "Enter student name: ";');
+    expect(code).toContain('cin >> name;');
+    expect(code).toContain('showSummary(total);');
+    expect(code).toContain('reportFile << "Average: " << total << endl;');
+    expect(code).toContain('// wait 1 second(s)');
+  });
+
   it('preserves branch-local declarations instead of rewriting them as assignments', () => {
     const nodes = [
       makeNode('s', 'terminator', 'Start'),
@@ -82,6 +117,39 @@ describe('generateCppFromGraph', () => {
     expect(code).not.toContain('1;');
   });
 
+  it('keeps named off-page connectors as routing comments, not function calls', () => {
+    const nodes = [
+      makeNode('s', 'terminator', 'Start'),
+      makeNode('o', 'off_page_connector', 'Calculate total'),
+      makeNode('e', 'terminator', 'End'),
+    ];
+    const edges = [
+      makeEdge('e1', 's', 'o'),
+      makeEdge('e2', 'o', 'e'),
+    ];
+
+    const code = generateCppFromGraph(nodes, edges);
+
+    expect(code).toContain('// Off-page connector: Calculate total');
+    expect(code).not.toContain('calculateTotal();');
+  });
+
+  it('uses predefined process for helper calls instead of connectors', () => {
+    const nodes = [
+      makeNode('s', 'terminator', 'Start'),
+      makeNode('fn', 'predefined', 'Calculate total', 'call calculate total with score'),
+      makeNode('e', 'terminator', 'End'),
+    ];
+    const edges = [
+      makeEdge('e1', 's', 'fn'),
+      makeEdge('e2', 'fn', 'e'),
+    ];
+
+    const code = generateCppFromGraph(nodes, edges);
+
+    expect(code).toContain('calculateTotal(score);');
+  });
+
   it('keeps includes inside the analyzer-supported header set', () => {
     const nodes = [
       makeNode('s', 'terminator', 'Start'),
@@ -100,6 +168,29 @@ describe('generateCppFromGraph', () => {
     expect(code).not.toContain('#include <vector>');
     expect(code).not.toContain('#include <algorithm>');
     expect(code).toContain('int values[3];');
+  });
+
+  it('adds the same required preprocessor directives used by code analysis', () => {
+    const nodes = [
+      makeNode('s', 'terminator', 'Start'),
+      makeNode('p1', 'process', 'Format output', 'cout << fixed << setprecision(2) << total;'),
+      makeNode('p2', 'process', 'Math', 'double root = sqrt(total);'),
+      makeNode('p3', 'process', 'Random', 'int roll = rand();'),
+      makeNode('e', 'terminator', 'End'),
+    ];
+    const edges = [
+      makeEdge('e1', 's', 'p1'),
+      makeEdge('e2', 'p1', 'p2'),
+      makeEdge('e3', 'p2', 'p3'),
+      makeEdge('e4', 'p3', 'e'),
+    ];
+
+    const code = generateCppFromGraph(nodes, edges);
+
+    expect(code).toContain('#include <iostream>');
+    expect(code).toContain('#include <iomanip>');
+    expect(code).toContain('#include <cmath>');
+    expect(code).toContain('#include <cstdlib>');
   });
 
   it('emits output expressions with endl and normalizes text conditions', () => {
@@ -123,6 +214,45 @@ describe('generateCppFromGraph', () => {
     expect(code).toContain('if (hp > 0 || i < n)');
     expect(code).toContain('cout << "alive" << endl;');
     expect(code).toContain('cout << "done" << endl;');
+  });
+
+  it('generates a one-arm if for single-path decisions', () => {
+    const nodes = [
+      makeNode('s', 'terminator', 'Start'),
+      makeNode('d', 'decision', 'score is at least passing score'),
+      makeNode('p', 'io', 'Print passed', 'display passed'),
+      makeNode('e', 'terminator', 'End'),
+    ];
+    const edges = [
+      makeEdge('e1', 's', 'd'),
+      makeEdge('e2', 'd', 'p'),
+      makeEdge('e3', 'p', 'e'),
+    ];
+
+    const code = generateCppFromGraph(nodes, edges);
+
+    expect(code).toContain('if (score >= passingScore) {');
+    expect(code).toContain('cout << "passed" << endl;');
+    expect(code).not.toContain('else');
+  });
+
+  it('negates the condition when a single decision path is labelled false', () => {
+    const nodes = [
+      makeNode('s', 'terminator', 'Start'),
+      makeNode('d', 'decision', 'valid == true'),
+      makeNode('p', 'io', 'Print invalid', 'display invalid'),
+      makeNode('e', 'terminator', 'End'),
+    ];
+    const edges = [
+      makeEdge('e1', 's', 'd'),
+      makeEdge('e2', 'd', 'p', 'false'),
+      makeEdge('e3', 'p', 'e'),
+    ];
+
+    const code = generateCppFromGraph(nodes, edges);
+
+    expect(code).toContain('if (!(valid == true)) {');
+    expect(code).toContain('cout << "invalid" << endl;');
   });
 
   it('turns simple English process text into C++ declarations and updates', () => {
@@ -353,6 +483,51 @@ describe('generateCppFromGraph', () => {
     expect(code).toContain('int scores[10];');
     expect(code).toContain('calculateResult(score, passingScore);');
     expect(code).toContain('// wait 2 second(s)');
+  });
+
+  it('turns document and note-style flowchart text into valid C++ or comments', () => {
+    const nodes = [
+      makeNode('s', 'terminator', 'Start'),
+      makeNode('doc', 'document', 'Report', 'write report.txt'),
+      makeNode('note', 'process', 'Summary', 'note: total has been saved'),
+      makeNode('e', 'terminator', 'End'),
+    ];
+    const edges = [
+      makeEdge('e1', 's', 'doc'),
+      makeEdge('e2', 'doc', 'note'),
+      makeEdge('e3', 'note', 'e'),
+    ];
+
+    const code = generateCppFromGraph(nodes, edges);
+
+    expect(code).toContain('#include <fstream>');
+    expect(code).toContain('ofstream reportFile("report.txt");');
+    expect(code).toContain('// total has been saved');
+    expect(code).not.toContain('write report.txt;');
+  });
+
+  it('can generate a helper function body from a function-call node', () => {
+    const nodes = [
+      makeNode('s', 'terminator', 'Start'),
+      makeNode('i', 'manual_input', 'Ask age', 'ask the user for their age'),
+      makeNode('d', 'decision', 'age > 17', 'age > 17'),
+      makeNode('t', 'io', 'Adult', 'display adult'),
+      makeNode('f', 'predefined', 'Show wrong input', 'call showWrongInput to display wrong input/minor'),
+      makeNode('e', 'terminator', 'End'),
+    ];
+    const edges = [
+      makeEdge('e1', 's', 'i'),
+      makeEdge('e2', 'i', 'd'),
+      makeEdge('e3', 'd', 't', 'true'),
+      makeEdge('e4', 'd', 'f', 'false'),
+      makeEdge('e5', 't', 'e'),
+      makeEdge('e6', 'f', 'e'),
+    ];
+
+    const code = generateCppFromGraph(nodes, edges);
+
+    expect(code).toMatch(/void showWrongInput\(\) \{\n    cout << "wrong input\/minor" << endl;\n\}/);
+    expect(code).toMatch(/int main\(\)[\s\S]+showWrongInput\(\);/);
   });
 
   it('emits complete helper functions above main but leaves class snippets inside main for validator rejection', () => {

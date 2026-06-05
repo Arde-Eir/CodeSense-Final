@@ -159,7 +159,7 @@ describe('validateGraph', () => {
   it('reports END_HAS_OUTGOING_EDGE when End has an outgoing edge', () => {
     const nodes = [
       makeNode('s', 'terminator', 'Start'),
-      makeNode('p', 'process',    'Process'),
+      makeNode('p', 'process',    'Set x', { code: 'x = 1;' }),
       makeNode('e', 'terminator', 'End'),
     ];
     const edges = [
@@ -183,11 +183,11 @@ describe('validateGraph', () => {
     expect(result.errors.some(err => err.code === 'DECISION_NO_EDGES')).toBe(true);
   });
 
-  it('reports DECISION_REQUIRES_TWO_BRANCHES when decision has exactly one outgoing edge', () => {
+  it('allows a decision with exactly one outgoing edge as a one-arm if', () => {
     const nodes = [
       makeNode('s', 'terminator', 'Start'),
       makeNode('d', 'decision',   'x > 0'),
-      makeNode('p', 'process',    'Process'),
+      makeNode('p', 'process',    'Set x', { code: 'x = 1;' }),
       makeNode('e', 'terminator', 'End'),
     ];
     const edges = [
@@ -196,8 +196,9 @@ describe('validateGraph', () => {
       makeEdge('e3', 'p', 'e'),
     ];
     const result = validateGraph(nodes, edges);
-    expect(result.errors.some(err => err.code === 'DECISION_REQUIRES_TWO_BRANCHES')).toBe(true);
-    expect(result.errors.some(err => err.code === 'DECISION_MISSING_FALSE')).toBe(true);
+    expect(result.isValid).toBe(true);
+    expect(result.errors.some(err => err.code === 'DECISION_REQUIRES_TWO_BRANCHES')).toBe(false);
+    expect(result.errors.some(err => err.code === 'DECISION_MISSING_FALSE')).toBe(false);
   });
 
   it('reports DECISION_UNLABELLED_EDGES when two+ edges have no true/false labels', () => {
@@ -270,6 +271,33 @@ describe('validateGraph', () => {
     expect(result.errors.some(err => err.code === 'DEAD_END_NODES')).toBe(true);
     const issue = result.errors.find(err => err.code === 'DEAD_END_NODES')!;
     expect(issue.nodeIds).toContain('p');
+  });
+
+  it('reports an unfinished false branch when it stops on a function-call node', () => {
+    const nodes = [
+      makeNode('s', 'terminator', 'Start'),
+      makeNode('v1', 'predefined', 'Call validate', { code: 'call validate input' }),
+      makeNode('p', 'process', 'Process', { code: 'set adult to false' }),
+      makeNode('d', 'decision', 'age >= 18'),
+      makeNode('v2', 'predefined', 'Call validate', { code: 'call validate input' }),
+      makeNode('o', 'io', 'Output', { code: 'display adult' }),
+      makeNode('e', 'terminator', 'End'),
+    ];
+    const edges = [
+      makeEdge('e1', 's', 'v1'),
+      makeEdge('e2', 'v1', 'p'),
+      makeEdge('e3', 'p', 'd'),
+      makeEdge('e4', 'd', 'o', 'true'),
+      makeEdge('e5', 'd', 'v2', 'false'),
+      makeEdge('e6', 'o', 'e'),
+    ];
+
+    const result = validateGraph(nodes, edges);
+
+    expect(result.isValid).toBe(false);
+    expect(result.errors.some(err => err.code === 'DEAD_END_NODES')).toBe(true);
+    expect(result.errors.find(err => err.code === 'DEAD_END_NODES')?.nodeIds).toContain('v2');
+    expect(result.errors.find(err => err.code === 'DEAD_END_NODES')?.message).toContain('merge point');
   });
 
   // Rule 10 — Dangling edges
@@ -393,7 +421,7 @@ describe('validateGraph', () => {
   });
 
   // Rule 11 — Required executable node code
-  it('emits MISSING_NODE_CODE warning for executable nodes with default label and no code', () => {
+  it('blocks generation for executable nodes with default label and no code', () => {
     const nodes = [
       makeNode('s', 'terminator', 'Start'),
       makeNode('p', 'process',    'Process'),  // default placeholder label
@@ -404,9 +432,9 @@ describe('validateGraph', () => {
       makeEdge('e2', 'p', 'e'),
     ];
     const result = validateGraph(nodes, edges);
-    expect(result.errors.some(w => w.code === 'MISSING_NODE_CODE')).toBe(false);
-    expect(result.warnings.some(w => w.code === 'MISSING_NODE_CODE')).toBe(true);
-    expect(result.isValid).toBe(true);
+    expect(result.errors.some(w => w.code === 'MISSING_NODE_CODE')).toBe(true);
+    expect(result.warnings.some(w => w.code === 'MISSING_NODE_CODE')).toBe(false);
+    expect(result.isValid).toBe(false);
   });
 
   it('allows generation when an executable node has a meaningful label but no code', () => {
@@ -457,6 +485,60 @@ describe('validateGraph', () => {
 
     expect(result.isValid).toBe(true);
     expect(result.warnings.some(w => w.code === 'PSEUDOCODE_STYLE_GUIDANCE')).toBe(true);
+  });
+
+  it('blocks generation when an instruction is placed in the wrong ISO shape', () => {
+    const nodes = [
+      makeNode('s', 'terminator', 'Start'),
+      makeNode('o', 'io', 'Read age', { code: 'ask the user for age' }),
+      makeNode('e', 'terminator', 'End'),
+    ];
+    const edges = [
+      makeEdge('e1', 's', 'o'),
+      makeEdge('e2', 'o', 'e'),
+    ];
+
+    const result = validateGraph(nodes, edges);
+
+    expect(result.isValid).toBe(false);
+    expect(result.errors.some(err => err.code === 'FLOWCHART_SHAPE_MISMATCH')).toBe(true);
+  });
+
+  it('blocks generation when file or delay steps use generic process shapes', () => {
+    const nodes = [
+      makeNode('s', 'terminator', 'Start'),
+      makeNode('p1', 'process', 'Report', { code: 'write report.txt' }),
+      makeNode('p2', 'process', 'Pause', { code: 'wait 2 seconds' }),
+      makeNode('e', 'terminator', 'End'),
+    ];
+    const edges = [
+      makeEdge('e1', 's', 'p1'),
+      makeEdge('e2', 'p1', 'p2'),
+      makeEdge('e3', 'p2', 'e'),
+    ];
+
+    const result = validateGraph(nodes, edges);
+
+    expect(result.isValid).toBe(false);
+    expect(result.errors.filter(err => err.code === 'FLOWCHART_SHAPE_MISMATCH')).toHaveLength(1);
+    expect(result.errors.find(err => err.code === 'FLOWCHART_SHAPE_MISMATCH')?.nodeIds).toEqual(['p1', 'p2']);
+  });
+
+  it('blocks raw C++ snippets when they are placed in the wrong ISO shape', () => {
+    const nodes = [
+      makeNode('s', 'terminator', 'Start'),
+      makeNode('p', 'process', 'Read age', { code: 'cin >> age;' }),
+      makeNode('e', 'terminator', 'End'),
+    ];
+    const edges = [
+      makeEdge('e1', 's', 'p'),
+      makeEdge('e2', 'p', 'e'),
+    ];
+
+    const result = validateGraph(nodes, edges);
+
+    expect(result.isValid).toBe(false);
+    expect(result.errors.some(err => err.code === 'FLOWCHART_SHAPE_MISMATCH')).toBe(true);
   });
 
   it('allows friendly sentence and command inputs without style warnings', () => {
@@ -517,7 +599,24 @@ describe('validateGraph', () => {
     expect(result.errors.some(err => err.code === 'NO_COMPILATION_REQUEST')).toBe(true);
   });
 
-  it('rejects raw STL container code because generated code must match analyzer scope', () => {
+  it('rejects manual include directives because Build Mode adds required headers', () => {
+    const nodes = [
+      makeNode('s', 'terminator', 'Start'),
+      makeNode('p', 'process', 'Manual header', { code: '#include <string>' }),
+      makeNode('e', 'terminator', 'End'),
+    ];
+    const edges = [
+      makeEdge('e1', 's', 'p'),
+      makeEdge('e2', 'p', 'e'),
+    ];
+
+    const result = validateGraph(nodes, edges);
+
+    expect(result.isValid).toBe(false);
+    expect(result.errors.some(err => err.code === 'FLOWCHART_MANUAL_INCLUDE')).toBe(true);
+  });
+
+  it('rejects raw STL container code because it is outside CP1/CP2 scope', () => {
     const nodes = [
       makeNode('s', 'terminator', 'Start'),
       makeNode('p', 'process', 'Use vector', { code: 'vector<int> scores;' }),
@@ -534,7 +633,7 @@ describe('validateGraph', () => {
     expect(result.errors.some(err => err.code === 'UNSUPPORTED_STL')).toBe(true);
   });
 
-  it('rejects OOP class snippets in flowchart nodes', () => {
+  it('rejects OOP class snippets because they are outside CP1/CP2 scope', () => {
     const nodes = [
       makeNode('s', 'terminator', 'Start'),
       makeNode('p', 'process', 'Class', { code: 'class Player { public: int hp; };' }),

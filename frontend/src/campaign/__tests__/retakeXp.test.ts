@@ -148,6 +148,11 @@ describe('level XP caps', () => {
     expect(levelXpCapForPhase(null)).toBe(0);
     expect(levelXpCapForPhase(undefined)).toBe(0);
   });
+
+  it('derives caps for generated custom level phases', () => {
+    expect(levelXpCapForPhase('level_4')).toBe(4000);
+    expect(levelXpCapForPhase('level_7')).toBe(7000);
+  });
 });
 
 describe('isRetakeRun', () => {

@@ -1,4 +1,5 @@
 import type { Node, Edge } from '@xyflow/react';
+import { detectRequiredHeaders } from './PreprocessorDependencies';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -12,10 +13,10 @@ export const FLOWCHART_CODE_TOPICS = [
   'Friendly sentence commands such as "ask for age", "display hello", and "set score to zero"',
   'Variables, constants, assignment, and arithmetic',
   'cin input and cout output',
-  'if / else decisions from true/false branches',
+  'single-branch if decisions and two-branch if / else decisions',
   'while-style loops from branches that return to a Decision',
   'arrays and basic indexed storage',
-  'single-name helper function calls and predefined-process shapes',
+  'helper function calls, including call name to action helper definitions',
   'file/document placeholders and basic fstream snippets',
   'raw C++ snippets only when they stay inside the same CP1/selected-CP2 foundations scope',
 ];
@@ -45,43 +46,6 @@ const TYPE_MODIFIERS = [
   'inline',
 ];
 
-// ─── Auto-Include Detection ───────────────────────────────────────────────────
-
-const CPP_INCLUDES: Record<string, string> = {
-  'cout':          'iostream',
-  'cin':           'iostream',
-  'endl':          'iostream',
-  'cerr':          'iostream',
-  'string':        'string',
-  'getline':       'string',
-  'stoi':          'string',
-  'stod':          'string',
-  'stof':          'string',
-  'to_string':     'string',
-  'sqrt':          'cmath',
-  'pow':           'cmath',
-  'abs':           'cmath',
-  'floor':         'cmath',
-  'ceil':          'cmath',
-  'round':         'cmath',
-  'log':           'cmath',
-  'exp':           'cmath',
-  'sin':           'cmath',
-  'cos':           'cmath',
-  'tan':           'cmath',
-  'rand':          'cstdlib',
-  'srand':         'cstdlib',
-  'exit':          'cstdlib',
-  'INT_MAX':       'climits',
-  'INT_MIN':       'climits',
-  'setw':          'iomanip',
-  'setprecision':  'iomanip',
-  'fixed':         'iomanip',
-  'fstream':       'fstream',   // document nodes
-  'ofstream':      'fstream',
-  'ifstream':      'fstream',
-};
-
 const INCLUDE_ORDER = [
   'iostream', 'fstream', 'string', 'cmath', 'cstdlib', 'climits', 'iomanip',
 ];
@@ -97,10 +61,6 @@ export type FlowchartInstructionKind =
   | 'document'
   | 'delay'
   | 'database';
-
-function escapeRegExp(value: string): string {
-  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-}
 
 function toIdentifier(value: string, fallback = 'value'): string {
   const words = value
@@ -288,6 +248,11 @@ function normalizeHumanStatement(text: string, nodeType = 'process'): string | n
 
   const lower = source.toLowerCase();
 
+  const note = source.match(/^(?:note|notes|summary|comment|remark)\s*:?\s+(.+)$/i);
+  if (note) {
+    return `// ${note[1].trim()}`;
+  }
+
   const sized3dArray = source.match(/^(?:create|declare|make|set up)\s+(?:a\s+|an\s+|the\s+)?(?:3d|three dimensional|three-dimensional)\s+(?:array|table|grid|cube)\s+(?:of\s+)?(.+?)(?:\s+with\s+(.+?)\s+(?:layers?|depth)\s+and\s+(.+?)\s+rows?\s+and\s+(.+?)\s+columns?)?$/i);
   if (sized3dArray) {
     const name = pluralizeIdentifier(normalizeVariableName(sized3dArray[1].replace(/s$/i, ''), 'items'));
@@ -438,11 +403,8 @@ function detectIncludes(allCode: string[]): string[] {
   const needed = new Set<string>(['iostream']);
   const combined = allCode.join(' ');
 
-  for (const [keyword, header] of Object.entries(CPP_INCLUDES)) {
-    const tokenPattern = new RegExp(`(?:^|[^A-Za-z0-9_])(?:std::)?${escapeRegExp(keyword)}(?:$|[^A-Za-z0-9_])`);
-    if (tokenPattern.test(combined)) needed.add(header);
-  }
-  if (/\bofstream\b|\bifstream\b/.test(combined)) needed.add('fstream');
+  detectRequiredHeaders(combined).forEach(header => needed.add(header));
+  if (/\bINT_(?:MAX|MIN)\b/.test(combined)) needed.add('climits');
 
   const sorted = INCLUDE_ORDER.filter(h => needed.has(h));
   const rest = [...needed].filter(h => !INCLUDE_ORDER.includes(h)).sort();
@@ -550,6 +512,42 @@ function normalizeTopLevelDeclaration(code: string): string {
   return s;
 }
 
+interface ParsedHumanCall {
+  fnName: string;
+  args: string;
+  argNames: string[];
+  helperBody?: string;
+}
+
+function parseHumanCallInstruction(code: string): ParsedHumanCall | null {
+  const c = code.trim();
+  const callWithBody = c.match(/^(?:call|run|use|execute)\s+(.+?)\s+to\s+(.+?)(?:\s+with\s+(.+))?$/i);
+  if (callWithBody) {
+    const argNames = callWithBody[3]
+      ? callWithBody[3].split(/\s*(?:,|and)\s*/).map(arg => normalizeVariableName(arg))
+      : [];
+    return {
+      fnName: normalizeVariableName(callWithBody[1], 'helper'),
+      args: argNames.join(', '),
+      argNames,
+      helperBody: callWithBody[2].trim(),
+    };
+  }
+
+  const humanCall = c.match(/^(?:call|run|use|execute)\s+(.+?)(?:\s+with\s+(.+))?$/i);
+  if (!humanCall) return null;
+
+  const argNames = humanCall[2]
+    ? humanCall[2].split(/\s*(?:,|and)\s*/).map(arg => normalizeVariableName(arg))
+    : [];
+
+  return {
+    fnName: normalizeVariableName(humanCall[1], 'helper'),
+    args: argNames.join(', '),
+    argNames,
+  };
+}
+
 function normalizeCondition(code: string): string {
   return (normalizeEnglishCondition(code) ?? code)
     .replace(/^[({[\s]+|[)}\]\s]+$/g, '')
@@ -635,13 +633,9 @@ function emitPredefined(label: string, code: string): string {
     return `// Call: ${l}`;
   }
 
-  const humanCall = c.match(/^(?:call|run|use|execute)\s+(.+?)(?:\s+with\s+(.+))?$/i);
+  const humanCall = parseHumanCallInstruction(c);
   if (humanCall) {
-    const fnName = normalizeVariableName(humanCall[1], 'helper');
-    const args = humanCall[2]
-      ? humanCall[2].split(/\s*(?:,|and)\s*/).map(arg => normalizeVariableName(arg)).join(', ')
-      : '';
-    return `${fnName}(${args});`;
+    return `${humanCall.fnName}(${humanCall.args});`;
   }
 
   // Already looks like a function call
@@ -657,10 +651,11 @@ function emitPredefined(label: string, code: string): string {
 function emitDocument(label: string, code: string): string {
   const c = code.trim();
   const l = label.trim();
+  const source = c || l;
 
   if (!c) {
-    // Descriptive comment — document nodes often represent output files/reports
-    return `// Document: ${l}`;
+    const human = normalizeHumanStatement(l, 'document');
+    if (human) return human;
   }
 
   // If the user wrote actual fstream code, emit as-is
@@ -668,12 +663,20 @@ function emitDocument(label: string, code: string): string {
     return normalizeStatement(c);
   }
 
-  // If it looks like a filename, wrap in a comment
-  if (/\.txt|\.csv|\.json|\.xml|\.log/.test(c)) {
-    return `// Write to: ${c}`;
+  const fileMatch = source.match(/(?:write|save|create|open|load|read)?\s*(?:to|from)?\s*["']?([^"'\s]+\.(?:txt|csv|json|xml|log))["']?/i);
+  if (fileMatch) {
+    const filename = fileMatch[1];
+    const variableName = normalizeVariableName(filename.replace(/\.[^.]+$/, ''), 'file');
+    const streamName = `${variableName}File`;
+    if (/^(?:read|load|open\s+from)/i.test(source)) {
+      return `ifstream ${streamName}("${filename}");`;
+    }
+    return `ofstream ${streamName}("${filename}");`;
   }
 
-  return normalizeStatement(c);
+  const human = normalizeHumanStatement(c, 'document');
+  if (human) return human;
+  return `// Document: ${source}`;
 }
 
 /** delay node → grammar ExpressionStatement (sleep / pause) */
@@ -718,7 +721,7 @@ function emitDatabase(label: string, code: string): string {
       .map((w, i) => i === 0 ? w.toLowerCase() : w.charAt(0).toUpperCase() + w.slice(1).toLowerCase())
       .join('') || 'dataStore';
     if (isValidIdentifier(varName)) return `int ${varName}[10];`;
-    return `// Database / Store: ${l}`;
+    return `// Stored Data: ${l}`;
   }
 
   if (human) return human;
@@ -784,6 +787,32 @@ function collectTopLevelDeclarations(nodes: Node<NodeData>[]): string[] {
     seen.add(normalized);
     declarations.push(normalized);
   }
+  return declarations;
+}
+
+function collectGeneratedHelperDeclarations(nodes: Node<NodeData>[]): string[] {
+  const seen = new Set<string>();
+  const declarations: string[] = [];
+
+  for (const node of nodes) {
+    if (node.type !== 'predefined' && node.type !== 'off_page_connector') continue;
+    const call = parseHumanCallInstruction(resolveCode(node));
+    if (!call?.helperBody || seen.has(call.fnName)) continue;
+
+    const body = normalizeHumanStatement(call.helperBody, 'process')
+      ?? normalizeHumanStatement(call.helperBody, 'io')
+      ?? normalizeStatement(call.helperBody);
+
+    seen.add(call.fnName);
+    const params = call.argNames.map(name => `int ${name}`).join(', ');
+
+    declarations.push([
+      `void ${call.fnName}(${params}) {`,
+      `    ${body}`,
+      '}',
+    ].join('\n'));
+  }
+
   return declarations;
 }
 
@@ -920,12 +949,13 @@ function traverse(
 
     // ── On-page connector (break / continue) ─────────────────────────────────
     if (node.type === 'connector') {
-      const code = str(node.data.code);
-      if (code === 'break') {
+      const code = str(node.data.code).toLowerCase();
+      const label = str(node.data.label).toLowerCase();
+      if (code === 'break' || label === 'break') {
         output += `${indent}break;\n`;
         break;
       }
-      if (code === 'continue') {
+      if (code === 'continue' || label === 'continue') {
         output += `${indent}continue;\n`;
         break;
       }
@@ -933,15 +963,10 @@ function traverse(
       continue;
     }
 
-    // ── Off-page connector (call to user-defined function) ────────────────────
+    // ── Off-page connector (cross-page routing/reference) ─────────────────────
     if (node.type === 'off_page_connector') {
       const label = str(node.data.label);
-      const rawCode = str(node.data.code);
-      if (!rawCode) {
-        output += `${indent}// Off-page connector: ${label || 'reference'}\n`;
-      } else {
-        output += `${indent}${emitPredefined(label, rawCode)}\n`;
-      }
+      output += `${indent}// Off-page connector: ${label || 'reference'}\n`;
       currentId = outEdges[0]?.target;
       continue;
     }
@@ -951,15 +976,18 @@ function traverse(
       const rawCondition = resolveCode(node);
       const condition = normalizeCondition(rawCondition);
 
-      const trueEdge = outEdges.find(e => {
+      const labelledTrueEdge = outEdges.find(e => {
         const l = str(e.label).toLowerCase();
         return l === 'true' || l === 'yes';
-      }) ?? outEdges[0];
+      });
 
-      const falseEdge: Edge | undefined = outEdges.find(e => {
+      const labelledFalseEdge: Edge | undefined = outEdges.find(e => {
         const l = str(e.label).toLowerCase();
         return l === 'false' || l === 'no';
-      }) ?? outEdges[1];
+      });
+
+      const trueEdge = labelledTrueEdge ?? (!labelledFalseEdge ? outEdges[0] : undefined);
+      const falseEdge = labelledFalseEdge ?? (labelledTrueEdge ? outEdges.find(e => e !== labelledTrueEdge) : undefined);
 
       const loopInfo = detectLoop(currentId, trueEdge, falseEdge, adj);
 
@@ -984,6 +1012,18 @@ function traverse(
 
         currentId = exitEdge?.target;
         continue;
+      }
+
+      // Single-exit decisions are valid flowchart shorthand for a one-arm if.
+      if ((trueEdge && !falseEdge) || (falseEdge && !trueEdge)) {
+        const branchEdge = trueEdge ?? falseEdge;
+        const branchCondition = falseEdge && !trueEdge ? `!(${condition})` : condition;
+        output += `${indent}if (${branchCondition}) {\n`;
+        if (branchEdge) {
+          output += traverse(branchEdge.target, nodeMap, adj, new Set(visited), indent + '    ', new Set());
+        }
+        output += `${indent}}\n`;
+        break;
       }
 
       // Plain if / if-else
@@ -1022,7 +1062,12 @@ function traverse(
 
     // ── Predefined Process (function call) ────────────────────────────────────
     if (node.type === 'predefined') {
-      output += `${indent}${emitPredefined(str(node.data.label), str(node.data.code))}\n`;
+      const rawCode = resolveCode(node);
+      if (isTopLevelDeclaration(rawCode)) {
+        output += `${indent}// Function definition emitted above main: ${str(node.data.label) || 'helper'}\n`;
+      } else {
+        output += `${indent}${emitPredefined(str(node.data.label), str(node.data.code))}\n`;
+      }
       currentId = outEdges[0]?.target;
       continue;
     }
@@ -1041,7 +1086,7 @@ function traverse(
       continue;
     }
 
-    // ── Database / Store (data container) ────────────────────────────────────
+    // ── Stored Data (data container) ─────────────────────────────────────────
     if (node.type === 'database') {
       output += `${indent}${emitDatabase(str(node.data.label), str(node.data.code))}\n`;
       currentId = outEdges[0]?.target;
@@ -1136,7 +1181,9 @@ export const generateCppFromGraph = (nodes: Node[], edges: Edge[]): string => {
   );
   const allCode = collectAllCode(typedNodes);
   const topLevelDeclarations = collectTopLevelDeclarations(typedNodes);
-  const includes = detectIncludes([...allCode, bodyLines]);
+  const generatedHelperDeclarations = collectGeneratedHelperDeclarations(typedNodes);
+  const declarations = [...topLevelDeclarations, ...generatedHelperDeclarations];
+  const includes = detectIncludes([...allCode, ...generatedHelperDeclarations, bodyLines]);
   const missingInputDeclarations = buildMissingInputDeclarations(bodyLines);
   const mainBody = [
     ...missingInputDeclarations.map(line => `    ${line}`),
@@ -1148,9 +1195,9 @@ export const generateCppFromGraph = (nodes: Node[], edges: Edge[]): string => {
     ...includes.map(h => `#include <${h}>`),
     'using namespace std;',
     '',
-    ...(topLevelDeclarations.length
+    ...(declarations.length
       ? [
-          ...topLevelDeclarations.flatMap(block => [block, '']),
+          ...declarations.flatMap(block => [block, '']),
         ]
       : []),
     'int main() {',

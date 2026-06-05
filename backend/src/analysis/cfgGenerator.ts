@@ -38,7 +38,7 @@ export class CFGGenerator {
 
   /**
    * FIX (user bug #3): A statement that unconditionally transfers control
-   * (return / throw / break / continue) ends the current linear flow. Any
+   * (return / throw / goto / break / continue) ends the current linear flow. Any
    * sibling statements after it in the same block are UNREACHABLE and must
    * NOT be wired into the CFG — otherwise we get visible arrows from
    * "Return" to the next line, which is wrong in C++ semantics.
@@ -46,7 +46,7 @@ export class CFGGenerator {
   private isTerminator(stmt: ASTNode | undefined | null): boolean {
     if (!stmt) return false;
     const t = (stmt as any).type;
-    if (t === 'ReturnStatement' || t === 'ThrowStatement') return true;
+    if (t === 'ReturnStatement' || t === 'ThrowStatement' || t === 'GotoStatement') return true;
     if (t === 'LoopControl') {
       const v = (stmt as any).value;
       return v === 'break' || v === 'continue';
@@ -57,15 +57,25 @@ export class CFGGenerator {
   // ── FIX 4: Track current function entry node and name for recursion back-edges
   private currentFunctionEntry: ControlFlowNode | null = null;
   private currentFunctionName: string = '';
+  private currentContinueTarget: ControlFlowNode | null = null;
+  private currentBreakTarget: ControlFlowNode | null = null;
 
-  // Pre-collected user-defined function names (for off_page_connector detection)
+  // Pre-collected user-defined function names for recursion back-edges.
   private definedFunctions = new Set<string>();
+  private functionDeclarations = new Map<string, FunctionDeclNode>();
+  private inlineCallStack: string[] = [];
+  private readonly maxInlineFunctionDepth = 4;
+  private nextEdgeLabel: string | null = null;
 
   private preCollectFunctions(ast: any): void {
     this.definedFunctions.clear();
+    this.functionDeclarations.clear();
     const walk = (node: any): void => {
       if (!node || typeof node !== 'object') return;
-      if (node.type === 'FunctionDecl' && node.name) this.definedFunctions.add(node.name);
+      if (node.type === 'FunctionDecl' && node.name) {
+        this.definedFunctions.add(node.name);
+        this.functionDeclarations.set(node.name, node as FunctionDeclNode);
+      }
       for (const key of Object.keys(node)) {
         const v = node[key];
         if (Array.isArray(v)) v.forEach(walk);
@@ -169,13 +179,14 @@ export class CFGGenerator {
       const node = this.nodes.find(n => n.id === nodeId);
       if (node) layers[rank].push(node);
     });
-    return layers;
+    return layers.filter((layer): layer is ControlFlowNode[] => Array.isArray(layer) && layer.length > 0);
   }
 
   private minimizeCrossings(layers: ControlFlowNode[][]): void {
     for (let i = 1; i < layers.length; i++) {
       const currentLayer = layers[i];
       const prevLayer    = layers[i - 1];
+      if (!currentLayer || !prevLayer) continue;
       const nodeWeights  = currentLayer.map(node => {
         const parents = this.edges
           .filter(e => e.to === node.id && !e.isReversed)
@@ -198,9 +209,12 @@ export class CFGGenerator {
     const NODE_H: Record<string, number> = {
       start: 50, end: 50,       // terminator pill
       decision: 140,             // diamond
-      junction: 36,              // small junction diamond
+      junction: 36,              // small routing merge point
       connector: 60,             // circle
       off_page_connector: 70,
+      document: 80,
+      delay: 70,
+      database: 90,
       output: 70, input: 75,
       predefined: 90,
       process: 90,
@@ -211,6 +225,9 @@ export class CFGGenerator {
       junction: 36,
       connector: 60,
       off_page_connector: 70,
+      document: 185,
+      delay: 150,
+      database: 180,
       output: 185, input: 185,
       predefined: 180,
       process: 180,
@@ -292,8 +309,75 @@ export class CFGGenerator {
   }
 
   private connect(from: ControlFlowNode, to: ControlFlowNode, label?: string): void {
-    this.edges.push({ from: from.id, to: to.id, label });
+    const edgeLabel = label ?? this.nextEdgeLabel ?? undefined;
+    this.nextEdgeLabel = null;
+    this.edges.push({ from: from.id, to: to.id, label: edgeLabel });
     from.children.push(to.id);
+  }
+
+  private isArrayDecl(node: any): boolean {
+    return Array.isArray(node?.dimensions) && node.dimensions.length > 0;
+  }
+
+  private isFileStreamType(type: string | undefined): boolean {
+    return /\b(?:fstream|ofstream|ifstream)\b/.test(String(type ?? ''));
+  }
+
+  private isDelayCall(node: any): boolean {
+    const name = String(node?.name ?? '').toLowerCase();
+    return /^(?:sleep|usleep|delay|wait|pause)$/.test(name) || name.includes('sleep_for');
+  }
+
+  private functionCallToString(node: any): string {
+    const args = Array.isArray(node?.arguments)
+      ? node.arguments.map((arg: any) => this.nodeToString(arg)).join(', ')
+      : '';
+    return `${node?.name ?? 'function'}(${args})`;
+  }
+
+  private functionSignatureToString(node: FunctionDeclNode): string {
+    const params = Array.isArray((node as any).params)
+      ? (node as any).params.map((param: any) => {
+          const type = param.varType ?? param.typeName ?? param.paramType ?? 'auto';
+          const name = param.name ? ` ${param.name}` : '';
+          return `${type}${name}`;
+        }).join(', ')
+      : '';
+    return `${(node as any).returnType ?? 'void'} ${node.name}(${params})`;
+  }
+
+  private buildFunctionDefinitionGraph(node: FunctionDeclNode): void {
+    const fnStart = this.createNode(
+      'predefined',
+      `Function: ${node.name}`,
+      this.functionSignatureToString(node),
+      (node as any).line,
+      node,
+    );
+    const fnEnd = this.createNode('end', `End: ${node.name}`);
+
+    const prevEntry = this.currentFunctionEntry;
+    const prevName  = this.currentFunctionName;
+    const prevExit  = this.currentFunctionExit;
+
+    this.currentFunctionEntry = fnStart;
+    this.currentFunctionName  = node.name;
+    this.currentFunctionExit  = fnEnd;
+
+    let lastNode: ControlFlowNode = fnStart;
+    let bodyTerminated = false;
+    if (Array.isArray(node.body)) {
+      for (const stmt of node.body) {
+        lastNode = this.visit(stmt, lastNode, fnEnd);
+        if (this.isTerminator(stmt)) { bodyTerminated = true; break; }
+      }
+    }
+
+    if (!bodyTerminated) this.connect(lastNode, fnEnd);
+
+    this.currentFunctionEntry = prevEntry;
+    this.currentFunctionName  = prevName;
+    this.currentFunctionExit  = prevExit;
   }
 
   private visit(node: ASTNode, current: ControlFlowNode, exit: ControlFlowNode): ControlFlowNode {
@@ -322,8 +406,50 @@ export class CFGGenerator {
 
   // ── Program ───────────────────────────────────────────────────────────────
   private visitProgram(node: any, current: ControlFlowNode, exit: ControlFlowNode): ControlFlowNode {
+    const body = (node.body || []) as ASTNode[];
+    const mainFunction = body.find((stmt: any) => stmt?.type === 'FunctionDecl' && stmt.name === 'main') as FunctionDeclNode | undefined;
+
+    if (mainFunction) {
+      for (const stmt of body) {
+        if ((stmt as any)?.type === 'FunctionDecl' && (stmt as any).name !== 'main') {
+          this.buildFunctionDefinitionGraph(stmt as FunctionDeclNode);
+        }
+      }
+
+      let lastNode = current;
+
+      for (const stmt of body) {
+        if ((stmt as any)?.type === 'FunctionDecl' || (stmt as any)?.type === 'FunctionPrototype') continue;
+        lastNode = this.visit(stmt, lastNode, exit);
+        if (this.isTerminator(stmt)) break;
+      }
+
+      const prevEntry = this.currentFunctionEntry;
+      const prevName  = this.currentFunctionName;
+      const prevExit  = this.currentFunctionExit;
+
+      this.currentFunctionEntry = current;
+      this.currentFunctionName  = 'main';
+      this.currentFunctionExit  = exit;
+
+      let bodyNode = lastNode;
+      let bodyTerminated = false;
+      if (Array.isArray(mainFunction.body)) {
+        for (const stmt of mainFunction.body) {
+          bodyNode = this.visit(stmt, bodyNode, exit);
+          if (this.isTerminator(stmt)) { bodyTerminated = true; break; }
+        }
+      }
+
+      this.currentFunctionEntry = prevEntry;
+      this.currentFunctionName  = prevName;
+      this.currentFunctionExit  = prevExit;
+
+      return bodyTerminated ? exit : bodyNode;
+    }
+
     let lastNode = current;
-    for (const stmt of (node.body || []) as ASTNode[]) {
+    for (const stmt of body) {
       lastNode = this.visit(stmt, lastNode, exit);
       if (this.isTerminator(stmt)) break; // FIX #3
     }
@@ -344,21 +470,23 @@ export class CFGGenerator {
 
     let truePath = decision;
     let trueReturned = false;
+    this.nextEdgeLabel = 'True';
     for (const stmt of (node.thenBranch || [])) {
       truePath = this.visit(stmt, truePath, merge);
       if (this.isTerminator(stmt)) { trueReturned = true; break; } // FIX #3
     }
     // Only connect to merge if the branch didn't already terminate
-    if (!trueReturned) this.connect(truePath, merge, 'True');
+    if (!trueReturned) this.connect(truePath, merge);
 
     if (node.elseBranch && node.elseBranch.length > 0) {
       let falsePath = decision;
       let falseReturned = false;
+      this.nextEdgeLabel = 'False';
       for (const stmt of node.elseBranch) {
         falsePath = this.visit(stmt, falsePath, merge);
         if (this.isTerminator(stmt)) { falseReturned = true; break; } // FIX #3
       }
-      if (!falseReturned) this.connect(falsePath, merge, 'False');
+      if (!falseReturned) this.connect(falsePath, merge);
     } else {
       this.connect(decision, merge, 'False');
     }
@@ -378,6 +506,8 @@ export class CFGGenerator {
     this.connect(current, switchNode);
 
     const merge = this.createNode('junction', 'End Switch');
+    const prevBreakTarget = this.currentBreakTarget;
+    this.currentBreakTarget = merge;
 
     // All cases branch in parallel from the switch decision node.
     (node.cases || []).forEach((caseNode: any) => {
@@ -402,6 +532,7 @@ export class CFGGenerator {
 
     // If no cases matched (or no default), flow continues past the switch
     this.connect(switchNode, merge, 'no match');
+    this.currentBreakTarget = prevBreakTarget;
     return merge;
   }
 
@@ -421,10 +552,16 @@ export class CFGGenerator {
 
     let bodyNode = decision;
     let bodyTerminated = false;
+    const prevContinueTarget = this.currentContinueTarget;
+    const prevBreakTarget = this.currentBreakTarget;
+    this.currentContinueTarget = decision;
+    this.currentBreakTarget = afterLoop;
     for (const stmt of (node.body || [])) {
       bodyNode = this.visit(stmt, bodyNode, afterLoop);
       if (this.isTerminator(stmt)) { bodyTerminated = true; break; }
     }
+    this.currentContinueTarget = prevContinueTarget;
+    this.currentBreakTarget = prevBreakTarget;
     if (!bodyTerminated) this.connect(bodyNode, decision, 'Loop');
 
     return afterLoop;
@@ -440,9 +577,15 @@ export class CFGGenerator {
     this.connect(current, loopStart);
 
     let bodyNode = loopStart;
+    const prevContinueTarget = this.currentContinueTarget;
+    const prevBreakTarget = this.currentBreakTarget;
+    this.currentContinueTarget = loopStart;
+    this.currentBreakTarget = exit;
     (node.body || []).forEach(stmt => {
       bodyNode = this.visit(stmt, bodyNode, exit);
     });
+    this.currentContinueTarget = prevContinueTarget;
+    this.currentBreakTarget = prevBreakTarget;
 
     const decision = this.createNode(
       'decision', 'Condition', this.nodeToString(node.condition), (node as any).line,
@@ -482,14 +625,22 @@ export class CFGGenerator {
 
     let bodyNode = decision;
     let bodyTerminated = false;
+    const updateNode = node.update
+      ? this.createNode('process', 'Update', this.nodeToString(node.update))
+      : null;
+    const prevContinueTarget = this.currentContinueTarget;
+    const prevBreakTarget = this.currentBreakTarget;
+    this.currentContinueTarget = updateNode ?? decision;
+    this.currentBreakTarget = afterLoop;
     for (const stmt of (node.body || [])) {
       bodyNode = this.visit(stmt, bodyNode, afterLoop);
       if (this.isTerminator(stmt)) { bodyTerminated = true; break; }
     }
+    this.currentContinueTarget = prevContinueTarget;
+    this.currentBreakTarget = prevBreakTarget;
 
     if (!bodyTerminated) {
-      if (node.update) {
-        const updateNode = this.createNode('process', 'Update', this.nodeToString(node.update));
+      if (updateNode) {
         this.connect(bodyNode, updateNode);
         this.connect(updateNode, decision, 'Loop');
       } else {
@@ -506,11 +657,24 @@ export class CFGGenerator {
     const dims = Array.isArray(node.dimensions) && node.dimensions.length
       ? node.dimensions.map((d: any) => `[${this.nodeToString(d)}]`).join('')
       : '';
-    const init = node.value !== undefined && node.value !== null
+    const hasInitializer = node.value !== undefined && node.value !== null;
+    const init = hasInitializer && node.initStyle === 'constructor'
+      ? `(${this.nodeToString(node.value)})`
+      : hasInitializer
       ? ` = ${this.nodeToString(node.value)}`
       : '';
     const code = `${node.varType} ${node.name}${dims}${init}`;
-    const step = this.createNode('process', 'Declare', code, node.line, node);
+    const type = this.isFileStreamType(node.varType)
+      ? 'document'
+      : this.isArrayDecl(node)
+      ? 'database'
+      : 'process';
+    const label = type === 'document'
+      ? 'File Stream'
+      : type === 'database'
+      ? 'Stored Data'
+      : 'Declare';
+    const step = this.createNode(type, label, code, node.line, node);
     this.connect(current, step);
     return step;
   }
@@ -527,8 +691,28 @@ export class CFGGenerator {
 
   // ── Expressions ──────────────────────────────────────────────────────────
   private visitExpressionStatement(node: any, current: ControlFlowNode, exit: ControlFlowNode): ControlFlowNode {
+    if (node.expression?.type === 'FunctionCall') {
+      return this.visitFunctionCall(node.expression, current);
+    }
     const code = this.nodeToString(node.expression);
-    const step = this.createNode('process', 'Expression', code, node.line, node.expression);
+    const rootStream = this.getLeftmostIdentifier(node.expression);
+    const isStreamOutput = this.containsOperator(node.expression, '<<');
+    const isStreamInput = this.containsOperator(node.expression, '>>');
+    const type = isStreamInput && rootStream === 'cin'
+      ? 'input'
+      : isStreamOutput && rootStream === 'cout'
+      ? 'output'
+      : isStreamOutput
+      ? 'document'
+      : 'process';
+    const label = type === 'input'
+      ? 'Input (cin)'
+      : type === 'output'
+      ? 'Output (cout)'
+      : type === 'document'
+      ? 'Document Output'
+      : 'Expression';
+    const step = this.createNode(type, label, code, node.line, node.expression);
     this.connect(current, step);
     return step;
   }
@@ -536,14 +720,21 @@ export class CFGGenerator {
   // ── FIX 4: visitFunctionCall — draw a labeled recursive back-edge when
   //   the call target matches the function we are currently inside.
   private visitFunctionCall(node: any, current: ControlFlowNode): ControlFlowNode {
-    const callType = this.definedFunctions.has(node.name) ? 'off_page_connector' : 'predefined';
-    const step = this.createNode(callType, `Call: ${node.name}`, `${node.name}(...)`, node.line, node);
+    const functionName = String(node?.name ?? '');
+    const callType = this.definedFunctions.has(String(node?.name ?? ''))
+      ? 'predefined'
+      : this.isDelayCall(node)
+      ? 'delay'
+      : 'predefined';
+    const label = callType === 'delay' ? 'Delay / Wait' : `Call: ${node.name}`;
+    const step = this.createNode(callType, label, this.functionCallToString(node), node.line, node);
     this.connect(current, step);
 
     // If this call targets the current function, add a "Recursive" back-edge
     // to its entry node so the graph visually shows the self-loop.
-    if (node.name === this.currentFunctionName && this.currentFunctionEntry) {
+    if (functionName === this.currentFunctionName && this.currentFunctionEntry) {
       this.connect(step, this.currentFunctionEntry, 'Recursive');
+      return step;
     }
 
     return step;
@@ -579,15 +770,6 @@ export class CFGGenerator {
     current: ControlFlowNode,
     exit: ControlFlowNode,
   ): ControlFlowNode {
-    const funcStart = this.createNode(
-      'start',
-      `Func: ${node.name}`,
-      `${(node as any).returnType} ${node.name}(...)`,
-      (node as any).line,
-      node,
-    );
-    const funcEnd = this.createNode('end', `End: ${node.name}`);
-
     // Save outer function context before overwriting (supports nested functions)
     const prevEntry = this.currentFunctionEntry;
     const prevName  = this.currentFunctionName;
@@ -595,27 +777,17 @@ export class CFGGenerator {
 
     // Point to this function's entry/exit so visitFunctionCall and
     // visitReturnStatement can find them through any nesting depth.
-    this.currentFunctionEntry = funcStart;
+    this.currentFunctionEntry = current;
     this.currentFunctionName  = node.name;
-    this.currentFunctionExit  = funcEnd;
+    this.currentFunctionExit  = exit;
 
-    // Functions are self-contained — connect program flow around them
-    // but also build their internal graph from funcStart → funcEnd
-    this.connect(current, funcStart);
-    let lastNode = funcStart;
+    let lastNode = current;
     let bodyTerminated = false;
     if (Array.isArray(node.body)) {
       for (const stmt of node.body) {
-        lastNode = this.visit(stmt, lastNode, funcEnd);
+        lastNode = this.visit(stmt, lastNode, exit);
         if (this.isTerminator(stmt)) { bodyTerminated = true; break; }
       }
-    }
-    // If the function body didn't end with a terminator (return/throw),
-    // connect the trailing flow to funcEnd. Otherwise the terminator's own
-    // visitor (e.g. visitReturnStatement) already wired the edge — re-running
-    // connect() here would produce a duplicate edge.
-    if (!bodyTerminated && lastNode !== funcEnd) {
-      this.connect(lastNode, funcEnd);
     }
 
     // Restore the outer function context (important for nested declarations)
@@ -623,12 +795,12 @@ export class CFGGenerator {
     this.currentFunctionName  = prevName;
     this.currentFunctionExit  = prevExit;
 
-    return funcEnd;
+    return bodyTerminated ? exit : lastNode;
   }
 
   private visitFunctionPrototype(node: any, current: ControlFlowNode): ControlFlowNode {
     const protoNode = this.createNode(
-      'process', `Prototype: ${node.name}`,
+      'predefined', `Prototype: ${node.name}`,
       `${node.returnType} ${node.name}(...)`, node.line, node,
     );
     this.connect(current, protoNode);
@@ -672,7 +844,9 @@ export class CFGGenerator {
     this.connect(current, step);
     // For break, connect to exit so the graph reflects the jump
     if (node.value === 'break') {
-      this.connect(step, exit, 'break');
+      this.connect(step, this.currentBreakTarget ?? exit, 'break');
+    } else if (node.value === 'continue' && this.currentContinueTarget) {
+      this.connect(step, this.currentContinueTarget, 'continue');
     }
     return step;
   }
@@ -768,14 +942,14 @@ export class CFGGenerator {
     const label = node.size
       ? `Alloc: new ${node.baseType}[...]`
       : `Alloc: new ${node.baseType}`;
-    const step = this.createNode('process', label, label, node.line, node);
+    const step = this.createNode('database', label, label, node.line, node);
     this.connect(current, step);
     return step;
   }
 
   private visitDeleteStatement(node: any, current: ControlFlowNode): ControlFlowNode {
     const label = node.isArray ? `Free: delete[] ${node.target}` : `Free: delete ${node.target}`;
-    const step = this.createNode('process', label, label, node.line, node);
+    const step = this.createNode('database', label, label, node.line, node);
     this.connect(current, step);
     return step;
   }
@@ -811,7 +985,7 @@ export class CFGGenerator {
       }
       case 'Assignment':
         return `${this.nodeToString(node.target)} ${node.operator} ${this.nodeToString(node.value)}`;
-      case 'FunctionCall':  return `${node.name}(...)`;
+      case 'FunctionCall':  return this.functionCallToString(node);
       case 'CastExpression': return `(${node.targetType})${this.nodeToString(node.operand)}`;
       case 'SizeofExpression': return `sizeof(${this.nodeToString(node.value)})`;
       case 'ConditionalExpression':
@@ -820,7 +994,18 @@ export class CFGGenerator {
         return node.size
           ? `new ${node.baseType}[${this.nodeToString(node.size)}]`
           : `new ${node.baseType}`;
-      case 'VariableDecl':  return `${node.varType} ${node.name}`;
+      case 'VariableDecl': {
+        const dims = Array.isArray(node.dimensions) && node.dimensions.length
+          ? node.dimensions.map((d: any) => `[${this.nodeToString(d)}]`).join('')
+          : '';
+        const hasInitializer = node.value !== undefined && node.value !== null;
+        const init = hasInitializer && node.initStyle === 'constructor'
+          ? `(${this.nodeToString(node.value)})`
+          : hasInitializer
+          ? ` = ${this.nodeToString(node.value)}`
+          : '';
+        return `${node.varType} ${node.name}${dims}${init}`;
+      }
       case 'ExpressionStatement': return this.nodeToString(node.expression);
       case 'InitializerList':
         return `{${(node.values || []).map((v: any) => this.nodeToString(v)).join(', ')}}`;
@@ -832,5 +1017,19 @@ export class CFGGenerator {
         if (node.value !== undefined && node.value !== null) return String(node.value);
         return node.type ?? '';
     }
+  }
+
+  private containsOperator(node: any, operator: string): boolean {
+    if (!node || typeof node !== 'object') return false;
+    if (node.type === 'BinaryOp' && node.operator === operator) return true;
+    return this.containsOperator(node.left, operator) || this.containsOperator(node.right, operator);
+  }
+
+  private getLeftmostIdentifier(node: any): string | null {
+    if (!node || typeof node !== 'object') return null;
+    if (node.type === 'Identifier') return node.name ?? null;
+    if (typeof node.name === 'string' && node.type !== 'FunctionCall') return node.name;
+    if (node.left) return this.getLeftmostIdentifier(node.left);
+    return null;
   }
 }

@@ -15,10 +15,11 @@ import { useNavigate } from 'react-router-dom';
 import { useAuth } from './components/AuthScreen';
 import { supabase } from './services/supabase';
 import type { Phase } from './types/campaign';
+import { isCampaignPhase, levelForPhase, phaseForLevel } from './types/campaign';
 
 // ─── Visual config (level cards' look, not gameplay) ───────────────────────
 interface LevelCardConfig {
-  id:        1 | 2 | 3;
+  id:        number;
   phase:     Phase;
   title:     string;
   subtitle:  string;
@@ -53,11 +54,13 @@ interface PhaseProgress {
 
 type LevelStatus = 'locked' | 'next' | 'in-progress' | 'complete';
 
-const EMPTY_PROGRESS: Record<Phase, PhaseProgress> = {
+const CORE_PROGRESS: Record<string, PhaseProgress> = {
   beginner:     { total: 0, finished: 0 },
   intermediate: { total: 0, finished: 0 },
   advanced:     { total: 0, finished: 0 },
 };
+
+const emptyProgress = (): Record<string, PhaseProgress> => ({ ...CORE_PROGRESS });
 
 // ─── DB level info row ─────────────────────────────────────────────────────
 interface LevelInfoRow {
@@ -80,7 +83,7 @@ export const CampaignPage: React.FC = () => {
   const { user } = useAuth();
 
   const [visible,   setVisible]   = useState(false);
-  const [progress,  setProgress]  = useState<Record<Phase, PhaseProgress>>(EMPTY_PROGRESS);
+  const [progress,  setProgress]  = useState<Record<string, PhaseProgress>>(emptyProgress);
   const [progressLoaded, setProgressLoaded] = useState(false);
   const [levelInfo, setLevelInfo] = useState<Record<string, LevelInfoRow>>({});
 
@@ -97,6 +100,47 @@ export const CampaignPage: React.FC = () => {
   }, []);
 
   const userXP = user?.totalXP ?? 0;
+
+  const dynamicLevels = useMemo(() => {
+    const levels = new Map<number, LevelCardConfig>();
+    for (const level of LEVELS) levels.set(level.id, level);
+
+    for (const phase of Object.keys(progress)) {
+      if (!isCampaignPhase(phase)) continue;
+      const id = levelForPhase(phase);
+      if (!levels.has(id)) {
+        levels.set(id, {
+          id,
+          phase: phaseForLevel(id),
+          title: `LEVEL ${id}`,
+          subtitle: `Custom Level ${id}`,
+          blurb: 'New learning material and quests.',
+          color: '#a371f7',
+          glowColor: 'rgba(163,113,247,0.35)',
+          icon: '◆',
+        });
+      }
+    }
+
+    for (const row of Object.values(levelInfo)) {
+      if (!isCampaignPhase(row.phase)) continue;
+      const id = levelForPhase(row.phase);
+      if (!levels.has(id)) {
+        levels.set(id, {
+          id,
+          phase: phaseForLevel(id),
+          title: `LEVEL ${id}`,
+          subtitle: row.title ?? `Custom Level ${id}`,
+          blurb: row.description ?? 'New learning material and quests.',
+          color: row.accent_color ?? '#a371f7',
+          glowColor: row.accent_color ? hexToRgba(row.accent_color, 0.35) : 'rgba(163,113,247,0.35)',
+          icon: '◆',
+        });
+      }
+    }
+
+    return Array.from(levels.values()).sort((a, b) => a.id - b.id);
+  }, [levelInfo, progress]);
 
   // ── Body styling: enable scrolling on this page ──────────────────────────
   useEffect(() => {
@@ -123,15 +167,21 @@ export const CampaignPage: React.FC = () => {
         .eq('mode', 'campaign');
       if (cancelled) return;
       if (!quests) {
-        setProgress(EMPTY_PROGRESS);
+        setProgress(emptyProgress());
         setProgressLoaded(true);
         return;
       }
 
-      const idsByPhase: Record<Phase, string[]> = { beginner: [], intermediate: [], advanced: [] };
+      const idsByPhase: Record<string, string[]> = {
+        beginner: [],
+        intermediate: [],
+        advanced: [],
+      };
       for (const q of quests) {
-        const phase = q.phase as Phase | null;
-        if (phase && phase in idsByPhase) idsByPhase[phase].push(q.id);
+        const phase = isCampaignPhase(q.phase) ? q.phase : null;
+        if (!phase) continue;
+        if (!idsByPhase[phase]) idsByPhase[phase] = [];
+        idsByPhase[phase].push(q.id);
       }
 
       const allIds = quests.map(q => q.id);
@@ -148,8 +198,8 @@ export const CampaignPage: React.FC = () => {
         (mp ?? []).filter(r => r.first_completed_at != null).map(r => r.questid)
       );
 
-      const next: Record<Phase, PhaseProgress> = { ...EMPTY_PROGRESS };
-      (Object.keys(idsByPhase) as Phase[]).forEach(phase => {
+      const next: Record<string, PhaseProgress> = emptyProgress();
+      Object.keys(idsByPhase).forEach(phase => {
         const ids = idsByPhase[phase];
         next[phase] = {
           total:    ids.length,
@@ -167,22 +217,23 @@ export const CampaignPage: React.FC = () => {
 
   // ── Status derivation ───────────────────────────────────────────────────
   const isLevelComplete = (phase: Phase): boolean => {
-    const p = progress[phase];
+    const p = progress[phase] ?? { total: 0, finished: 0 };
     return progressLoaded && p.finished >= p.total;
   };
-  const isLevelUnlocked = (id: 1 | 2 | 3): boolean => {
+  const isLevelUnlocked = (id: number): boolean => {
     if (id === 1) return true;
-    return isLevelComplete(LEVELS[id - 2].phase);
+    const previous = dynamicLevels.find(level => level.id === id - 1);
+    return previous ? isLevelComplete(previous.phase) : true;
   };
 
   // The "next up" level is the first unlocked-but-not-complete level. It gets
   // a subtle pulse-glow so the user can see at a glance where to continue.
-  const nextLevelId: 1 | 2 | 3 | null = useMemo(() => {
-    for (const lvl of LEVELS) {
+  const nextLevelId: number | null = useMemo(() => {
+    for (const lvl of dynamicLevels) {
       if (isLevelUnlocked(lvl.id) && !isLevelComplete(lvl.phase)) return lvl.id;
     }
     return null;
-  }, [progress]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [dynamicLevels, progress, progressLoaded]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const statusFor = (lvl: LevelCardConfig): LevelStatus => {
     if (!isLevelUnlocked(lvl.id))      return 'locked';
@@ -224,7 +275,7 @@ export const CampaignPage: React.FC = () => {
           <HeroBanner />
 
           <div className="level-grid">
-            {LEVELS.map((level, i) => {
+            {dynamicLevels.map((level, i) => {
               const db = levelInfo[level.phase];
               const color = db?.accent_color ?? level.color;
               const merged: LevelCardConfig = {
@@ -240,7 +291,7 @@ export const CampaignPage: React.FC = () => {
                   config={merged}
                   index={i}
                   status={statusFor(level)}
-                  progress={progress[level.phase]}
+                  progress={progress[level.phase] ?? { total: 0, finished: 0 }}
                   isProgressLoading={!progressLoaded}
                   onClick={(el) => handleLevelClick(level, el)}
                 />

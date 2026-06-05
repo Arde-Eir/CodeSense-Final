@@ -82,7 +82,7 @@ const DEFAULT_LABELS: Record<FlowNodeType, string> = {
   document:           'Document',
   manual_input:       'Input',
   delay:              'Delay',
-  database:           'Data Store',
+  database:           'Stored Data',
   junction:           '⬡',
 };
 
@@ -108,7 +108,7 @@ const EDITOR_TITLE: Record<string, string> = {
   document:           'Document / Output File',
   manual_input:       'Manual Input (cin)',
   delay:              'Delay / Wait',
-  database:           'Database / Data Store',
+  database:           'Stored Data',
   junction:           'Junction / Merge Point',
 };
 
@@ -116,7 +116,7 @@ const CODE_PLACEHOLDER: Record<string, string> = {
   process:            'Type a simple sentence, e.g. score starts at zero',
   decision:           'Type a condition, e.g. if age is greater than 17',
   io:                 'Type what to show, e.g. display hello world',
-  predefined:         'Type a helper call, e.g. call calculate result',
+  predefined:         'Type a helper call, e.g. call showWrongInput to display wrong input',
   connector:          '',
   off_page_connector: '',
   document:           'Type a file step, e.g. write report.txt',
@@ -152,6 +152,7 @@ const NODE_TEMPLATES: Record<string, { label: string; code: string }[]> = {
   predefined: [
     { label: 'Call calculate', code: 'call calculate result' },
     { label: 'Call validate', code: 'call validate input' },
+    { label: 'Call warning', code: 'call showWrongInput to display wrong input' },
     { label: 'Call display', code: 'call display summary with total' },
   ],
   delay: [
@@ -167,6 +168,80 @@ const NODE_TEMPLATES: Record<string, { label: string; code: string }[]> = {
   document: [
     { label: 'Write report', code: 'report.txt' },
   ],
+};
+
+const SHAPE_CHEAT_SHEET: Record<string, { use: string; type: string; examples: string[]; avoid?: string }> = {
+  terminator: {
+    use: 'Use only for Start and End.',
+    type: 'No code needed.',
+    examples: ['Start', 'End'],
+  },
+  process: {
+    use: 'Use for variables, assignments, arithmetic, and ordinary steps.',
+    type: 'Type one action, not input/output/file work.',
+    examples: ['score starts at zero', 'set total to price plus tax', 'count++'],
+    avoid: 'Do not put cin, cout, file streams, waits, or function calls here.',
+  },
+  decision: {
+    use: 'Use for if and loop conditions.',
+    type: 'Type only the condition. Label two outgoing edges true/false. One outgoing edge becomes a single-arm if.',
+    examples: ['age > 17', 'score is below 75', 'repeat while count < 5'],
+    avoid: 'Do not type a whole if statement with braces.',
+  },
+  io: {
+    use: 'Use for output only.',
+    type: 'Type what should be displayed with cout.',
+    examples: ['display hello world', 'show the value of total', 'cout << total << endl;'],
+    avoid: 'Do not use this for cin/read input.',
+  },
+  manual_input: {
+    use: 'Use for user input only.',
+    type: 'Type what variable should be read with cin.',
+    examples: ['ask the user for age', 'enter name', 'cin >> score;'],
+    avoid: 'Do not use this for cout/display output.',
+  },
+  predefined: {
+    use: 'Use for function/subroutine/helper calls.',
+    type: 'Type one function call, or use "call name to action" to generate a small helper body above main.',
+    examples: ['call showWrongInput to display wrong input', 'call calculate result', 'showSummary(total);'],
+    avoid: 'Do not use on-page or off-page connectors for function calls.',
+  },
+  connector: {
+    use: 'Use as an on-page reference or routing marker.',
+    type: 'Type a short reference letter/number only.',
+    examples: ['A', 'B', '1'],
+    avoid: 'Do not put C++ statements here except break/continue connector labels when modeling loop jumps.',
+  },
+  off_page_connector: {
+    use: 'Use as a cross-page continuation/reference.',
+    type: 'Type a page/reference ID only.',
+    examples: ['P2', 'page-2', '1'],
+    avoid: 'This is not a function-call shape.',
+  },
+  document: {
+    use: 'Use for files, reports, and document output.',
+    type: 'Type a filename, file stream, or file write step.',
+    examples: ['write report.txt', 'ofstream reportFile("report.txt");', 'reportFile << total << endl;'],
+    avoid: 'Do not use generic Process for file streams.',
+  },
+  delay: {
+    use: 'Use for wait/pause/delay steps.',
+    type: 'Type the wait duration or a wait sentence.',
+    examples: ['wait 2 seconds', 'pause 1 second', '5'],
+    avoid: 'This shape emits a structural wait comment for CP1/CP2, not threaded C++.',
+  },
+  database: {
+    use: 'Use for arrays, stored data, and simple storage.',
+    type: 'Type an array/stored-data declaration or storage step.',
+    examples: ['create an array of scores', 'int scores[5];', 'store score in scores'],
+    avoid: 'Do not use STL containers like vector/map.',
+  },
+  junction: {
+    use: 'Use only to merge or route paths.',
+    type: 'No code needed.',
+    examples: ['Merge', 'After decision'],
+    avoid: 'Do not put executable code here.',
+  },
 };
 
 const PALETTE_ITEMS: {
@@ -245,7 +320,7 @@ const PALETTE_ITEMS: {
     ),
   },
   {
-    type: 'database', label: 'Database / Store', iso: 'ISO: Stored Data',
+    type: 'database', label: 'Stored Data', iso: 'ISO: Stored Data',
     shape: (
       <svg width={36} height={22} viewBox="0 0 36 22" style={{ flexShrink: 0 }}>
         <rect x="2" y="5" width="32" height="14" fill="#050d05" stroke="#66bb6a" strokeWidth="1.5" />
@@ -564,7 +639,7 @@ const DocumentNode = ({ data, selected }: NodeProps<Node<ExtendedNodeData>>) => 
   );
 };
 
-// ── 8. MANUAL INPUT — trapezoid, higher on left ──────────────────────────────
+// ── 8. MANUAL INPUT — trapezoid, top slopes upward left-to-right ─────────────
 const ManualInputNode = ({ data, selected }: NodeProps<Node<ExtendedNodeData>>) => {
   const W = 185, H = 72, SLOPE = 18;
   const { color } = useNodeAppearance('manual_input', data);
@@ -793,7 +868,7 @@ const FlowchartLegend: React.FC<{ isDrawerOpen?: boolean }> = ({ isDrawerOpen = 
             </div>
           ))}
           <div style={{ marginTop: 4, padding: '5px 4px', fontSize: 9, color: '#484f58', lineHeight: 1.7, borderTop: '1px solid #21262d' }}>
-            💡 Label decision edges <strong style={{ color: '#4caf50' }}>true</strong> / <strong style={{ color: '#ff6b6b' }}>false</strong> for correct code generation.
+            💡 One decision edge creates a single-arm <strong>if</strong>; label two-way decisions <strong style={{ color: '#4caf50' }}>true</strong> / <strong style={{ color: '#ff6b6b' }}>false</strong>.
           </div>
         </div>
       )}
@@ -889,12 +964,13 @@ const GameStats: React.FC<{
 const FlowchartQuickGuide: React.FC<{ onClose: () => void }> = ({ onClose }) => (
   <aside style={{
     position: 'absolute', top: 52, left: 12, zIndex: 1000,
-    width: 320, maxWidth: 'calc(100% - 270px)',
+    width: 'min(420px, calc(100% - 32px))',
+    maxHeight: 'calc(100dvh - 180px)',
     background: 'linear-gradient(135deg,rgba(13,17,23,0.98),rgba(22,27,34,0.98))',
     border: '1px solid rgba(88,166,255,0.28)',
     borderRadius: 10,
     boxShadow: '0 16px 44px rgba(0,0,0,0.45)',
-    overflow: 'hidden',
+    overflow: 'hidden auto',
     color: '#c9d1d9',
     fontSize: 11,
   }}>
@@ -933,12 +1009,16 @@ add one to score`}
       </div>
       <div>
         <div style={{ color: '#e6edf3', fontWeight: 700, marginBottom: 4 }}>Shape cheat sheet</div>
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '4px 10px', color: '#8b949e' }}>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: '4px 10px', color: '#8b949e' }}>
           <span><b style={{ color: '#42a5f5' }}>Start/End</b> entry and exit</span>
           <span><b style={{ color: '#4caf50' }}>Process</b> variables and math</span>
           <span><b style={{ color: '#ffa726' }}>Decision</b> if/while checks</span>
           <span><b style={{ color: '#64b5f6' }}>Output</b> print text/value</span>
           <span><b style={{ color: '#ff7043' }}>Input</b> ask/read value</span>
+          <span><b style={{ color: '#ab47bc' }}>Function</b> helper calls</span>
+          <span><b style={{ color: '#ef5350' }}>Document</b> files/reports</span>
+          <span><b style={{ color: '#78909c' }}>Delay</b> wait/pause</span>
+          <span><b style={{ color: '#66bb6a' }}>Stored Data</b> arrays/storage</span>
           <span><b style={{ color: '#e040fb' }}>Junction</b> merge paths</span>
         </div>
       </div>
@@ -1069,7 +1149,7 @@ const GenerateCodePanel: React.FC<{
 
           {(!showValidation || !hasIssues) && !isDirty && (
             <div style={{ fontSize: 9, color: '#484f58', lineHeight: 1.6, padding: '5px 8px', background: 'rgba(168,85,247,0.06)', borderRadius: 6, border: '1px solid rgba(168,85,247,0.2)' }}>
-              Type simple sentence steps. No AI, no compilation. Label decision edges{' '}
+              Type simple sentence steps. No AI, no compilation. For two-way decisions, label edges{' '}
               <strong style={{ color: '#4caf50' }}>true</strong> /{' '}
               <strong style={{ color: '#ff6b6b' }}>false</strong>{' '}
               → click Generate
@@ -1179,9 +1259,10 @@ const NodeEditor: React.FC<{
     'Label';
   const placeholder =
     editState.type === 'connector'          ? 'e.g. A, B, 1'                  :
-    editState.type === 'off_page_connector' ? 'e.g. P2, page-2, 1'             :
+    editState.type === 'off_page_connector' ? 'e.g. P2, page-2, 1' :
     `e.g. ${DEFAULT_LABELS[editState.type as FlowNodeType] ?? 'Label'}`;
   const templates = NODE_TEMPLATES[editState.type] ?? [];
+  const cheatSheet = SHAPE_CHEAT_SHEET[editState.type];
 
   const inputBase: React.CSSProperties = {
     width: '100%', boxSizing: 'border-box',
@@ -1220,7 +1301,7 @@ const NodeEditor: React.FC<{
           if (e.key === 'Escape') onCancel();
           if (e.key === 'Enter' && e.ctrlKey) handleSave();
         }}
-        style={{ background: '#13181f', border: `1px solid ${accent}44`, borderTop: `3px solid ${accent}`, borderRadius: 14, width: 460, boxShadow: `0 24px 64px rgba(0,0,0,0.85), 0 0 0 1px ${accent}18`, animation: 'editorSlideIn 0.18s ease-out', overflow: 'hidden' }}
+        style={{ background: '#13181f', border: `1px solid ${accent}44`, borderTop: `3px solid ${accent}`, borderRadius: 14, width: 'min(560px, calc(100vw - 32px))', maxHeight: 'calc(100dvh - 32px)', boxShadow: `0 24px 64px rgba(0,0,0,0.85), 0 0 0 1px ${accent}18`, animation: 'editorSlideIn 0.18s ease-out', overflow: 'hidden', display: 'flex', flexDirection: 'column' }}
       >
         <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '13px 20px', background: `${accent}0c`, borderBottom: `1px solid ${accent}1e` }}>
           <div style={{ width: 9, height: 9, borderRadius: '50%', background: accent, boxShadow: `0 0 8px ${accent}bb`, flexShrink: 0 }} />
@@ -1228,7 +1309,63 @@ const NodeEditor: React.FC<{
           <div style={{ fontSize: 10, color: '#3d444d', fontFamily: "'IBM Plex Mono', monospace" }}>Ctrl+Enter to save · Esc to cancel</div>
         </div>
 
-        <div style={{ padding: 20, display: 'flex', flexDirection: 'column', gap: 16 }}>
+        <div style={{ padding: 20, display: 'flex', flexDirection: 'column', gap: 16, overflowY: 'auto' }}>
+          {cheatSheet && (
+            <div style={{
+              border: `1px solid ${accent}33`,
+              background: `${accent}0f`,
+              borderRadius: 8,
+              padding: '10px 12px',
+              display: 'grid',
+              gap: 7,
+              fontSize: 11,
+              lineHeight: 1.55,
+              color: '#8b949e',
+            }}>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10 }}>
+                <strong style={{ color: accent, fontFamily: "'IBM Plex Mono', monospace", letterSpacing: 0.6, textTransform: 'uppercase', fontSize: 10 }}>
+                  Shape Cheat Sheet
+                </strong>
+                <span style={{ color: '#3d444d', fontFamily: "'IBM Plex Mono', monospace", fontSize: 10 }}>
+                  Use this shape like CFG
+                </span>
+              </div>
+              <div><b style={{ color: '#c9d1d9' }}>Use:</b> {cheatSheet.use}</div>
+              <div><b style={{ color: '#c9d1d9' }}>Input:</b> {cheatSheet.type}</div>
+              <div style={{ display: 'grid', gap: 4 }}>
+                <b style={{ color: '#c9d1d9' }}>Examples:</b>
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+                  {cheatSheet.examples.map(example => (
+                    <button
+                      key={example}
+                      type="button"
+                      onClick={() => {
+                        if (noCode) setLabel(example);
+                        else setCode(example);
+                      }}
+                      style={{
+                        border: '1px solid #30363d',
+                        background: '#0d1117',
+                        color: '#9ecbff',
+                        borderRadius: 6,
+                        padding: '4px 7px',
+                        fontSize: 10,
+                        cursor: 'pointer',
+                        fontFamily: "'IBM Plex Mono', monospace",
+                      }}
+                      title={noCode ? 'Use as label' : 'Use as instruction'}
+                    >
+                      {example}
+                    </button>
+                  ))}
+                </div>
+              </div>
+              {cheatSheet.avoid && (
+                <div style={{ color: '#ffa726' }}><b>Avoid:</b> {cheatSheet.avoid}</div>
+              )}
+            </div>
+          )}
+
           <div>
             <label style={{ display: 'block', fontSize: 10, fontWeight: 700, color: '#6e7681', textTransform: 'uppercase', letterSpacing: '0.8px', marginBottom: 7, fontFamily: "'IBM Plex Mono', monospace" }}>
               {fieldLabel}
@@ -1395,7 +1532,7 @@ const EdgeLabelEditor: React.FC<{
         </div>
 
         <div style={{ fontSize: 9, color: '#484f58', marginTop: 10, lineHeight: 1.6 }}>
-          💡 Label decision edges <strong style={{ color: '#4caf50' }}>true</strong> / <strong style={{ color: '#ff6b6b' }}>false</strong> so the code generator can produce correct <code style={{ fontSize: 8, background: '#1c2128', padding: '1px 4px', borderRadius: 3 }}>if</code> / <code style={{ fontSize: 8, background: '#1c2128', padding: '1px 4px', borderRadius: 3 }}>while</code> statements.
+          💡 One outgoing decision edge generates a single-arm <code style={{ fontSize: 8, background: '#1c2128', padding: '1px 4px', borderRadius: 3 }}>if</code>. Label two-way branches <strong style={{ color: '#4caf50' }}>true</strong> / <strong style={{ color: '#ff6b6b' }}>false</strong> for <code style={{ fontSize: 8, background: '#1c2128', padding: '1px 4px', borderRadius: 3 }}>if</code> / <code style={{ fontSize: 8, background: '#1c2128', padding: '1px 4px', borderRadius: 3 }}>while</code>.
         </div>
       </div>
     </div>
@@ -1739,6 +1876,9 @@ const FlowGraphInner: React.FC<Props> = ({
       if (node.type === 'connector')                    return 'connector';
       if (node.type === 'off_page_connector')           return 'off_page_connector';
       if (node.type === 'predefined')                   return 'predefined';
+      if (node.type === 'document')                     return 'document';
+      if (node.type === 'delay')                        return 'delay';
+      if (node.type === 'database')                     return 'database';
 
       if (lbl === 'start' || lbl === 'end')                                    return 'terminator';
       if (code.includes('cin')    || code.includes('scanf')
@@ -1746,12 +1886,15 @@ const FlowGraphInner: React.FC<Props> = ({
       if (code.includes('cout')   || code.includes('printf')
        || lbl.includes('cout')    || lbl.includes('printf')
        || lbl.includes('print')   || lbl.includes('output'))                   return 'io';
-      if (lbl.includes('write')  || lbl.includes('file')
+      if (code.includes('ofstream') || code.includes('ifstream') || code.includes('fstream')
+       || lbl.includes('write')  || lbl.includes('file')
        || lbl.includes('document') || lbl.includes('report'))                  return 'document';
-      if (lbl.includes('array')  || lbl.includes('vector')
+      if (code.includes('new ') || code.includes('delete') || /\[[^\]]*\]/.test(code)
+       || lbl.includes('array')  || lbl.includes('vector')
        || lbl.includes('map')    || lbl.includes('database')
        || lbl.includes('store')  || lbl.includes('[]'))                        return 'database';
-      if (lbl.includes('sleep')  || lbl.includes('delay')
+      if (code.includes('sleep') || code.includes('sleep_for')
+       || lbl.includes('sleep')  || lbl.includes('delay')
        || lbl.includes('wait')   || lbl.includes('pause'))                     return 'delay';
       if ((lbl.includes('(') && lbl.includes(')'))
        || lbl.includes('call')   || lbl.includes('func'))                      return 'predefined';
@@ -1796,14 +1939,28 @@ const FlowGraphInner: React.FC<Props> = ({
     const initialEdges: Edge[] = validCfgEdges.map((edge, i) => {
       const target       = capped.find(n => n.id === edge.to);
       const hasViolation = target && stableSafetyChecks.some(c => c.line === target.line && c.status === 'UNSAFE');
-      const color = hasViolation ? '#ff4444' : '#64b5f6';
+      const label = String(edge.label ?? '').trim().toLowerCase();
+      const isTrueEdge = label === 'true' || label === 'yes';
+      const isFalseEdge = label === 'false' || label === 'no';
+      const color = hasViolation
+        ? '#ff4444'
+        : isTrueEdge
+        ? '#4caf50'
+        : isFalseEdge
+        ? '#ff4444'
+        : '#64b5f6';
+      const labelColor = isTrueEdge
+        ? '#4caf50'
+        : isFalseEdge
+        ? '#ff6b6b'
+        : '#ffffff';
       return {
         id: `e-${i}`, source: edge.from, target: edge.to,
         label: edge.label, type: 'default',
         animated:       !!hasViolation,
         style:          { stroke: color, strokeWidth: hasViolation ? 3 : 2 },
         markerEnd:      { type: MarkerType.ArrowClosed, color, width: 20, height: 20 },
-        labelStyle:     { fill: '#ffffff', fontSize: '11px', fontWeight: '600' },
+        labelStyle:     { fill: labelColor, fontSize: '11px', fontWeight: '700' },
         labelBgStyle:   { fill: '#0d1117', fillOpacity: 0.9, rx: 4, ry: 4 },
         labelBgPadding: [5, 8] as [number, number],
       };
@@ -2001,7 +2158,7 @@ const FlowGraphInner: React.FC<Props> = ({
             {isBuildMode ? (
               <>
                 Use <strong style={{ color: '#58a6ff' }}>➕ ADD NODE</strong> — 11 ISO 5807 shapes are available.<br />
-                Label decision edges <strong style={{ color: '#4caf50' }}>true</strong> / <strong style={{ color: '#ff6b6b' }}>false</strong>, then click <strong style={{ color: '#a855f7' }}>⚡ GENERATE C++</strong>.<br />
+                Use one decision edge for a single-arm <strong>if</strong>, or label two branches <strong style={{ color: '#4caf50' }}>true</strong> / <strong style={{ color: '#ff6b6b' }}>false</strong>, then click <strong style={{ color: '#a855f7' }}>⚡ GENERATE C++</strong>.<br />
                 <span style={{ fontSize: 10, color: '#3d444d' }}>💡 <strong style={{ color: '#e040fb' }}>Alt+click</strong> any edge to insert a Junction node at that point.</span>
               </>
             ) : (

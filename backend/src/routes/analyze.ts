@@ -372,7 +372,7 @@ router.post('/analyze', (req, res) => {
         explanations: [
           '❌ **Status:** Semantic Analysis Failed',
           ...semanticErrors.map(e => `🚨 **Error (L${e.line}):** ${e.message}`),
-          ...combinedWarnings.map(w => `⚠️ **Warning (L${w.line}):** ${w.message}`),
+          ...combinedWarnings.map(formatWarningExplanation),
         ],
       });
     }
@@ -460,7 +460,7 @@ router.post('/analyze', (req, res) => {
     // CRITICAL: Adding this string triggers the PASS status in your LogsTab UI
     explanations: [
         "✅ **Status:** Analysis Successful",
-        ...combinedWarnings.map(w => `⚠️ **WARNING (L${w.line}):** ${w.message}`),
+        ...combinedWarnings.map(formatWarningExplanation),
         ...unsupportedWarnings.map(w => `⚠️ **Unsupported Feature:** ${w.message}`),
         ...(executorCrashMsg ? [`⚠️ **Safety Analyzer:** Stopped early — ${executorCrashMsg}`] : []),
         ...(cfgCrashMsg      ? [`⚠️ **Flow Graph:** Generation failed — ${cfgCrashMsg}`]       : []),
@@ -547,8 +547,11 @@ function buildSymbolicTrace(
     if ((sym.line ?? 0) === 0) continue;      // skip stdlib
     if (sym.kind === 'function') continue;
     const label = key.split('::').slice(1).join('::') || sym.name;
+    const dimensions = Array.isArray(sym.dimensions) && sym.dimensions.length
+      ? sym.dimensions.map((d: any) => `[${d}]`).join('')
+      : '';
     entries.push({
-      expression: `${sym.type} ${label}`,
+      expression: `${sym.type} ${label}${dimensions}`,
       value: sym.initialized ? sym.type : 'uninitialized',
     });
   }
@@ -637,6 +640,83 @@ function dedupeWarnings(warnings: AnalysisError[]): AnalysisError[] {
     out.push(w);
   }
   return out;
+}
+
+function formatWarningExplanation(warning: AnalysisError): string {
+  const guidance = getWarningGuidance(warning.message);
+  const suffix = guidance
+    ? `\n   Why: ${guidance.why}\n   Try this: ${guidance.suggestion}`
+    : `\n   Why: The analyzer found something that may be confusing, risky, or outside the expected beginner pattern.\n   Try this: Review the highlighted line and make the intent explicit.`;
+  return `⚠️ **WARNING (L${warning.line}):** ${warning.message}${suffix}`;
+}
+
+function getWarningGuidance(message: string): { why: string; suggestion: string } | null {
+  const lower = message.toLowerCase();
+
+  if (lower.includes('unused variable')) {
+    return {
+      why: 'The variable is declared but never read, so it does not affect the program result.',
+      suggestion: 'Use the variable later in a condition, assignment, output, or return value, or remove it if it is not needed.',
+    };
+  }
+
+  if (lower.includes('redundant assignment') || lower.includes('overwritten')) {
+    return {
+      why: 'A value is assigned, then replaced before any code reads the first value.',
+      suggestion: 'Remove the earlier assignment, or read/use the value before assigning a new one.',
+    };
+  }
+
+  if (lower.includes('possible data loss') || lower.includes('narrowing conversion')) {
+    return {
+      why: 'The value may lose decimal precision or range when stored in the target type.',
+      suggestion: 'Use a matching type such as double/float, or convert intentionally only when losing precision is acceptable.',
+    };
+  }
+
+  if (lower.includes('uninitialized')) {
+    return {
+      why: 'Reading a variable before assigning it can use unpredictable leftover memory.',
+      suggestion: 'Assign an initial value before the first read, for example int count = 0;.',
+    };
+  }
+
+  if (lower.includes('infinite loop')) {
+    return {
+      why: 'The loop condition may never become false.',
+      suggestion: 'Update the condition variable inside the loop or add a clear break condition.',
+    };
+  }
+
+  if (lower.includes('unsupported') || lower.includes('outside') || lower.includes('not supported')) {
+    return {
+      why: 'This analyzer focuses on CP1/CP2 procedural code, so some advanced C++ features are intentionally limited.',
+      suggestion: 'Use simpler variables, arrays, functions, loops, conditionals, and supported headers for now.',
+    };
+  }
+
+  if (lower.includes('header') || lower.includes('preprocessor') || lower.includes('include')) {
+    return {
+      why: 'Strict mode checks whether library features have the matching #include directive.',
+      suggestion: 'Add the required header, or replace the library call with basic arithmetic/control-flow code.',
+    };
+  }
+
+  if (lower.includes('logical contradiction') || lower.includes('always false')) {
+    return {
+      why: 'The condition can never be true, so part of the code will not run.',
+      suggestion: 'Check the comparison operator and the values used in the condition.',
+    };
+  }
+
+  if (lower.includes('logical tautology') || lower.includes('always true')) {
+    return {
+      why: 'The condition is always true, so the alternative path cannot run.',
+      suggestion: 'Simplify the condition or change it so both paths are possible when needed.',
+    };
+  }
+
+  return null;
 }
 
 function detectFunctionOverloads(ast: any): AnalysisError[] {

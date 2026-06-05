@@ -122,29 +122,29 @@ export class Translator {
       // ── Functions ───────────────────────────────────────────────────────────
       case 'FunctionDecl': {
         if (n.name === 'main')
-          return '🚀 Your program wakes up here — this is where everything begins!';
+          return 'Program entry point: execution starts inside main().';
         const paramTags = (n.params || [])
-          .map((p: any) => `${p.varType} ${p.name || '?'} [${this.shortParamTag(String(p.varType || ''))}]`)
+          .map((p: any) => `${p.varType} ${p.name || '?'} (${this.shortParamTag(String(p.varType || ''))})`)
           .join(', ');
-        const gives = n.returnType === 'void' ? 'gives nothing back' : `gives back a ${n.returnType}`;
-        return `🔧 A reusable task called "${n.name}" — takes ${paramTags || 'nothing'} and ${gives}.`;
+        const gives = n.returnType === 'void' ? 'returns no value' : `returns ${n.returnType}`;
+        return `Defines helper "${n.name}": inputs ${paramTags || 'none'}; ${gives}.`;
       }
       case 'FunctionPrototype': {
         const paramTags = (n.params || [])
-          .map((p: any) => `${p.varType} ${p.name || '?'} [${this.shortParamTag(String(p.varType || ''))}]`)
+          .map((p: any) => `${p.varType} ${p.name || '?'} (${this.shortParamTag(String(p.varType || ''))})`)
           .join(', ');
-        return `📢 Early announcement: "${n.name}" exists and takes ${paramTags || 'nothing'} — the full code comes later.`;
+        return `Declares "${n.name}" early: inputs ${paramTags || 'none'}; body appears later.`;
       }
       case 'FunctionCall': {
         const args = (n.arguments || []).map((a: any) => this.formatExpr(a)).join(', ');
         return args
-          ? `📞 Ask "${n.name}" to do its job with: ${args}`
-          : `📞 Ask "${n.name}" to do its job.`;
+          ? `Calls "${n.name}" now, passing ${args}; execution returns after it finishes.`
+          : `Calls "${n.name}" now; execution returns after it finishes.`;
       }
       case 'ReturnStatement':
         return n.value
-          ? `↩️ Done! Hand back the result: ${this.formatExpr(n.value)}`
-          : `↩️ All done here — exit this function.`;
+          ? `Returns ${this.formatExpr(n.value)} and exits the current function.`
+          : `Exits the current function and returns to the caller.`;
 
       // ── Variables ───────────────────────────────────────────────────────────
       case 'VariableDecl': {
@@ -157,27 +157,27 @@ export class Translator {
         const name    = this.cleanName(n.name);
         if (isConst) {
           const val = n.value ? this.formatExpr(n.value) : '?';
-          return `❄️ Locked box "${name}" = ${val} — this value can never be changed.`;
+          return `Creates constant "${name}" = ${val}; it cannot be reassigned.`;
         }
         if (isRef) {
           return n.value
-            ? `🔗 "${name}" is an alias for ${this.formatExpr(n.value)} — same variable, different name. Changes affect the original!`
-            : `🔗 Reference "${name}" (${vt}) — another name for an existing variable. Must be bound at creation.`;
+            ? `Creates reference "${name}" as an alias of ${this.formatExpr(n.value)}; changes affect the original.`
+            : `Creates reference "${name}" (${vt}); it must alias an existing variable.`;
         }
         if (isPtr) {
           if (n.value && this.isNullptr(n.value))
-            return `📌 Pointer "${name}" — set to nullptr right away (safe — it points at nothing for now).`;
+            return `Creates pointer "${name}" set to nullptr; it points to nothing safely.`;
           return n.value
-            ? `📌 Pointer "${name}" — stores a memory address, currently pointing at ${this.formatExpr(n.value)}.`
-            : `📌 Pointer "${name}" — stores a memory address (like a GPS pin), currently unset!`;
+            ? `Creates pointer "${name}" storing the address/value ${this.formatExpr(n.value)}.`
+            : `Creates pointer "${name}" without a target; initialize before use.`;
         }
         if (isArr) {
           const size = n.dimensions[0] ? this.formatExpr(n.dimensions[0]) : '?';
-          return `📦 Row of ${size} boxes called "${name}" — like ${size} numbered lockers side by side.`;
+          return `Creates array "${name}" with ${size} indexed slot(s), starting at index 0.`;
         }
         return n.value
-          ? `📦 Box "${name}" created and filled with ${this.formatExpr(n.value)}.`
-          : `⚠️ Empty box "${name}" created — it holds random garbage until you put something in it!`;
+          ? `Creates ${vt || 'variable'} "${name}" initialized to ${this.formatExpr(n.value)}.`
+          : `Creates ${vt || 'variable'} "${name}" uninitialized; assign before reading.`;
       }
       case 'Assignment': {
         const tgt = typeof n.target === 'string' ? n.target : this.formatExpr(n.target);
@@ -189,51 +189,51 @@ export class Translator {
           '*=': 'Multiply', '/=': 'Divide', '%=': 'Modulo update',
         };
         const verb = opFriendly[n.operator] || 'Update';
-        return `✏️ ${verb} "${tgt}" — new value becomes ${val}.`;
+        return `${verb} "${tgt}"; its new value is ${val}.`;
       }
       case 'ArrayAccess': {
         const idx = (n.indices || []).map((i: any) => this.formatExpr(i)).join(', ');
-        return `🔍 Reach into box "${n.name}" and grab item at slot [${idx}].`;
+        return `Reads or writes "${n.name}" at index [${idx}].`;
       }
 
       // ── Decisions ───────────────────────────────────────────────────────────
       case 'IfStatement': {
         const cond = this.formatExpr(n.condition);
-        return `🤔 Decision: is ${cond}? If yes, go one way; if no, go another — like a fork in the road.`;
+        return `Branches on ${cond}: true runs the if path, false runs else or skips it.`;
       }
       case 'SwitchStatement': {
         const count = (n.cases || []).length;
-        return `🎯 Check "${this.formatExpr(n.condition)}" and jump to the matching option — like a ${count}-item menu.`;
+        return `Compares ${this.formatExpr(n.condition)} against ${count} case option(s).`;
       }
       case 'ConditionalExpression': {
         const cond  = this.formatExpr(n.condition);
         const yes   = this.formatExpr(n.trueExpression);
         const no    = this.formatExpr(n.falseExpression);
-        return `❓ Quick pick: if ${cond} then ${yes}, otherwise ${no}.`;
+        return `Chooses ${yes} when ${cond} is true; otherwise chooses ${no}.`;
       }
 
       // ── Loops ────────────────────────────────────────────────────────────────
       case 'WhileLoop':
-        return `🔁 Keep looping as long as "${this.formatExpr(n.condition)}" stays true — stops the moment it's false.`;
+        return `Repeats while ${this.formatExpr(n.condition)} is true; checks before each run.`;
       case 'DoWhileLoop':
-        return `🔄 Do the work first, then ask: "${this.formatExpr(n.condition)}" — always runs at least once.`;
+        return `Runs once, then repeats while ${this.formatExpr(n.condition)} is true.`;
       case 'ForLoop': {
         const cond = n.condition ? this.formatExpr(n.condition) : 'forever';
         const upd  = n.update    ? `, stepping by ${this.formatExpr(n.update)}` : '';
-        return `🔢 Count loop — keep going while ${cond}${upd}.`;
+        return `For loop: repeats while ${cond}${upd}.`;
       }
       case 'RangeBasedFor':
-        return `🔁 Walk through every item in "${this.formatExpr(n.range)}", calling each one "${n.name}".`;
+        return `Loops through each item in ${this.formatExpr(n.range)} as "${n.name}".`;
       case 'LoopControl':
         return n.value === 'break'
-          ? '🛑 Emergency exit! Jump out of the loop right now.'
-          : '⏭️ Skip the rest of this round and jump straight to the next one.';
+          ? 'Break exits the nearest loop or switch immediately.'
+          : 'Continue skips the rest of this loop round and starts the next check.';
 
       // ── I/O ──────────────────────────────────────────────────────────────────
       case 'CoutStatement': {
         const items = this.flattenCout(n.values)
           .filter(s => s !== 'cout' && s !== 'std::cout').join(', ');
-        return `🖥️ Print to the screen: ${items || 'a blank line'}.`;
+        return `Outputs to the console: ${items || 'a blank line'}.`;
       }
       case 'CinStatement': {
         const flatten = (x: any): any[] => {
@@ -244,77 +244,77 @@ export class Translator {
         const names = flatten(n.targets ?? n.target)
           .map((t: any) => typeof t === 'string' ? t : this.cleanName(t.name ?? t))
           .filter((s: string) => s !== 'cin' && s !== 'std::cin');
-        return `⌨️ Pause and wait for the user to type — save what they enter into "${names.join('", "') || 'a variable'}".`;
+        return `Reads console input into "${names.join('", "') || 'a variable'}".`;
       }
 
       // ── Memory ───────────────────────────────────────────────────────────────
       case 'NewExpression':
         return n.size
-          ? `🆕 Reserve fresh memory for ${this.formatExpr(n.size)} ${n.baseType} values — remember to free it when done!`
-          : `🆕 Create a brand-new ${n.baseType} in memory — remember to free it when done!`;
+          ? `Allocates dynamic memory for ${this.formatExpr(n.size)} ${n.baseType} value(s); free it later.`
+          : `Allocates one dynamic ${n.baseType}; free it later.`;
       case 'DeleteStatement':
         return n.isArray
-          ? `🗑️ Release the whole array "${this.cleanName(n.target)}" back to the system — it's gone!`
-          : `🗑️ Free "${this.cleanName(n.target)}" from memory — don't touch that pointer anymore!`;
+          ? `Frees dynamic array "${this.cleanName(n.target)}"; do not use it afterward.`
+          : `Frees dynamic memory "${this.cleanName(n.target)}"; do not use it afterward.`;
 
       // ── Errors ───────────────────────────────────────────────────────────────
       case 'TryStatement':
-        return '🛡️ Risky zone — if anything crashes here, the catch block swoops in to handle it.';
+        return 'Runs protected code; thrown errors can move control to catch.';
       case 'ThrowStatement': {
         const val = n.value ? this.formatExpr(n.value) : 'the current error';
-        return `🚀 Toss the error "${val}" — the nearest catch block will catch it.`;
+        return `Throws ${val}; control jumps to the nearest matching catch.`;
       }
 
       // ── Type ops ─────────────────────────────────────────────────────────────
       case 'CastExpression':
-        return `🔄 Convert "${this.formatExpr(n.operand)}" into type ${n.targetType} — like converting miles to km.`;
+        return `Converts ${this.formatExpr(n.operand)} to type ${n.targetType}.`;
       case 'SizeofExpression':
-        return `📏 How many bytes does "${this.formatExpr(n.value)}" take up in memory?`;
+        return `Gets the byte size of ${this.formatExpr(n.value)}.`;
 
       // ── Pointers ─────────────────────────────────────────────────────────────
       case 'AddressOf':
-        return `📍 Find where "${this.cleanName(n.operand)}" lives in memory — returns its GPS address.`;
+        return `Gets the memory address of "${this.cleanName(n.operand)}".`;
       case 'Dereference':
-        return `🎯 Follow the pointer "${this.cleanName(n.operand)}" and read the value it's pointing at.`;
+        return `Uses the value stored at pointer "${this.cleanName(n.operand)}".`;
       case 'PreIncrement':
-        return `⬆️ Add 1 to "${this.cleanName(n.operand)}" first, then use the new value.`;
+        return `Increments "${this.cleanName(n.operand)}" before using it.`;
       case 'PostIncrement':
-        return `⬆️ Use "${this.cleanName(n.operand)}" as-is right now, then add 1 to it afterward.`;
+        return `Uses "${this.cleanName(n.operand)}", then increments it.`;
       case 'PreDecrement':
-        return `⬇️ Subtract 1 from "${this.cleanName(n.operand)}" first, then use the new value.`;
+        return `Decrements "${this.cleanName(n.operand)}" before using it.`;
       case 'PostDecrement':
-        return `⬇️ Use "${this.cleanName(n.operand)}" as-is right now, then subtract 1 afterward.`;
+        return `Uses "${this.cleanName(n.operand)}", then decrements it.`;
 
       // ── Goto / Labels ─────────────────────────────────────────────────────────
       case 'GotoStatement':
-        return `🏃 Jump straight to the marker called "${n.label}".`;
+        return `Jumps directly to label "${n.label}".`;
       case 'LabelStatement':
-        return `🏷️ Marker "${n.label}" — a landing spot that goto can jump to.`;
+        return `Defines label "${n.label}" as a goto target.`;
 
       // ── Expressions ──────────────────────────────────────────────────────────
       case 'BinaryOp':
-        return `🧮 Calculate: ${this.formatExpr(node)}`;
+        return `Evaluates expression: ${this.formatExpr(node)}.`;
       case 'ExpressionStatement':
-        return `▶️ Run: ${this.formatExpr(n.expression)}`;
+        return `Runs expression statement: ${this.formatExpr(n.expression)}.`;
       case 'InitializerList': {
         const vals = (n.values || []).map((v: any) => this.formatExpr(v)).join(', ');
-        return `📋 Fill all slots at once with: { ${vals} }`;
+        return `Initializes values with { ${vals} }.`;
       }
 
       // ── Structure ─────────────────────────────────────────────────────────────
       case 'Block':
-        return `📂 A grouped block of statements — they run together as a unit.`;
+        return `Groups statements into one scope.`;
       case 'LambdaExpression': {
         const cap = n.capture ? `captures [${n.capture}]` : 'captures nothing';
-        return `🎭 Inline mini-function (lambda) — ${cap}, defined right here on the spot.`;
+        return `Defines an inline lambda; ${cap}.`;
       }
       case 'GlobalAccess':
-        return `🌐 Access "${n.name}" from the global scope.`;
+        return `Accesses global-scope name "${n.name}".`;
       case 'CatchClause': {
         const param = n.param?.type === 'CatchAll'
           ? 'any error'
           : `${n.param?.varType ?? ''} ${n.param?.name ?? ''}`.trim();
-        return `🪤 Catch block — handles errors of type: ${param}.`;
+        return `Handles thrown errors matching: ${param}.`;
       }
 
       default:
@@ -433,6 +433,8 @@ export class Translator {
       // Logic for uninitialized variables - a major source of C++ bugs
       this.explanations.push(`${this.indent()}   ⚠️ **Warning: Uninitialized!**`);
       this.explanations.push(`${this.indent()}   The box '${name}' is currently empty. In C++, it will contain "garbage data" (random leftovers in memory) until you assign it a value.`);
+      this.explanations.push(`${this.indent()}   Why: If '${name}' is read before it is assigned, it can produce unpredictable results.`);
+      this.explanations.push(`${this.indent()}   Try this: Give '${name}' a starting value when you declare it, or assign it before the first time it is used.`);
       
       if (isPtr) {
         this.explanations.push(`${this.indent()}   🛑 **DANGER:** Uninitialized pointers are risky. It's safer to set this to 'nullptr'!`);
@@ -574,7 +576,7 @@ export class Translator {
     this.indentLevel--;
 
     if (node.elseBranch && node.elseBranch.length > 0) {
-      this.explanations.push(`${this.indent()}❌ **If NO:**`);
+      this.explanations.push(`${this.indent()}↘️ **If NO:**`);
       this.indentLevel++;
       node.elseBranch.forEach(stmt => this.visit(stmt));
       this.indentLevel--;
@@ -874,6 +876,7 @@ private visitCoutStatement(node: any): void {
     if (!node) return '???';
 
     if (typeof node === 'string') return node;
+    if (typeof node !== 'object') return String(node);
 
     switch (node.type) {
       case 'BinaryOp': {
@@ -917,8 +920,16 @@ private visitCoutStatement(node: any): void {
         const indices = (node.indices || []).map((i: any) => `[${this.formatExpr(i)}]`).join('');
         return `${node.name}${indices}`;
       }
-      case 'VariableDecl':
-        return this.cleanName(node.name);
+      case 'VariableDecl': {
+        const name = this.cleanName(node.name);
+        const dims = (node.dimensions || []).map((d: any) => `[${this.formatExpr(d)}]`).join('');
+        const prefix = `${node.varType ? `${node.varType} ` : ''}${name}${dims}`;
+        return node.value ? `${prefix} = ${this.formatExpr(node.value)}` : prefix;
+      }
+      case 'MultipleVariableDecl':
+        return (node.declarations || []).map((d: any) => this.formatExpr(d)).join(', ');
+      case 'ExpressionStatement':
+        return this.formatExpr(node.expression);
       case 'Assignment': {
         const tgt = typeof node.target === 'string'
           ? this.cleanName(node.target)
@@ -959,8 +970,16 @@ private visitCoutStatement(node: any): void {
         const vals = (node.values || []).map((v: any) => this.formatExpr(v)).join(', ');
         return `{ ${vals} }`;
       }
+      case 'ReturnStatement':
+        return node.value ? `return ${this.formatExpr(node.value)}` : 'return';
+      case 'LoopControl':
+        return node.value || 'loop control';
+      case 'Block':
+        return '{ ... }';
       default:
-        return node.name || node.value || String(node);
+        if (node.name !== undefined && node.name !== null) return String(node.name);
+        if (node.value !== undefined && node.value !== null) return String(node.value);
+        return node.type || 'unknown expression';
     }
   }
   // =========================================================================

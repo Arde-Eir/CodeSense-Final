@@ -15,6 +15,7 @@ import {
 import { extractTextFromPdf, generateQuestDraftFromText } from './admin/questAutoGenerator'
 import { generateAutoHints } from './campaign/generateAutoHints'
 import type { ActivityTab, Quest } from './types/campaign'
+import { isCampaignPhase, levelForPhase, phaseForLevel } from './types/campaign'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -22,7 +23,7 @@ import type { ActivityTab, Quest } from './types/campaign'
 interface ExistingQuest {
   id: string
   title: string
-  level: 1 | 2 | 3 | null
+  level: number | null
   difficulty: string | null
   basexp: number
   requiredxp?: number
@@ -97,7 +98,7 @@ interface QFormOrderProblem { id: string; question: string; items: QFormOrderIte
 
 interface QuestFormState {
   title: string; description: string
-  difficulty: 'beginner' | 'intermediate' | 'advanced' | 'expert'; level: 1 | 2 | 3
+  difficulty: 'beginner' | 'intermediate' | 'advanced' | 'expert'; level: number
   basexp: number; requiredxp: number; sortorder: number; isactive: boolean
   tutorial_title: string; tutorial_body: string
   theory_sections: QFormTheory[]; objectives: string[]
@@ -336,6 +337,25 @@ const questActivityLabels = (q: ExistingQuest): string[] => {
   return labels
 }
 
+const coreLevelNames: Record<number, string> = {
+  1: 'Beginner',
+  2: 'Intermediate',
+  3: 'Advanced',
+}
+
+const levelName = (level: number): string =>
+  coreLevelNames[level] ?? `Custom Level ${level}`
+
+const levelOptionLabel = (level: number): string =>
+  `${level} - ${levelName(level)}`
+
+const levelBadgeColor = (level: number): string => {
+  if (level === 1) return 'green'
+  if (level === 2) return 'yellow'
+  if (level === 3) return 'red'
+  return 'purple'
+}
+
 const defaultQF = (): QuestFormState => ({
   title: '', description: '', difficulty: 'beginner',
   level: 1, basexp: 100, requiredxp: 0, sortorder: 99, isactive: true,
@@ -350,6 +370,11 @@ const defaultQF = (): QuestFormState => ({
   hints: [],
   game_items: [], drop_zones: [],
 })
+
+const defaultLevelAccent = (level: number): string => {
+  const colors = ['#3fb950', '#e3b341', '#f85149', '#a371f7', '#58a6ff', '#ff7b72'];
+  return colors[Math.max(0, level - 1) % colors.length];
+}
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -397,6 +422,7 @@ export const AdminPanel: React.FC = () => {
   // Quest generator
   const [questForm,      setQuestForm]      = useState<QuestFormState>(defaultQF)
   const [existingQuests, setExistingQuests] = useState<ExistingQuest[]>([])
+  const [questLevelInfoPhases, setQuestLevelInfoPhases] = useState<string[]>([])
   const [replaceTarget,  setReplaceTarget]  = useState('')
   const [questSaving,    setQuestSaving]    = useState(false)
   const [questSubTab,    setQuestSubTab]    = useState<'create' | 'manage'>('create')
@@ -406,13 +432,87 @@ export const AdminPanel: React.FC = () => {
   const [questsLoading,  setQuestsLoading]  = useState(false)
   const [questActionId,  setQuestActionId]  = useState<string | null>(null)
   const [questSearch,    setQuestSearch]    = useState('')
-  const [questLevelFilter, setQuestLevelFilter] = useState<'all' | '1' | '2' | '3'>('all')
+  const [questLevelFilter, setQuestLevelFilter] = useState<string>('all')
   const [questStatusFilter, setQuestStatusFilter] = useState<'all' | 'active' | 'inactive'>('all')
+  const [customLevelDraft, setCustomLevelDraft] = useState('')
   const [fixingPop,      setFixingPop]      = useState(false)
   const [fixPopResult,   setFixPopResult]   = useState<string | null>(null)
   const [autoQuestLoading, setAutoQuestLoading] = useState(false)
   const [autoQuestResult, setAutoQuestResult] = useState<string | null>(null)
   const qSet = (patch: Partial<QuestFormState>) => setQuestForm(p => ({ ...p, ...patch }))
+
+  const questLevelOptions = useMemo(() => {
+    const levels = new Set<number>([1, 2, 3, questForm.level])
+    for (const quest of existingQuests) {
+      if (typeof quest.level === 'number' && Number.isFinite(quest.level)) {
+        levels.add(quest.level)
+      }
+    }
+    for (const phase of questLevelInfoPhases) {
+      if (isCampaignPhase(phase)) levels.add(levelForPhase(phase))
+    }
+    return Array.from(levels).sort((a, b) => a - b)
+  }, [existingQuests, questForm.level, questLevelInfoPhases])
+
+  const nextQuestLevel = useMemo(
+    () => Math.max(3, ...questLevelOptions) + 1,
+    [questLevelOptions]
+  )
+
+  const addCustomLevel = (level = Number(customLevelDraft)) => {
+    if (!Number.isInteger(level) || level < 1) {
+      showToast('Enter a whole level number, like 4', 'error')
+      return
+    }
+    qSet({ level, difficulty: level <= 1 ? 'beginner' : level === 2 ? 'intermediate' : level === 3 ? 'advanced' : 'expert' })
+    setQuestLevelFilter(String(level))
+    setCustomLevelDraft('')
+    setQuestSubTab('create')
+    showToast(`Level ${level} is ready. Add learning material and quests, then save.`)
+  }
+
+  const ensureLevelInfoForLevel = async (level: number) => {
+    const phase = phaseForLevel(level)
+    const row = {
+      phase,
+      title: levelName(level),
+      subtitle: `Level ${level}`,
+      description: level <= 3 ? null : 'New learning material and quests.',
+      accent_color: defaultLevelAccent(level),
+      banner_url: null,
+    }
+    const { error } = await supabase
+      .from('level_info')
+      .upsert(row, { onConflict: 'phase', ignoreDuplicates: true })
+    if (error) throw new Error(`Level metadata failed: ${error.message}`)
+  }
+
+  const removeCustomLevel = async (level: number) => {
+    if (level <= 3) {
+      showToast('Default Levels 1-3 cannot be removed', 'error')
+      return
+    }
+    const attachedQuests = existingQuests.filter(q => q.level === level)
+    if (attachedQuests.length > 0) {
+      showToast(`Move or delete ${attachedQuests.length} quest(s) in Level ${level} before removing it`, 'error')
+      return
+    }
+    if (!window.confirm(`Remove Level ${level}? This removes its dashboard metadata only.`)) return
+
+    try {
+      const { error } = await supabase
+        .from('level_info')
+        .delete()
+        .eq('phase', phaseForLevel(level))
+      if (error) throw error
+      setQuestLevelInfoPhases(prev => prev.filter(phase => phase !== phaseForLevel(level)))
+      if (questForm.level === level) qSet({ level: 1, difficulty: 'beginner' })
+      if (questLevelFilter === String(level)) setQuestLevelFilter('all')
+      showToast(`Level ${level} removed`)
+    } catch (err: any) {
+      showToast(`Failed to remove level: ${err.message}`, 'error')
+    }
+  }
 
   const addObjectivesFromDraft = (replace = false) => {
     const items = parseLineList(objectiveDraft)
@@ -643,6 +743,14 @@ export const AdminPanel: React.FC = () => {
         return
       }
       setExistingQuests(data ?? [])
+      const { data: levels, error: levelErr } = await supabase
+        .from('level_info')
+        .select('phase')
+      if (levelErr) {
+        console.warn('[fetchQuestLevelInfo]', levelErr.message)
+      } else {
+        setQuestLevelInfoPhases((levels ?? []).map(row => row.phase).filter(Boolean))
+      }
     } finally {
       setQuestsLoading(false)
     }
@@ -967,6 +1075,7 @@ export const AdminPanel: React.FC = () => {
 
     setQuestSaving(true)
     try {
+      await ensureLevelInfoForLevel(questForm.level)
       if (replaceId) {
         const { error } = await supabase.from('quests').update(questData).eq('id', replaceId)
         if (error) throw error
@@ -1036,7 +1145,7 @@ export const AdminPanel: React.FC = () => {
 
     setQuestForm({
       title: q.title ?? '', description: q.description ?? '',
-      difficulty: campaignDifficultyToForm(q.difficulty), level: q.level ?? 1,
+      difficulty: campaignDifficultyToForm(q.difficulty), level: Number(q.level ?? 1),
       basexp: q.basexp ?? 100, requiredxp: q.requiredxp ?? 0,
       sortorder: q.sortorder ?? 99, isactive: q.isactive ?? true,
       tutorial_title: q.tutorial_title ?? '', tutorial_body: q.tutorial_body ?? '',
@@ -1668,10 +1777,10 @@ export const AdminPanel: React.FC = () => {
                             <div className="row g-2 mb-2">
                               <div className="col-4">
                                 <label className="form-label">Level</label>
-                                <select className="form-select" value={questForm.level} onChange={e => qSet({ level: Number(e.target.value) as 1|2|3 })}>
-                                  <option value={1}>1 – Beginner</option>
-                                  <option value={2}>2 – Intermediate</option>
-                                  <option value={3}>3 – Advanced</option>
+                                <select className="form-select" value={questForm.level} onChange={e => qSet({ level: Number(e.target.value) })}>
+                                  {questLevelOptions.map(level => (
+                                    <option key={level} value={level}>{levelOptionLabel(level)}</option>
+                                  ))}
                                 </select>
                               </div>
                               <div className="col-4">
@@ -1702,6 +1811,51 @@ export const AdminPanel: React.FC = () => {
                               <input type="checkbox" className="form-check-input" checked={questForm.isactive} onChange={e => qSet({ isactive: e.target.checked })} />
                               <span className="form-check-label">Active (visible to users)</span>
                             </label>
+                            <div className="border rounded p-2 mt-3" style={{ background: '#f8fafc' }}>
+                              <div className="d-flex justify-content-between align-items-start gap-2 flex-wrap">
+                                <div>
+                                  <div style={{ fontSize: '13px', fontWeight: 700 }}>Level Dashboard Generator</div>
+                                  <div className="text-muted" style={{ fontSize: '12px' }}>
+                                    Create another level bucket, then add learning material and quest activities for it below.
+                                  </div>
+                                </div>
+                                <span className={`badge bg-${levelBadgeColor(questForm.level)}-lt`}>Current: Level {questForm.level}</span>
+                              </div>
+                              <div className="row g-2 mt-2 align-items-end">
+                                <div className="col-6">
+                                  <label className="form-label" style={{ fontSize: '12px' }}>New level number</label>
+                                  <input
+                                    type="number"
+                                    min={1}
+                                    step={1}
+                                    className="form-control form-control-sm"
+                                    value={customLevelDraft}
+                                    onChange={e => setCustomLevelDraft(e.target.value)}
+                                    placeholder={`Next: Level ${nextQuestLevel}`}
+                                  />
+                                </div>
+                                <div className="col-6 d-flex gap-2">
+                                  <button className="btn btn-sm btn-outline-primary flex-fill" onClick={() => addCustomLevel(nextQuestLevel)}>
+                                    + Add Level {nextQuestLevel}
+                                  </button>
+                                  <button className="btn btn-sm btn-primary flex-fill" onClick={() => addCustomLevel()}>
+                                    Use Number
+                                  </button>
+                                </div>
+                              </div>
+                              {questForm.level > 3 && (
+                                <div className="d-flex align-items-center justify-content-between gap-2 mt-2 flex-wrap">
+                                  <span className="text-muted" style={{ fontSize: '11px' }}>
+                                    {existingQuests.filter(q => q.level === questForm.level).length > 0
+                                      ? `${existingQuests.filter(q => q.level === questForm.level).length} quest(s) are assigned to this level.`
+                                      : 'No saved quests are assigned to this level yet.'}
+                                  </span>
+                                  <button className="btn btn-sm btn-outline-danger" onClick={() => removeCustomLevel(questForm.level)}>
+                                    Remove Level {questForm.level}
+                                  </button>
+                                </div>
+                              )}
+                            </div>
                           </div>
                         </div>
 
@@ -2278,9 +2432,9 @@ export const AdminPanel: React.FC = () => {
                             <label className="form-label">Level</label>
                             <select className="form-select form-select-sm" value={questLevelFilter} onChange={e => setQuestLevelFilter(e.target.value as any)}>
                               <option value="all">All levels</option>
-                              <option value="1">Level 1</option>
-                              <option value="2">Level 2</option>
-                              <option value="3">Level 3</option>
+                              {questLevelOptions.map(level => (
+                                <option key={level} value={String(level)}>Level {level}</option>
+                              ))}
                             </select>
                           </div>
                           <div className="col-6 col-md-2">
@@ -2319,7 +2473,7 @@ export const AdminPanel: React.FC = () => {
                                   <strong style={{ fontSize: '13px' }}>{q.title}</strong>
                                   {q.description && <div className="text-muted" style={{ fontSize: '11px', maxWidth: 420 }}>{q.description}</div>}
                                 </td>
-                                <td><span className={`badge bg-${q.level === 1 ? 'green' : q.level === 2 ? 'yellow' : 'red'}-lt`}>Level {q.level}</span></td>
+                                <td><span className={`badge bg-${levelBadgeColor(q.level ?? 0)}-lt`}>Level {q.level ?? 'n/a'}</span></td>
                                 <td>
                                   <div className="d-flex gap-1 flex-wrap">
                                     {activities.length ? activities.map(label => <span key={label} className="badge bg-blue-lt">{label}</span>) : <span className="text-muted" style={{ fontSize: '12px' }}>No activities</span>}

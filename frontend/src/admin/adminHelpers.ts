@@ -32,8 +32,8 @@ export interface MCQuestionLite {
   [k: string]: unknown;
 }
 
-export type Level = 1 | 2 | 3;
-export type Phase = 'beginner' | 'intermediate' | 'advanced';
+export type Level = number;
+export type Phase = 'beginner' | 'intermediate' | 'advanced' | `level_${number}`;
 
 // ─── User stats ────────────────────────────────────────────────────────────
 export function computeUserStats<U extends AdminUserLite>(users: U[]): UserStats {
@@ -70,7 +70,8 @@ export function filterUsers<U extends AdminUserLite>(
 export function levelToPhase(level: Level): Phase {
   if (level === 1) return 'beginner';
   if (level === 2) return 'intermediate';
-  return 'advanced';
+  if (level === 3) return 'advanced';
+  return `level_${Math.max(1, Math.trunc(level))}` as `level_${number}`;
 }
 
 // ─── Balloon-pop language patcher ───────────────────────────────────────────
