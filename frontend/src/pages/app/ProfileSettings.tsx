@@ -1,8 +1,8 @@
 import React, { useEffect, useState, useRef, useCallback } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { useAuth } from './components/AuthScreen'
-import { supabase } from './services/supabase'
-import { getLevelProgress, getXPToNextLevel, getLevelName, XP_LEVELS, calculateLevel } from './types'
+import { useAuth } from '@/components/AuthContext'
+import { supabase } from '@/services/supabase'
+import { getLevelProgress, getXPToNextLevel, getLevelName, XP_LEVELS, calculateLevel } from '@/types'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -10,7 +10,6 @@ interface ProfileData {
   playername: string
   email: string
   totalxp: number
-  currentlevel: number
   sandbox_runs: number
   charactertype: string | null
   user_type: string | null
@@ -20,7 +19,7 @@ interface ProfileData {
 interface LeaderboardEntry {
   rank: number
   userid: string
-  users: { playername: string } | null
+  playername: string
   totalxp: number
 }
 
@@ -45,7 +44,7 @@ interface QuestEntry {
 interface FastQuestEntry {
   questid: string
   completion_time_seconds: number
-  quests: { title: string } | null
+  quests: { title: string } | { title: string }[] | null
 }
 
 interface ActivityLogEntry {
@@ -67,8 +66,33 @@ const isCompletedMissionRow = (row: { first_completed_at?: string | null; status
 const missionDoneAt = (row: { first_completed_at?: string | null; completedat?: string | null }) =>
   row.first_completed_at ?? row.completedat ?? null
 
-const countUniqueCompletedQuests = (rows: { questid?: string | null; id?: string | null; first_completed_at?: string | null; status?: string | null }[]) =>
-  new Set(rows.filter(isCompletedMissionRow).map(row => row.questid ?? row.id)).size
+function questTitle(row: { questid?: string | null; quests?: { title: string } | { title: string }[] | null }): string {
+  const quest = Array.isArray(row.quests) ? row.quests[0] : row.quests
+  return quest?.title ?? row.questid ?? 'Unknown Quest'
+}
+
+function completedMissionTime(row: { first_completed_at?: string | null; completedat?: string | null; updatedat?: string | null }): number {
+  const time = new Date(row.updatedat ?? missionDoneAt(row) ?? 0).getTime()
+  return Number.isNaN(time) ? 0 : time
+}
+
+function dedupeCompletedMissionRows<T extends { questid?: string | null; id?: string | null; first_completed_at?: string | null; completedat?: string | null; updatedat?: string | null; status?: string | null }>(rows: T[]): T[] {
+  const byQuest = new Map<string, T>()
+  for (const row of rows.filter(isCompletedMissionRow)) {
+    const key = row.questid ?? row.id
+    if (!key) continue
+    const current = byQuest.get(key)
+    if (!current || completedMissionTime(row) >= completedMissionTime(current)) byQuest.set(key, row)
+  }
+  return Array.from(byQuest.values()).sort((a, b) => completedMissionTime(b) - completedMissionTime(a))
+}
+
+const countUniqueCompletedQuests = (rows: { questid?: string | null; id?: string | null; first_completed_at?: string | null; completedat?: string | null; updatedat?: string | null; status?: string | null }[]) =>
+  dedupeCompletedMissionRows(rows).length
+
+function isUserType(value: string | null): value is 'student' | 'professional' {
+  return value === 'student' || value === 'professional'
+}
 
 // ─── Achievements definition ──────────────────────────────────────────────────
 
@@ -111,6 +135,11 @@ const CHAR_META: Record<string, { icon: string; color: string; desc: string; unl
   king:   { icon: '🔱', color: '#ffd700', desc: 'Supreme — the highest title of the realm',   unlockLevel: 5 },
 }
 const TITLE_ORDER = ['squire', 'knight', 'lord', 'duke', 'king'] as const
+type CharacterType = typeof TITLE_ORDER[number]
+
+function isCharacterType(value: string | null): value is CharacterType {
+  return TITLE_ORDER.includes(value as CharacterType)
+}
 
 const MODE_COLOR: Record<string, string> = {
   sandbox: '#4caf50', campaign: '#ffa726',
@@ -172,18 +201,16 @@ export const ProfileSettings: React.FC = () => {
   const [saving, setSaving] = useState(false)
   const [uploadingAvatar, setUploadingAvatar] = useState(false)
   const [uploadingBanner, setUploadingBanner] = useState(false)
-  const [saveMsg, setSaveMsg] = useState('')
+  const [saveMsg, setSaveMsg] = useState<{ text: string; ok: boolean } | null>(null)
   const [loading, setLoading] = useState(true)
 
   // Settings tab state
-  const [editCharType, setEditCharType] = useState('')
+  const [editCharType, setEditCharType] = useState<CharacterType>('squire')
   const [editUserType, setEditUserType] = useState<'student' | 'professional'>('student')
   const [pwCurrent, setPwCurrent] = useState('')
   const [pwNew, setPwNew] = useState('')
   const [pwConfirm, setPwConfirm] = useState('')
   const [pwMsg, setPwMsg] = useState<{ text: string; ok: boolean } | null>(null)
-  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false)
-  const [deleteInput, setDeleteInput] = useState('')
 
   const avatarInputRef = useRef<HTMLInputElement>(null)
   const bannerInputRef = useRef<HTMLInputElement>(null)
@@ -212,104 +239,116 @@ export const ProfileSettings: React.FC = () => {
     }
   }, [])
 
-  useEffect(() => {
-    if (!user) { navigate('/login'); return }
-    fetchAll()
-  }, [user?.id])
-
   const fetchAll = useCallback(async () => {
     if (!user) return
     try {
       // Profile
-      const { data: prof } = await supabase
+      const { data: prof, error: profileError } = await supabase
         .from('users')
-        .select('playername, email, totalxp, currentlevel, sandbox_runs, charactertype, user_type, createdat')
+        .select('playername, email, totalxp, sandbox_runs, charactertype, user_type, createdat')
         .eq('id', user.id).single()
+      if (profileError) throw new Error(`Profile lookup failed: ${profileError.message}`)
       if (prof) {
         setProfile(prof)
         setEditName(prof.playername)
         setEditEmail(prof.email ?? '')
-        setEditCharType(prof.charactertype ?? 'squire')
-        setEditUserType((prof.user_type as any) ?? 'student')
+        setEditCharType(isCharacterType(prof.charactertype) ? prof.charactertype : 'squire')
+        setEditUserType(isUserType(prof.user_type) ? prof.user_type : 'student')
       }
 
       // Leaderboard
-      const { data: lb } = await supabase
-        .from('users').select('id, playername, totalxp, currentlevel')
+      const { data: lb, error: leaderboardError } = await supabase
+        .from('users').select('id, playername, totalxp')
         .eq('isactive', true).order('totalxp', { ascending: false }).limit(10)
+      if (leaderboardError) throw new Error(`Leaderboard lookup failed: ${leaderboardError.message}`)
       if (lb) {
-        setLeaderboard(lb.map((u: any, i: number) => ({ rank: i + 1, userid: u.id, totalxp: u.totalxp, users: { playername: u.playername } })))
-        const myPos = lb.findIndex((u: any) => u.id === user.id)
+        setLeaderboard(lb.map((u, i) => ({ rank: i + 1, userid: u.id, totalxp: u.totalxp ?? 0, playername: u.playername ?? 'Unknown Player' })))
+        const myPos = lb.findIndex(u => u.id === user.id)
         if (myPos !== -1) { setMyRank(myPos + 1) }
         else {
-          const { count } = await supabase.from('users').select('*', { count: 'exact', head: true })
+          const { count, error: rankError } = await supabase.from('users').select('*', { count: 'exact', head: true })
             .eq('isactive', true).gt('totalxp', prof?.totalxp ?? 0)
+          if (rankError) throw new Error(`Rank lookup failed: ${rankError.message}`)
           setMyRank((count ?? 0) + 1)
         }
       }
 
       // Quests completed. first_completed_at survives retakes, so it is the
       // durable completion signal; status='completed' remains a legacy fallback.
-      const { data: progressRows } = await supabase.from('mission_progress')
+      const { data: progressRows, error: progressError } = await supabase.from('mission_progress')
         .select('id, questid, status, first_completed_at')
         .eq('userid', user.id)
-      setQuestsCompleted(countUniqueCompletedQuests((progressRows ?? []) as any[]))
+      if (progressError) throw new Error(`Mission progress lookup failed: ${progressError.message}`)
+      setQuestsCompleted(countUniqueCompletedQuests(progressRows ?? []))
 
       // Recent completed quests for activity
-      const { data: cq } = await supabase.from('mission_progress')
+      const { data: cq, error: completedError } = await supabase.from('mission_progress')
         .select('questid, status, completedat, first_completed_at, updatedat, hintsused, quests(title)')
         .eq('userid', user.id)
         .order('updatedat', { ascending: false }).limit(40)
-      const recentCompleted = ((cq ?? []) as unknown as QuestEntry[])
-        .filter(isCompletedMissionRow)
+      if (completedError) throw new Error(`Completed quest lookup failed: ${completedError.message}`)
+      const recentCompleted = dedupeCompletedMissionRows((cq ?? []) as unknown as QuestEntry[])
         .filter(q => Boolean(missionDoneAt(q)))
-        .sort((a, b) => new Date(missionDoneAt(b)!).getTime() - new Date(missionDoneAt(a)!).getTime())
         .slice(0, 15)
       setCompletedQuests(recentCompleted)
 
       // Fastest quest completions
-      const { data: fq } = await supabase
+      const { data: fq, error: fastestError } = await supabase
         .from('mission_progress')
         .select('questid, completion_time_seconds, quests(title)')
         .eq('userid', user.id)
         .not('completion_time_seconds', 'is', null)
         .order('completion_time_seconds', { ascending: true })
         .limit(10)
-      setFastestQuests((fq as any[]) ?? [])
+      if (fastestError) throw new Error(`Fastest quest lookup failed: ${fastestError.message}`)
+      setFastestQuests((fq ?? []) as unknown as FastQuestEntry[])
 
       // Recent reports (kept for stats counters)
-      const { data: reps } = await supabase.from('reports')
+      const { data: reps, error: reportsError } = await supabase.from('reports')
         .select('id, type, createdat, mode_context, cognitive_complexity')
         .eq('userid', user.id).order('createdat', { ascending: false }).limit(20)
+      if (reportsError) throw new Error(`Reports lookup failed: ${reportsError.message}`)
       setReports((reps ?? []) as ReportEntry[])
 
       // Activity log — primary feed source
-      const { data: al } = await supabase
+      const { data: al, error: activityError } = await supabase
         .from('activity_log')
         .select('id, type, title, description, xp_gained, createdat, meta')
         .eq('userid', user.id)
         .order('createdat', { ascending: false })
         .limit(30)
+      if (activityError) throw new Error(`Activity log lookup failed: ${activityError.message}`)
       setActivityLog((al ?? []) as ActivityLogEntry[])
 
       // Avatar
-      const { data: avatarFiles } = await supabase.storage.from('Avatars').list(user.id, { limit: 10 })
+      const { data: avatarFiles, error: avatarError } = await supabase.storage.from('Avatars').list(user.id, { limit: 10 })
+      if (avatarError) throw new Error(`Avatar list failed: ${avatarError.message}`)
       const af = avatarFiles?.find(f => f.id && f.name && !f.name.includes('banner') && f.metadata?.mimetype?.startsWith('image/'))
         ?? avatarFiles?.find(f => f.id && f.name && f.name !== 'banner')
       if (af) {
         const { data: ud } = supabase.storage.from('Avatars').getPublicUrl(`${user.id}/${af.name}`)
         setAvatarUrl(ud.publicUrl)
+      } else {
+        setAvatarUrl(null)
       }
 
       // Banner
-      const { data: bannerFiles } = await supabase.storage.from('Avatars').list(`${user.id}/banner`, { limit: 1 })
+      const { data: bannerFiles, error: bannerError } = await supabase.storage.from('Avatars').list(`${user.id}/banner`, { limit: 1 })
+      if (bannerError) throw new Error(`Banner list failed: ${bannerError.message}`)
       if (bannerFiles && bannerFiles.length > 0) {
         const { data: ud } = supabase.storage.from('Avatars').getPublicUrl(`${user.id}/banner/${bannerFiles[0].name}`)
         setBannerUrl(ud.publicUrl)
+      } else {
+        setBannerUrl(null)
       }
     } catch (e) { console.error('Profile fetch error:', e) }
     finally { setLoading(false) }
   }, [user])
+
+  useEffect(() => {
+    if (!user) { navigate('/login'); return }
+    fetchAll()
+  }, [fetchAll, navigate, user])
 
   // ── Image handling ────────────────────────────────────────────────────────
 
@@ -340,10 +379,15 @@ export const ProfileSettings: React.FC = () => {
       if (!blob) { setUploadingAvatar(false); return }
       try {
         const path = `${user.id}/avatar.webp`
-        await supabase.storage.from('Avatars').upload(path, blob, { upsert: true, contentType: 'image/webp' })
+        const { error: uploadError } = await supabase.storage.from('Avatars').upload(path, blob, { upsert: true, contentType: 'image/webp' })
+        if (uploadError) throw new Error(`Avatar upload failed: ${uploadError.message}`)
         const { data } = supabase.storage.from('Avatars').getPublicUrl(path)
         setAvatarUrl(data.publicUrl + '?t=' + Date.now())
-      } catch (e) { console.error(e) }
+        flashSave('Avatar updated!')
+      } catch (e) {
+        console.error(e)
+        flashSave(e instanceof Error ? e.message : 'Avatar upload failed', false)
+      }
       finally { setUploadingAvatar(false) }
     }, 'image/webp', 0.92)
   }
@@ -354,10 +398,15 @@ export const ProfileSettings: React.FC = () => {
     try {
       const ext = file.name.split('.').pop()
       const path = `${user.id}/banner/banner.${ext}`
-      await supabase.storage.from('Avatars').upload(path, file, { upsert: true })
+      const { error: uploadError } = await supabase.storage.from('Avatars').upload(path, file, { upsert: true })
+      if (uploadError) throw new Error(`Banner upload failed: ${uploadError.message}`)
       const { data } = supabase.storage.from('Avatars').getPublicUrl(path)
       setBannerUrl(data.publicUrl + '?t=' + Date.now())
-    } catch (e) { console.error(e) }
+      flashSave('Background updated!')
+    } catch (e) {
+      console.error(e)
+      flashSave(e instanceof Error ? e.message : 'Banner upload failed', false)
+    }
     finally { setUploadingBanner(false) }
   }
 
@@ -366,41 +415,85 @@ export const ProfileSettings: React.FC = () => {
   const handleSaveProfile = async () => {
     if (!user) return; setSaving(true)
     try {
-      await supabase.from('users').update({ playername: editName, email: editEmail }).eq('id', user.id)
-      setProfile(prev => prev ? { ...prev, playername: editName, email: editEmail } : prev)
+      const trimmedName = editName.trim()
+      const trimmedEmail = editEmail.trim()
+      if (!trimmedName) throw new Error('Player name is required.')
+      const { error } = await supabase.from('users').update({ playername: trimmedName, email: trimmedEmail }).eq('id', user.id)
+      if (error) throw new Error(`Profile update failed: ${error.message}`)
+      setProfile(prev => prev ? { ...prev, playername: trimmedName, email: trimmedEmail } : prev)
       setIsEditing(false); flashSave('Profile updated!')
-    } catch (e) { console.error(e) } finally { setSaving(false) }
+    } catch (e) {
+      console.error(e)
+      flashSave(e instanceof Error ? e.message : 'Profile update failed', false)
+    } finally { setSaving(false) }
   }
 
   const handleSaveSettings = async () => {
     if (!user || !profile) return; setSaving(true)
     try {
-      await supabase.from('users').update({ charactertype: editCharType, user_type: editUserType }).eq('id', user.id)
+      const selectedTitle = CHAR_META[editCharType]
+      if (calculateLevel(profile.totalxp) < selectedTitle.unlockLevel) {
+        throw new Error(`The ${editCharType} title is not unlocked yet.`)
+      }
+      const { error } = await supabase.from('users').update({ charactertype: editCharType, user_type: editUserType }).eq('id', user.id)
+      if (error) throw new Error(`Settings update failed: ${error.message}`)
       setProfile(prev => prev ? { ...prev, charactertype: editCharType, user_type: editUserType } : prev)
-      if (user) setUser({ ...user, characterType: editCharType as any, userType: editUserType })
+      setUser({ ...user, characterType: editCharType, userType: editUserType })
       flashSave('Settings saved!')
-    } catch (e) { console.error(e) } finally { setSaving(false) }
+    } catch (e) {
+      console.error(e)
+      flashSave(e instanceof Error ? e.message : 'Settings update failed', false)
+    } finally { setSaving(false) }
   }
 
   const handleChangePassword = async () => {
     setPwMsg(null)
+    if (!profile?.email) { setPwMsg({ text: 'Profile email is missing. Save an email before changing your password.', ok: false }); return }
     if (!pwCurrent) { setPwMsg({ text: 'Enter your current password', ok: false }); return }
     if (!pwNew || pwNew.length < 8) { setPwMsg({ text: 'New password must be at least 8 characters', ok: false }); return }
     if (pwNew !== pwConfirm) { setPwMsg({ text: 'Passwords do not match', ok: false }); return }
     setSaving(true)
     try {
       const { error: reAuthErr } = await supabase.auth.signInWithPassword({
-        email: profile!.email, password: pwCurrent,
+        email: profile.email, password: pwCurrent,
       })
       if (reAuthErr) { setPwMsg({ text: 'Current password is incorrect', ok: false }); return }
       const { error } = await supabase.auth.updateUser({ password: pwNew })
       if (error) { setPwMsg({ text: error.message, ok: false }) }
       else { setPwMsg({ text: 'Password changed successfully!', ok: true }); setPwCurrent(''); setPwNew(''); setPwConfirm('') }
-    } catch (e: any) { setPwMsg({ text: e.message, ok: false }) }
+    } catch (e) { setPwMsg({ text: e instanceof Error ? e.message : 'Password update failed', ok: false }) }
     finally { setSaving(false) }
   }
 
-  const flashSave = (msg: string) => { setSaveMsg(msg); setTimeout(() => setSaveMsg(''), 3500) }
+  const copyStats = async () => {
+    if (!profile) {
+      flashSave('Profile is not loaded yet', false)
+      return
+    }
+    if (!navigator.clipboard) {
+      flashSave('Clipboard unavailable', false)
+      return
+    }
+    const text = `🧠 CodeSense | ${levelName}\n⭐ ${profile.totalxp} XP · #${myRank ?? '?'} ranked\n🔬 ${profile.sandbox_runs} analyses · ⚔️ ${questsCompleted} quests\n🏅 ${unlockedCount}/${ACHIEVEMENTS.length} badges`
+    try {
+      await navigator.clipboard.writeText(text)
+      flashSave('Stats copied!')
+    } catch (e) {
+      console.error(e)
+      flashSave('Copy failed', false)
+    }
+  }
+
+  const handleSignOut = async () => {
+    const { error } = await supabase.auth.signOut()
+    if (error) {
+      flashSave(`Sign out failed: ${error.message}`, false)
+      return
+    }
+    navigate('/', { replace: true })
+  }
+
+  const flashSave = (text: string, ok = true) => { setSaveMsg({ text, ok }); setTimeout(() => setSaveMsg(null), 3500) }
 
   // ── Derived values ────────────────────────────────────────────────────────
 
@@ -414,12 +507,13 @@ export const ProfileSettings: React.FC = () => {
   )
   if (!profile) return null
 
-  const derivedLevel = calculateLevel(profile.totalxp) as 1 | 2 | 3 | 4 | 5
+  const derivedLevel = calculateLevel(profile.totalxp)
   const levelName = getLevelName(derivedLevel)
   const levelProgress = getLevelProgress(profile.totalxp)
   const xpToNext = getXPToNextLevel(profile.totalxp)
   const memberSince = new Date(profile.createdat).toLocaleDateString([], { year: 'numeric', month: 'long' })
   const unlockedCount = ACHIEVEMENTS.filter(a => a.check(profile, questsCompleted)).length
+  const displayedTitle = isCharacterType(profile.charactertype) ? profile.charactertype : 'squire'
 
   const TABS = [
     { id: 'overview',      label: '📋 Overview'     },
@@ -463,11 +557,10 @@ export const ProfileSettings: React.FC = () => {
           color: MODE_COLOR[r.mode_context] ?? '#8b949e',
         })),
         ...completedQuests.map(q => {
-          const questTitle = Array.isArray(q.quests) ? q.quests[0]?.title : q.quests?.title
           const completedAt = missionDoneAt(q) ?? ''
           return {
             key: `q-${q.questid}`, date: completedAt, icon: '⚔️',
-            title: `Quest completed: ${questTitle ?? 'Unknown'}`,
+            title: `Quest completed: ${questTitle(q)}`,
             sub: q.hintsused > 0 ? `${q.hintsused} hint${q.hintsused > 1 ? 's' : ''} used` : 'No hints used 🎯',
             color: '#ffa726',
           }
@@ -548,7 +641,7 @@ export const ProfileSettings: React.FC = () => {
         </button>
         <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
           <span style={{ color: '#8b949e', fontSize: '13px', fontWeight: '500' }}>Profile Settings</span>
-          {saveMsg && <span style={{ color: '#4caf50', fontSize: '12px', fontWeight: '600', animation: 'profileFadeUp 0.3s ease' }}>✓ {saveMsg}</span>}
+          {saveMsg && <span style={{ color: saveMsg.ok ? '#4caf50' : '#f85149', fontSize: '12px', fontWeight: '600', animation: 'profileFadeUp 0.3s ease' }}>{saveMsg.ok ? '✓' : '⚠'} {saveMsg.text}</span>}
         </div>
         <div className="ps-header-actions" style={{ display: 'flex', gap: '8px' }}>
           <button onClick={() => navigate('/sandbox')} style={{ background: 'rgba(76,175,80,0.1)', border: '1px solid rgba(76,175,80,0.3)', color: '#4caf50', padding: '6px 14px', borderRadius: '8px', fontSize: '12px', fontWeight: '600', cursor: 'pointer' }}>🔬 Sandbox</button>
@@ -602,7 +695,7 @@ export const ProfileSettings: React.FC = () => {
               {/* Badge strip */}
               <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap', marginBottom: '18px' }}>
                 <span style={{ background: 'rgba(76,175,80,0.12)', border: '1px solid rgba(76,175,80,0.3)', color: '#4caf50', padding: '3px 10px', borderRadius: '20px', fontSize: '11px', fontWeight: '700' }}>
-                  {CHAR_META[profile.charactertype ?? 'squire']?.icon} {profile.charactertype ?? 'Squire'}
+                  {CHAR_META[displayedTitle].icon} {displayedTitle}
                 </span>
                 <span style={{ background: 'rgba(100,181,246,0.1)', border: '1px solid rgba(100,181,246,0.25)', color: '#64b5f6', padding: '3px 10px', borderRadius: '20px', fontSize: '11px', fontWeight: '700' }}>
                   {profile.user_type === 'professional' ? '💼 Professional' : '🎓 Student'}
@@ -682,7 +775,7 @@ export const ProfileSettings: React.FC = () => {
                         <div key={i} style={{ display: 'flex', alignItems: 'center', gap: '10px', padding: '8px 0', borderBottom: i < fastestQuests.length - 1 ? '1px solid #21262d' : 'none' }}>
                           <span style={{ fontSize: '10px', color: '#484f58', fontFamily: 'monospace', minWidth: 20 }}>#{i + 1}</span>
                           <span style={{ flex: 1, fontSize: '12px', color: '#c9d1d9', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' as const }}>
-                            {(r.quests as any)?.title ?? r.questid}
+                            {questTitle(r)}
                           </span>
                           <span style={{ fontSize: '12px', fontFamily: 'monospace', color: '#3fb950', fontWeight: 700 }}>
                             {fmtTime(r.completion_time_seconds)}
@@ -863,36 +956,15 @@ export const ProfileSettings: React.FC = () => {
                     </button>
                   </div>
 
-                  {/* Danger zone */}
+                  {/* Account session */}
                   <div style={{ background: 'rgba(248,81,73,0.04)', border: '1px solid rgba(248,81,73,0.25)', borderRadius: '12px', padding: '18px' }}>
-                    <div style={{ color: '#f85149', fontSize: '10px', fontWeight: '700', letterSpacing: '1.5px', textTransform: 'uppercase', marginBottom: '10px' }}>⚠️ Danger Zone</div>
-                    {!showDeleteConfirm ? (
-                      <div>
-                        <p style={{ color: '#8b949e', fontSize: '12px', marginBottom: '12px', lineHeight: 1.6 }}>
-                          Permanently delete your account and all associated data. This cannot be undone.
-                        </p>
-                        <button className="prof-danger-btn" onClick={() => setShowDeleteConfirm(true)} style={{ background: 'transparent', border: '1px solid rgba(248,81,73,0.35)', color: '#f85149', padding: '8px 18px', borderRadius: '8px', fontSize: '12px', fontWeight: '600', cursor: 'pointer', transition: 'all 0.15s' }}>
-                          Delete My Account
-                        </button>
-                      </div>
-                    ) : (
-                      <div>
-                        <p style={{ color: '#f85149', fontSize: '12px', marginBottom: '10px', fontWeight: '600' }}>
-                          Type your username <strong>"{profile.playername}"</strong> to confirm deletion:
-                        </p>
-                        <input value={deleteInput} onChange={e => setDeleteInput(e.target.value)} className="prof-input"
-                          style={{ width: '100%', background: '#161b22', border: '1px solid rgba(248,81,73,0.4)', borderRadius: '8px', padding: '9px 12px', color: 'white', fontSize: '13px', boxSizing: 'border-box', marginBottom: '10px', transition: 'border-color 0.2s' }} />
-                        <div style={{ display: 'flex', gap: '8px' }}>
-                          <button disabled={deleteInput !== profile.playername} onClick={async () => {
-                            await supabase.auth.signOut()
-                            navigate('/', { replace: true })
-                          }} style={{ background: deleteInput === profile.playername ? '#f85149' : 'rgba(248,81,73,0.15)', border: 'none', color: 'white', padding: '8px 18px', borderRadius: '8px', fontSize: '12px', fontWeight: '700', cursor: deleteInput === profile.playername ? 'pointer' : 'not-allowed', opacity: deleteInput === profile.playername ? 1 : 0.5 }}>
-                            Confirm Delete
-                          </button>
-                          <button onClick={() => { setShowDeleteConfirm(false); setDeleteInput('') }} style={{ background: 'transparent', border: '1px solid #30363d', color: '#8b949e', padding: '8px 14px', borderRadius: '8px', fontSize: '12px', cursor: 'pointer' }}>Cancel</button>
-                        </div>
-                      </div>
-                    )}
+                    <div style={{ color: '#f85149', fontSize: '10px', fontWeight: '700', letterSpacing: '1.5px', textTransform: 'uppercase', marginBottom: '10px' }}>Account Session</div>
+                    <p style={{ color: '#8b949e', fontSize: '12px', marginBottom: '12px', lineHeight: 1.6 }}>
+                      Sign out of this browser session. Your account data and progress stay saved.
+                    </p>
+                    <button className="prof-danger-btn" onClick={handleSignOut} style={{ background: 'transparent', border: '1px solid rgba(248,81,73,0.35)', color: '#f85149', padding: '8px 18px', borderRadius: '8px', fontSize: '12px', fontWeight: '600', cursor: 'pointer', transition: 'all 0.15s' }}>
+                      Sign Out
+                    </button>
                   </div>
                 </div>
               )}
@@ -954,7 +1026,7 @@ export const ProfileSettings: React.FC = () => {
               ⚔️ {questsCompleted} quests done<br />
               🏅 {unlockedCount}/{ACHIEVEMENTS.length} badges
             </div>
-            <button onClick={() => { navigator.clipboard.writeText(`🧠 CodeSense | ${levelName}\n⭐ ${profile.totalxp} XP · #${myRank ?? '?'} ranked\n🔬 ${profile.sandbox_runs} analyses · ⚔️ ${questsCompleted} quests\n🏅 ${unlockedCount}/${ACHIEVEMENTS.length} badges`).then(() => flashSave('Stats copied!')) }} style={{ marginTop: '10px', width: '100%', background: 'rgba(76,175,80,0.12)', border: '1px solid rgba(76,175,80,0.3)', color: '#4caf50', padding: '7px', borderRadius: '7px', fontSize: '11px', fontWeight: '700', cursor: 'pointer' }}>
+            <button onClick={copyStats} style={{ marginTop: '10px', width: '100%', background: 'rgba(76,175,80,0.12)', border: '1px solid rgba(76,175,80,0.3)', color: '#4caf50', padding: '7px', borderRadius: '7px', fontSize: '11px', fontWeight: '700', cursor: 'pointer' }}>
               📋 Copy to Clipboard
             </button>
           </div>
@@ -970,7 +1042,7 @@ export const ProfileSettings: React.FC = () => {
                   <div key={i} style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '7px 8px', borderRadius: '8px', background: isMe ? 'rgba(76,175,80,0.1)' : i % 2 === 0 ? 'rgba(255,255,255,0.02)' : 'transparent', border: isMe ? '1px solid rgba(76,175,80,0.3)' : '1px solid transparent' }}>
                     <span style={{ fontSize: medal ? '14px' : '10px', minWidth: '20px', textAlign: 'center', color: '#8b949e', fontWeight: '700' }}>{medal ?? `#${i + 1}`}</span>
                     <span style={{ flex: 1, fontSize: '11px', color: isMe ? '#4caf50' : '#e6edf3', fontWeight: isMe ? '700' : '400', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                      {(entry.users as any)?.playername ?? '?'}{isMe && <span style={{ fontSize: '9px', marginLeft: '4px', opacity: 0.7 }}>(you)</span>}
+                      {entry.playername}{isMe && <span style={{ fontSize: '9px', marginLeft: '4px', opacity: 0.7 }}>(you)</span>}
                     </span>
                     <span style={{ fontSize: '10px', color: '#ffc107', fontWeight: '700' }}>{entry.totalxp}</span>
                   </div>

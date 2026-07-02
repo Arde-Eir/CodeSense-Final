@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import type { Node, Edge } from '@xyflow/react';
-import { validateGraph } from '../GraphValidator';
+import { validateGraph } from '@/services/GraphValidator';
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -67,6 +67,18 @@ describe('validateGraph', () => {
   it('reports NO_END_NODE when only a Start terminator exists', () => {
     const nodes = [makeNode('s', 'terminator', 'Start')];
     const result = validateGraph(nodes, []);
+    expect(result.errors.some(e => e.code === 'NO_END_NODE')).toBe(true);
+  });
+
+  it('rejects Return when it is drawn with the Start/End terminator shape', () => {
+    const nodes = [
+      makeNode('s', 'terminator', 'Start'),
+      makeNode('r', 'terminator', 'Return', { code: 'return 0;' }),
+    ];
+    const edges = [makeEdge('e1', 's', 'r')];
+    const result = validateGraph(nodes, edges);
+
+    expect(result.errors.some(e => e.code === 'RETURN_USES_TERMINATOR_SHAPE')).toBe(true);
     expect(result.errors.some(e => e.code === 'NO_END_NODE')).toBe(true);
   });
 

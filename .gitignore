@@ -9,15 +9,30 @@ backend/dist/
 frontend/dist/
 backend/build/
 
-# Logs
+# Logs and generated debug output
 *.log
 npm-debug.log*
+backend/resp*.json
+backend/response*.json
+frontend/lint-report.json
 
-# Environment
+# Local-only environment and private material
 .env
+.env.*
 *.local
+secrets/
+private/
+*.secret.*
+*.credentials.*
+*.pem
+*.key
+*.p12
+
+# Keep safe templates visible to repo viewers
+!.env.example
+!backend/.env.example
+!frontend/.env.example
 
 # Editor/System
 .vscode/
 .DS_Store
-.env

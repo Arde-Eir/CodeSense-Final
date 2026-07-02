@@ -2,8 +2,8 @@
 import '@testing-library/jest-dom/vitest';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, fireEvent, act, cleanup } from '@testing-library/react';
-import { MCGame } from '../MCGame';
-import type { MCQ } from '../../types/campaign';
+import { MCGame } from '@/games/MCGame';
+import type { MCQ } from '@/types/campaign';
 
 // ─── Fixtures ─────────────────────────────────────────────────────────────────
 

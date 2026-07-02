@@ -150,13 +150,13 @@ html, body, #root {
 }
 
 .build-layout {
-  grid-template-columns: minmax(0, 1fr) minmax(360px, 440px);
+  grid-template-columns: minmax(360px, 440px) minmax(0, 1fr);
   gap: 10px;
   padding: 10px;
 }
 
 .build-layout-rail-closed {
-  grid-template-columns: minmax(0, 1fr) 54px;
+  grid-template-columns: 54px minmax(0, 1fr);
 }
 
 .build-canvas-column {
@@ -176,7 +176,7 @@ html, body, #root {
   min-width: 0;
   overflow-y: auto;
   overflow-x: visible;
-  padding-left: 10px;
+  padding-right: 10px;
 }
 
 .build-side-rail.closed {
@@ -224,7 +224,7 @@ html, body, #root {
   position: absolute;
   top: 0;
   bottom: 0;
-  left: -6px;
+  right: -6px;
   width: 12px;
   z-index: 20;
   cursor: col-resize;
@@ -253,7 +253,7 @@ html, body, #root {
 .build-rail-toggle {
   position: absolute;
   top: 8px;
-  left: -36px;
+  right: -36px;
   z-index: 12;
   width: 30px;
   height: 30px;

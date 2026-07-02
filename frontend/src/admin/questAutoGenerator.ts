@@ -82,7 +82,7 @@ const uid = (prefix: string) =>
 
 const cleanText = (text: string): string =>
   text
-    .replace(/\u0000/g, ' ')
+    .replace(new RegExp(String.fromCharCode(0), 'g'), ' ')
     .replace(/[•●▪]/g, '\n- ')
     .replace(/[ \t]+/g, ' ')
     .replace(/\r/g, '\n')
@@ -117,7 +117,7 @@ const titleCase = (value: string): string =>
     .map(word => word ? `${word[0].toUpperCase()}${word.slice(1)}` : word)
     .join(' ')
 
-const stripToSentence = (value: string, max = 170): string => {
+const stripToSentence = (value: string, max: number): string => {
   const cleaned = compact(value)
   if (cleaned.length <= max) return cleaned
   return `${cleaned.slice(0, max).replace(/\s+\S*$/, '')}...`

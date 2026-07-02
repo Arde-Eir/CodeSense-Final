@@ -2,13 +2,13 @@
  * OnboardingWalkthrough.tsx
  * ─────────────────────────────────────────────────────────────────────────────
  * Optional first-time tour that runs after a user registers. Shown once only
- * (gated by localStorage). Explains every surface of the app in 9 steps, with
+ * (gated by localStorage). Explains every surface of the app, with
  * "Skip", "Back", and "Next / Got it" controls. Each step can deep-link to
  * the feature it describes so users can try it immediately.
  *
  * Trigger: the Home dashboard mounts, sees the user is authenticated AND
  * `localStorage['cs-onboarded-v1'] !== 'done'`, and renders this component.
- * Users can also replay it from Profile → Help (if we add a button there).
+ * Users can also replay it from the profile menu.
  */
 import React, { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
@@ -20,48 +20,64 @@ export const ONBOARD_STEP_KEY = 'cs-onboard-step-v1'
 interface Step {
   icon: string
   title: string
+  kicker: string
   body: React.ReactNode
+  takeaways: string[]
   /** Optional action: either navigate somewhere or run a callback. */
   action?: { label: string; path?: string; onClick?: () => void }
 }
 
-const STEPS = (isAdmin: boolean, isGuest = false): Step[] => [
+const readInitialStep = (stepCount: number): number => {
+  try {
+    const raw = Number(localStorage.getItem(ONBOARD_STEP_KEY) ?? '0')
+    return Number.isInteger(raw) ? Math.max(0, Math.min(stepCount - 1, raw)) : 0
+  } catch {
+    return 0
+  }
+}
+
+const STEPS = (isAdmin: boolean, isGuest: boolean): Step[] => [
   {
     icon: '👋',
     title: 'Welcome to CodeSense',
+    kicker: 'Fast orientation',
     body: (
       <>
         <p>
-          CodeSense is a <b>deterministic C++ analyzer</b> wrapped in a gamified
-          learning environment. This quick tour takes about <b>90 seconds</b>{' '}
-          and shows you every surface of the app.
+          CodeSense is a <b>deterministic C++ analyzer</b> wrapped in a learning
+          workspace. This replay gives you the shortest path through analysis,
+          quests, progress, and profile tools.
         </p>
-        <p style={{ color: '#8b949e', fontSize: 12 }}>
-          You can <b>Skip</b> at any time — this tour is optional and won't
-          reappear unless you ask for it.
+        <p style={{ color: '#8b949e', fontSize: 12, marginTop: 10 }}>
+          It saves your current step while you move around, so opening a feature
+          from the tour will not lose your place.
         </p>
       </>
     ),
+    takeaways: ['Replay anytime from the profile menu', 'Use feature buttons to jump around', 'Skip finishes the tour cleanly'],
   },
   {
     icon: '🏠',
     title: 'Home Dashboard',
+    kicker: 'Your command center',
     body: (
       <>
-        <p>The hub. You'll see five zones:</p>
+        <p>The dashboard is built for quick recovery: find what changed, jump to
+          the right workspace, and pick up where you left off.</p>
         <ul style={{ paddingLeft: 20, lineHeight: 1.9, color: '#c9d1d9', fontSize: 13 }}>
-          <li><b>Search bar</b> — finds players, quests, your reports, actions.</li>
-          <li><b>🔔 Notification bell</b> — system announcements, quest completions, achievements, rank-ups, admin actions on you.</li>
-          <li><b>Mode cards</b> — Sandbox and Campaign.</li>
-          <li><b>Command Center</b> — Quick Start to your last snippet + recent analyses.</li>
-          <li><b>Leaderboard mini</b> — top 10 by XP with your rank highlighted.</li>
+          <li><b>Global search</b> finds players, quests, reports, and actions.</li>
+          <li><b>Notifications</b> collect announcements, completions, rank-ups, and account events.</li>
+          <li><b>Command Center</b> restores your latest snippet and recent analyses.</li>
+          <li><b>Leaderboard mini</b> shows the current top players and your rank context.</li>
         </ul>
       </>
     ),
+    takeaways: ['Search is the fastest navigation', 'Recent work lives in Command Center', 'Announcements are also in the profile menu'],
   },
   {
     icon: '🔬',
     title: 'Sandbox — Experiment Freely',
+    kicker: 'Analyze real C++',
     body: (
       <>
         <p>
@@ -77,11 +93,13 @@ const STEPS = (isAdmin: boolean, isGuest = false): Step[] => [
         </p>
       </>
     ),
+    takeaways: ['Verdicts are deterministic', 'Rule codes explain every warning', 'Reports feed your progress history'],
     action: { label: 'Open Sandbox →', path: '/sandbox' },
   },
   {
     icon: '🧩',
     title: 'Build Mode — Flowchart to C++',
+    kicker: 'Visual logic builder',
     body: (
       <>
         <p>
@@ -99,10 +117,12 @@ const STEPS = (isAdmin: boolean, isGuest = false): Step[] => [
         </p>
       </>
     ),
+    takeaways: ['Use ISO 5807 shapes', 'Validation blocks broken graphs', 'Generate only after required paths connect'],
   },
   {
     icon: '⚔️',
     title: 'Campaign — Earn XP',
+    kicker: 'Structured practice',
     body: (
       <>
         <p>
@@ -117,13 +137,39 @@ const STEPS = (isAdmin: boolean, isGuest = false): Step[] => [
         </p>
       </>
     ),
+    takeaways: ['Quests are grouped by phase', 'Hints trade XP for help', 'Unlocked titles can be displayed in Profile'],
     action: isGuest
       ? { label: 'Create account for Campaign →', path: '/signup' }
       : { label: 'Open Campaign →', path: '/campaign' },
   },
+  ...(!isGuest
+    ? [
+        {
+          icon: '📊',
+          title: 'Progress Report',
+          kicker: 'Your learning signal',
+          body: (
+            <>
+              <p>
+                Progress Report turns your activity into readable trends:
+                XP growth, quest completion, analysis volume, streaks, recent
+                work, and campaign movement.
+              </p>
+              <p>
+                Use it when you want to know whether you are practicing broadly
+                or only repeating one comfortable path.
+              </p>
+            </>
+          ),
+          takeaways: ['Track XP and level movement', 'Review recent analyses', 'Spot gaps before your next quest'],
+          action: { label: 'Open Progress →', path: '/progress' },
+        } as Step,
+      ]
+    : []),
   {
     icon: '🏆',
     title: 'Leaderboard & Achievements',
+    kicker: 'Community context',
     body: (
       <>
         <p>
@@ -137,22 +183,24 @@ const STEPS = (isAdmin: boolean, isGuest = false): Step[] => [
         </p>
       </>
     ),
+    takeaways: ['Compare by XP and activity', 'Open public player detail cards', 'Achievements show long-term habits'],
     action: { label: 'View Leaderboard →', path: '/leaderboard' },
   },
   {
     icon: '👤',
     title: 'Profile Settings',
+    kicker: 'Your public identity',
     body: (
       <>
         <p>
           <b>Profile → Overview / Achievements / Activity / Settings / Learn</b>
           {' '}— five tabs for everything personal. Upload an avatar (circular
           crop) and banner, pick your displayed title from unlocked ranks,
-          change your password, and (carefully) use the Danger Zone to delete
-          your account.
+          change your password, and tune how other players see your profile.
         </p>
       </>
     ),
+    takeaways: ['Avatar and banner personalize your card', 'Unlocked titles are cosmetic', 'Settings affect account details'],
     action: isGuest
       ? { label: 'Create account for Profile →', path: '/signup' }
       : { label: 'Go to Profile →', path: '/profile' },
@@ -160,6 +208,7 @@ const STEPS = (isAdmin: boolean, isGuest = false): Step[] => [
   {
     icon: '📘',
     title: 'Tutorials & User Manual',
+    kicker: 'Reference and practice',
     body: (
       <>
         <p>
@@ -174,6 +223,7 @@ const STEPS = (isAdmin: boolean, isGuest = false): Step[] => [
         </p>
       </>
     ),
+    takeaways: ['Tutorials save progress', 'Manual explains rule codes', 'Patch notes show what recently changed'],
     action: { label: 'Open Tutorials →', path: '/tutorials' },
   },
   ...(isAdmin
@@ -181,6 +231,7 @@ const STEPS = (isAdmin: boolean, isGuest = false): Step[] => [
         {
           icon: '🛡',
           title: 'Admin Panel (You Have Access)',
+          kicker: 'Operations tools',
           body: (
             <>
               <p>
@@ -196,6 +247,7 @@ const STEPS = (isAdmin: boolean, isGuest = false): Step[] => [
               </p>
             </>
           ),
+          takeaways: ['Preview users without keeping admin powers', 'Review audit logs', 'Publish announcements'],
           action: { label: 'Open Admin Panel →', path: '/admin' },
         } as Step,
       ]
@@ -203,6 +255,7 @@ const STEPS = (isAdmin: boolean, isGuest = false): Step[] => [
   {
     icon: '🎉',
     title: "You're all set",
+    kicker: 'Tour complete',
     body: (
       <>
         <p>That's the full tour. You can always reach:</p>
@@ -216,33 +269,32 @@ const STEPS = (isAdmin: boolean, isGuest = false): Step[] => [
         </p>
       </>
     ),
+    takeaways: ['Start in Sandbox for experiments', 'Use Campaign for guided XP', 'Replay this tour whenever the app changes'],
   },
 ]
 
 export const OnboardingWalkthrough: React.FC<{
   isAdmin: boolean
-  isGuest?: boolean
+  isGuest: boolean
   onFinish: () => void
-}> = ({ isAdmin, isGuest = false, onFinish }) => {
+}> = ({ isAdmin, isGuest, onFinish }) => {
   const navigate = useNavigate()
   const steps = STEPS(isAdmin, isGuest)
-  const [idx, setIdx] = useState(() => {
-    try {
-      const raw = Number(localStorage.getItem(ONBOARD_STEP_KEY) ?? '0')
-      return Number.isFinite(raw) ? Math.max(0, Math.min(steps.length - 1, raw)) : 0
-    } catch {
-      return 0
-    }
-  })
+  const [idx, setIdx] = useState(() => readInitialStep(steps.length))
   const step = steps[idx]
   const isLast = idx === steps.length - 1
 
   // Close on Escape
   useEffect(() => {
     try { localStorage.setItem(ONBOARD_ACTIVE_KEY, 'true') } catch { /* quota */ }
+    const previousOverflow = document.body.style.overflow
+    document.body.style.overflow = 'hidden'
     const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') skip() }
     document.addEventListener('keydown', onKey)
-    return () => document.removeEventListener('keydown', onKey)
+    return () => {
+      document.body.style.overflow = previousOverflow
+      document.removeEventListener('keydown', onKey)
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
@@ -294,16 +346,27 @@ export const OnboardingWalkthrough: React.FC<{
       background: 'rgba(3,5,9,0.85)', backdropFilter: 'blur(6px)',
       display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16,
       animation: 'obFadeIn 0.2s ease',
-    }}>
+    }}
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="codesense-tour-title"
+    >
       <style>{`
         @keyframes obFadeIn  { from{opacity:0} to{opacity:1} }
         @keyframes obSlideUp { from{opacity:0;transform:translateY(18px)} to{opacity:1;transform:translateY(0)} }
+        @media (max-width: 620px) {
+          .cs-onboard-card { max-height: calc(100vh - 28px); }
+          .cs-onboard-content { padding: 22px 18px 18px !important; }
+          .cs-onboard-footer { padding: 14px 18px !important; gap: 12px; }
+          .cs-onboard-dots { display: none !important; }
+        }
       `}</style>
 
-      <div style={{
+      <div className="cs-onboard-card" style={{
         background: 'linear-gradient(155deg, #161b22 0%, #0d1117 100%)',
         border: '1px solid #30363d', borderRadius: 18,
-        maxWidth: 540, width: '100%', padding: 0,
+        maxWidth: 620, width: '100%', padding: 0,
+        maxHeight: 'calc(100vh - 48px)',
         boxShadow: '0 30px 90px rgba(0,0,0,0.8), 0 0 0 1px rgba(76,175,80,0.1)',
         animation: 'obSlideUp 0.28s ease-out',
         fontFamily: "'IBM Plex Sans', system-ui, sans-serif",
@@ -344,16 +407,62 @@ export const OnboardingWalkthrough: React.FC<{
         </div>
 
         {/* Content */}
-        <div style={{ padding: '28px 28px 24px', flex: 1 }}>
-          <div style={{ fontSize: 44, marginBottom: 10 }}>{step.icon}</div>
-          <h2 style={{
+        <div className="cs-onboard-content" style={{ padding: '28px 28px 24px', flex: 1, overflowY: 'auto' }}>
+          <div style={{ display: 'flex', alignItems: 'flex-start', gap: 16, marginBottom: 12 }}>
+            <div style={{
+              width: 58, height: 58, borderRadius: 16,
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+              background: 'rgba(227,179,65,0.12)',
+              border: '1px solid rgba(227,179,65,0.24)',
+              fontSize: 34,
+              flexShrink: 0,
+            }}>{step.icon}</div>
+            <div>
+              <div style={{
+                color: '#e3b341',
+                fontFamily: "'IBM Plex Mono', monospace",
+                fontSize: 11,
+                fontWeight: 800,
+                letterSpacing: 1.1,
+                textTransform: 'uppercase',
+                marginBottom: 6,
+              }}>
+                {step.kicker}
+              </div>
+              <h2 id="codesense-tour-title" style={{
             color: '#e6edf3', fontSize: 22, fontWeight: 800,
             margin: '0 0 12px',
           }}>
             {step.title}
           </h2>
+            </div>
+          </div>
           <div style={{ color: '#c9d1d9', fontSize: 14, lineHeight: 1.75 }}>
             {step.body}
+          </div>
+          <div style={{
+            display: 'grid',
+            gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))',
+            gap: 10,
+            marginTop: 18,
+          }}>
+            {step.takeaways.map(takeaway => (
+              <div
+                key={takeaway}
+                style={{
+                  background: 'rgba(22,27,34,0.88)',
+                  border: '1px solid #30363d',
+                  borderRadius: 10,
+                  color: '#c9d1d9',
+                  fontSize: 12,
+                  lineHeight: 1.45,
+                  padding: '10px 12px',
+                }}
+              >
+                <span style={{ color: '#4caf50', fontWeight: 900, marginRight: 6 }}>✓</span>
+                {takeaway}
+              </div>
+            ))}
           </div>
         </div>
 
@@ -377,7 +486,7 @@ export const OnboardingWalkthrough: React.FC<{
         )}
 
         {/* Footer nav */}
-        <div style={{
+        <div className="cs-onboard-footer" style={{
           display: 'flex', justifyContent: 'space-between', alignItems: 'center',
           padding: '18px 28px', borderTop: '1px solid #21262d', marginTop: 24,
         }}>
@@ -393,7 +502,7 @@ export const OnboardingWalkthrough: React.FC<{
           </button>
 
           {/* Dot indicators */}
-          <div style={{ display: 'flex', gap: 6 }}>
+          <div className="cs-onboard-dots" style={{ display: 'flex', gap: 6 }}>
             {steps.map((_, i) => (
               <button
                 key={i}

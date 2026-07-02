@@ -4,9 +4,10 @@ import {
   fixPopLanguageInQuestion, patchMCQuestions, splitMCQuestions,
   normalizeMCQuestionOptions, normalizeMCQuestions,
   parseCodeFillAnswers,
+  validateQuestBuilderForm,
   loadHintsForEdit, serializeHints,
-  type AdminUserLite, type MCQuestionLite, type HintFormRow,
-} from '../adminHelpers';
+  type AdminUserLite, type MCQuestionLite, type HintFormRow, type QuestBuilderValidationInput,
+} from '@/admin/adminHelpers';
 
 // ─── Fixtures ─────────────────────────────────────────────────────────────
 const makeUser = (overrides: Partial<AdminUserLite> = {}): AdminUserLite => ({
@@ -462,5 +463,98 @@ describe('parseCodeFillAnswers', () => {
 
   it('preserves single answers without commas', () => {
     expect(parseCodeFillAnswers('printf')).toEqual(['printf']);
+  });
+});
+
+// ─── validateQuestBuilderForm ─────────────────────────────────────────────
+const validBuilderForm = (): QuestBuilderValidationInput => ({
+  act_mc: true,
+  act_balloon: false,
+  act_drag: false,
+  act_ordering: false,
+  act_codefill: false,
+  mc_questions: [{
+    question: 'Which type stores whole numbers?',
+    options: ['int', 'string', '', ''],
+    correct: 0,
+  }],
+  balloon_questions: [],
+  drag_problems: [],
+  ordering_problems: [],
+  code_fill_items: [],
+});
+
+describe('validateQuestBuilderForm', () => {
+  it('accepts a complete multiple-choice quest', () => {
+    expect(validateQuestBuilderForm(validBuilderForm())).toEqual({ ok: true, errors: [] });
+  });
+
+  it('rejects a selected activity with no complete content', () => {
+    const form = {
+      ...validBuilderForm(),
+      act_mc: false,
+      act_drag: true,
+      mc_questions: [],
+      drag_problems: [{ question: '', items: [], drop_zones: [] }],
+    };
+
+    const result = validateQuestBuilderForm(form);
+    expect(result.ok).toBe(false);
+    expect(result.errors).toContain('Drag & Drop: add at least one matching problem.');
+  });
+
+  it('rejects drag zones that are not linked to a real term', () => {
+    const form = {
+      ...validBuilderForm(),
+      act_mc: false,
+      act_drag: true,
+      mc_questions: [],
+      drag_problems: [{
+        question: 'Match terms',
+        items: [{ id: 'a', label: 'Array' }, { id: 'b', label: 'Loop' }],
+        drop_zones: [
+          { label: 'Stores many values', accepted: 'a' },
+          { label: 'Broken mapping', accepted: 'missing' },
+        ],
+      }],
+    };
+
+    const result = validateQuestBuilderForm(form);
+    expect(result.ok).toBe(false);
+    expect(result.errors).toContain('Drag & Drop problem 1, description 2: choose a valid accepted term.');
+  });
+
+  it('rejects ordering problems with fewer than three items', () => {
+    const form = {
+      ...validBuilderForm(),
+      act_mc: false,
+      act_ordering: true,
+      mc_questions: [],
+      ordering_problems: [{
+        question: 'Order the steps',
+        items: [{ label: 'Declare' }, { label: 'Use' }],
+      }],
+    };
+
+    const result = validateQuestBuilderForm(form);
+    expect(result.ok).toBe(false);
+    expect(result.errors).toContain('Ordering problem 1: add at least three ordered items.');
+  });
+
+  it('rejects code-fill rows when blank count and answer count differ', () => {
+    const form = {
+      ...validBuilderForm(),
+      act_mc: false,
+      act_codefill: true,
+      mc_questions: [],
+      code_fill_items: [{
+        code_lines: 'int ___ = ___;',
+        answers: 'total',
+      }],
+    };
+
+    const result = validateQuestBuilderForm(form);
+    expect(result.ok).toBe(false);
+    expect(result.errors).toContain('Code Fill item 1: 2 blank(s) need 2 answer(s), but 1 were provided.');
   });
 });

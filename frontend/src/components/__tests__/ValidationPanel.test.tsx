@@ -1,7 +1,7 @@
 import { describe, it, expect, vi } from 'vitest';
 import { render, screen, fireEvent } from '@testing-library/react';
-import { ValidationPanel } from '../Visualizer/ValidationPanel';
-import type { ValidationResult, ValidationIssue } from '../../services/GraphValidator';
+import { ValidationPanel } from '@/components/Visualizer/ValidationPanel';
+import type { ValidationResult, ValidationIssue } from '@/services/GraphValidator';
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -39,6 +39,53 @@ describe('ValidationPanel', () => {
     render(<ValidationPanel result={result} onDismiss={vi.fn()} />);
     expect(screen.getByText(/No start node/i)).toBeInTheDocument();
     expect(screen.getByText(/cannot generate/i)).toBeInTheDocument();
+  });
+
+  it('shows a solution suggestion for each issue', () => {
+    const issue: ValidationIssue = {
+      severity: 'error',
+      code: 'NO_START_NODE',
+      message: 'No start node',
+    };
+    const result = makeResult({ all: [issue], errors: [issue], warnings: [] });
+
+    render(<ValidationPanel result={result} onDismiss={vi.fn()} />);
+
+    expect(screen.getByText(/Try this:/i)).toBeInTheDocument();
+    expect(screen.getByText(/Add a Start \/ End node/i)).toBeInTheDocument();
+  });
+
+  it('shows a fix helper tooltip with location and solution', () => {
+    const issue: ValidationIssue = {
+      severity: 'error',
+      code: 'NO_END_NODE',
+      message: 'No end node',
+      nodeIds: ['node-1'],
+    };
+    const result = makeResult({ all: [issue], errors: [issue], warnings: [] });
+
+    render(<ValidationPanel result={result} onDismiss={vi.fn()} onHighlight={vi.fn()} />);
+    fireEvent.focus(screen.getByLabelText(/show fix helper/i));
+
+    expect(screen.getByText(/Fix Helper/i)).toBeInTheDocument();
+    expect(screen.getByText(/Where to fix:/i)).toBeInTheDocument();
+    expect(screen.getByText(/Solution:/i)).toBeInTheDocument();
+    expect(screen.getAllByText(/Add a Start \/ End node/i).length).toBeGreaterThan(0);
+  });
+
+  it('opens the fix helper when the Fix chip is clicked', () => {
+    const issue: ValidationIssue = {
+      severity: 'error',
+      code: 'NO_START_NODE',
+      message: 'No start node',
+    };
+    const result = makeResult({ all: [issue], errors: [issue], warnings: [] });
+
+    render(<ValidationPanel result={result} onDismiss={vi.fn()} />);
+    fireEvent.click(screen.getByLabelText(/show fix helper/i));
+
+    expect(screen.getByText(/Fix Helper/i)).toBeInTheDocument();
+    expect(screen.getByText(/Canvas structure/i)).toBeInTheDocument();
   });
 
   it('renders a warning panel when there are only warnings', () => {

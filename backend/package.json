@@ -9,6 +9,7 @@
     "build:ts": "tsc -p .",
     "copy:parser": "shx mkdir -p dist/analysis && shx cp src/analysis/parser.js dist/analysis/parser.js",
     "build": "npm run clean && npm run build:parser && npm run build:ts && npm run copy:parser",
+    "test": "node --test tests/*.test.cjs",
     "dev": "ts-node src/server.ts",
     "start": "node dist/server.js"
   },
@@ -22,13 +23,15 @@
   "author": "CodeSense Team",
   "license": "ISC",
   "dependencies": {
-    "@monaco-editor/react": "^4.7.0",
-    "axios": "^1.13.4",
-    "body-parser": "^2.2.2",
+    "axios": "^1.18.1",
+    "body-parser": "^2.3.0",
     "cors": "^2.8.6",
     "express": "^5.2.1",
-    "firebase": "^12.9.0",
     "peggy": "^3.0.2"
+  },
+  "overrides": {
+    "form-data": "^4.0.6",
+    "path-to-regexp": "^8.4.2"
   },
   "devDependencies": {
     "@types/cors": "^2.8.19",

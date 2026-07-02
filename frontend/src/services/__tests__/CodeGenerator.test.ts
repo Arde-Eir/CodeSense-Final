@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { Edge, Node } from '@xyflow/react';
-import { generateCppFromGraph } from '../CodeGenerator';
+import { generateCppFromGraph } from '@/services/CodeGenerator';
 
 function makeNode(
   id: string,
@@ -317,7 +317,32 @@ describe('generateCppFromGraph', () => {
 
     const code = generateCppFromGraph(nodes, edges);
 
-    expect(code).toMatch(/int main\(\) \{\n    int number;\n\n    cin >> number;/);
+    expect(code).toMatch(/int main\(\) \{\n {4}int number;\n\n {4}cin >> number;/);
+  });
+
+  it('turns a bare process variable name into a typed declaration', () => {
+    const nodes = [
+      makeNode('s', 'terminator', 'Start'),
+      makeNode('p', 'process', 'Process', 'age'),
+      makeNode('d', 'decision', 'Condition', 'age > 17'),
+      makeNode('t', 'io', 'Output', 'Adult'),
+      makeNode('f', 'predefined', 'Function Call', 'call showWrongInput to display wrong input'),
+      makeNode('e', 'terminator', 'End'),
+    ];
+    const edges = [
+      makeEdge('e1', 's', 'p'),
+      makeEdge('e2', 'p', 'd'),
+      makeEdge('e3', 'd', 't', 'true'),
+      makeEdge('e4', 'd', 'f', 'false'),
+      makeEdge('e5', 't', 'e'),
+      makeEdge('e6', 'f', 'e'),
+    ];
+
+    const code = generateCppFromGraph(nodes, edges);
+
+    expect(code).toMatch(/void showWrongInput\(\) \{\n {4}cout << "wrong input" << endl;\n\}/);
+    expect(code).toMatch(/int main\(\) \{\n {4}int age;\n {4}if \(age > 17\) \{\n {8}cout << "Adult" << endl;\n {4}\} else \{\n {8}showWrongInput\(\);/);
+    expect(code).not.toContain('    age;\n');
   });
 
   it('does not redeclare input variables that already exist', () => {
@@ -526,7 +551,7 @@ describe('generateCppFromGraph', () => {
 
     const code = generateCppFromGraph(nodes, edges);
 
-    expect(code).toMatch(/void showWrongInput\(\) \{\n    cout << "wrong input\/minor" << endl;\n\}/);
+    expect(code).toMatch(/void showWrongInput\(\) \{\n {4}cout << "wrong input\/minor" << endl;\n\}/);
     expect(code).toMatch(/int main\(\)[\s\S]+showWrongInput\(\);/);
   });
 

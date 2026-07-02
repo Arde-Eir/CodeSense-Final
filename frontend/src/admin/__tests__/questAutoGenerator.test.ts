@@ -2,7 +2,7 @@
 import { describe, expect, it } from 'vitest'
 import { basename } from 'node:path'
 import { existsSync, readFileSync } from 'node:fs'
-import { generateQuestDraftFromText } from '../questAutoGenerator'
+import { generateQuestDraftFromText } from '@/admin/questAutoGenerator'
 
 const DEFAULT_PDF_TEXT_FIXTURE = `
   C++ Input and Output Fundamentals

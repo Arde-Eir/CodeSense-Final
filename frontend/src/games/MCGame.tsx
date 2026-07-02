@@ -3,7 +3,7 @@
 // explanation reveal, advance through all of them.
 
 import React from 'react';
-import type { MCQ } from '../types/campaign';
+import type { MCQ } from '@/types/campaign';
 import { normalizeMCQList } from './normalizeMCQ';
 
 interface Props {

@@ -15,7 +15,7 @@
 
 import type {
   Quest, MissionProgress, QuestRow, QuestUIStatus, LevelStats,
-} from '../types/campaign';
+} from '@/types/campaign';
 import { levelXpCapForPhase } from './retakeXp';
 
 export function buildQuests(quests: Quest[], progress: MissionProgress[]): {

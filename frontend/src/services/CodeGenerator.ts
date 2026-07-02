@@ -17,7 +17,6 @@ export const FLOWCHART_CODE_TOPICS = [
   'while-style loops from branches that return to a Decision',
   'arrays and basic indexed storage',
   'helper function calls, including call name to action helper definitions',
-  'file/document placeholders and basic fstream snippets',
   'raw C++ snippets only when they stay inside the same CP1/selected-CP2 foundations scope',
 ];
 
@@ -499,6 +498,10 @@ function normalizeStatement(code: string): string {
   if (/^(if|else|while|for|do|switch)\s*[\s({]/.test(s)) return s;
   if (s === 'else' || s === 'do') return s;
   return s + ';';
+}
+
+function isBareIdentifierStatement(code: string): boolean {
+  return isValidIdentifier(code.trim().replace(/;$/, ''));
 }
 
 function isTopLevelDeclaration(code: string): boolean {
@@ -1103,6 +1106,8 @@ function traverse(
         output += `${indent}// Top-level declaration emitted above main: ${label || 'custom C++'}\n`;
       } else if (humanStatement) {
         output += `${indent}${humanStatement}\n`;
+      } else if (isBareIdentifierStatement(rawCode)) {
+        output += `${indent}int ${rawCode.trim().replace(/;$/, '')};\n`;
       } else if (!rawCode || rawCode === 'Process' || (rawCode === label && !rawCode.includes('=') && !rawCode.includes('('))) {
         if (label && label !== 'Process' && label.length < 80) {
           output += `${indent}// ${label}\n`;

@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { render, screen } from '@testing-library/react';
-import { TheorySectionBlock } from '../TheorySection';
-import type { TheorySection } from '../../types/campaign';
+import { TheorySectionBlock } from '@/components/TheorySection';
+import type { TheorySection } from '@/types/campaign';
 
 // ─── Tests ────────────────────────────────────────────────────────────────────
 

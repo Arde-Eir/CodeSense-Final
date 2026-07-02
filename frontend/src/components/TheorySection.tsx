@@ -5,7 +5,7 @@
 // well-organized study guide rather than a wall of text.
 
 import React from 'react';
-import type { TheorySection } from '../types/campaign';
+import type { TheorySection } from '@/types/campaign';
 
 export const TheorySectionBlock: React.FC<{ sec: TheorySection }> = ({ sec }) => {
   const type = sec.type ?? 'default';

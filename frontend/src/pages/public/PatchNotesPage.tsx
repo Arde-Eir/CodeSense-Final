@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { supabase } from './services/supabase';
+import { supabase } from '@/services/supabase';
 
 interface PatchNote {
   id:            string;

@@ -1,4 +1,4 @@
-import type { ActivityTab, HintItem, Quest } from '../types/campaign';
+import type { ActivityTab, HintItem, Quest } from '@/types/campaign';
 
 const fallbackByTab: Record<ActivityTab, HintItem[]> = {
   drag: [

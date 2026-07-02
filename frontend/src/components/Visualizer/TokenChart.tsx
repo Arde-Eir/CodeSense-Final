@@ -1,5 +1,5 @@
 import React, { useMemo } from 'react';
-import type { Token } from '../../types';
+import type { Token } from '@/types';
 
 interface TokenChartProps {
   tokens: Token[];

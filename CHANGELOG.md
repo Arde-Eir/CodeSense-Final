@@ -1,5 +1,28 @@
 # CodeSense Changelog
 
+## Session 4 — 2026-06-30
+
+### Campaign Retake Fixes
+
+#### Bug Fixes
+
+**1. Stale activity completion badges during quest retakes** — `frontend/src/pages/app/lessonactivity.tsx`
+- Retaken campaign quests now keep rendered activity badges in React state instead of relying only on a mutable ref, so tab checkmarks update when progress is loaded, reset, or synced from Supabase.
+- Fixed stale completed activity state showing tabs such as Balloon Pop as already done after retake/reset transitions.
+
+**2. Resume Quest retakes now start cleanly** — `frontend/src/pages/app/CampaignInside.tsx`, `frontend/src/pages/app/lessonactivity.tsx`
+- `Resume Quest +20 XP` and the sidebar `Continue` button now open previously first-finished active quests with a retake marker.
+- The lesson page consumes that marker, clears `mission_progress.completed_activities`, resets hint count, and then removes the marker from the URL.
+- First-finish unlock history and XP accounting remain preserved through `first_completed_at` and existing XP fields.
+
+### Publish Note
+
+Supabase rejected direct publishing to `patch_notes` with row-level security from the local anon key. Use the Admin Panel or an admin/service-role Supabase session to publish:
+
+**Announcement title:** Campaign Retake Fixes  
+**Patch note title:** Campaign Retake Progress Fixes  
+**Version:** v0.3.1
+
 ## Session 3 — 2026-05-26
 
 ### Full Test Verification
@@ -71,12 +94,12 @@ The PDF-content test in `src/admin/__tests__/questAutoGenerator.test.ts` now exe
 
 ### Supplemental Backend Validation
 
-**Location:** `backend/test-backend.js`  
-**Runner:** Node.js script  
-**Command:** `node backend/test-backend.js` (with the built backend running on port 3000)  
+**Location:** `tests/run-testing-report.mjs`  
+**Runner:** Root npm test report  
+**Command:** `npm test`  
 **Result:** 16/16 internal checks passing
 
-The variable-declaration translation check now verifies the current output contract, and the script returns a nonzero exit code if any internal check fails.
+The variable-declaration translation check now verifies the current output contract, and the report returns a nonzero exit code if any internal check fails.
 
 ---
 

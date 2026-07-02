@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
-import { composeHints } from '../composeHints';
-import type { HintItem } from '../../types/campaign';
+import { composeHints } from '@/campaign/composeHints';
+import type { HintItem } from '@/types/campaign';
 
 const tabA: HintItem = { title: 'A-only',     body: 'a',    activity: 'mc' };
 const tabB: HintItem = { title: 'B-only',     body: 'b',    activity: 'drag' };

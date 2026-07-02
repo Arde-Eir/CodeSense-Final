@@ -1,33 +1,10 @@
-import React, { createContext, useContext, useState, useEffect, useCallback } from 'react'
+import React, { useState, useEffect, useCallback } from 'react'
 import type { ReactNode } from 'react'
-import { DataIsolationService } from '../Dataisolationservice'
-import { DatabaseService } from '../services/DatabaseService'
-import { supabase } from '../services/supabase'
-import type { ExplorerProfile } from '../types'
-
-interface AuthContextType {
-  user: ExplorerProfile | null
-  isGuest: boolean
-  isAuthenticated: boolean
-  isAdmin: boolean
-  maintenanceMode: boolean
-  maintenanceMessage: string
-  impersonatingUser: ExplorerProfile | null
-  setUser: React.Dispatch<React.SetStateAction<ExplorerProfile | null>>
-  login: (playerName: string, secretCode: string) => Promise<void>
-  signup: (
-    playerName: string,
-    secretCode: string,
-    email: string,
-    userType?: 'student' | 'professional'
-  ) => Promise<void>
-  logout: () => void
-  continueAsGuest: () => void
-  goBack: () => void
-  startImpersonation: (targetUser: ExplorerProfile) => void
-  stopImpersonation: () => void
-  refreshMaintenanceMode: () => Promise<void>
-}
+import { AuthContext, useAuth } from '@/components/AuthContext'
+import { DataIsolationService } from '@/services/DataIsolationService'
+import { DatabaseService } from '@/services/DatabaseService'
+import { supabase } from '@/services/supabase'
+import type { ExplorerProfile } from '@/types'
 
 // ─── MaintenanceGate ──────────────────────────────────────────────────────────
 // Wraps the entire app. When maintenanceMode is ON, non-admin users (including
@@ -92,14 +69,6 @@ export const MaintenanceGate: React.FC<{ children: ReactNode }> = ({ children })
       </div>
     </div>
   )
-}
-
-const AuthContext = createContext<AuthContextType | undefined>(undefined)
-
-export const useAuth = () => {
-  const context = useContext(AuthContext)
-  if (!context) throw new Error('useAuth must be used within AuthProvider')
-  return context
 }
 
 export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) => {

@@ -10,9 +10,10 @@ import {
 } from '@xyflow/react';
 import type { Connection, Edge, Node, NodeProps, NodeChange, EdgeChange } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
-import type { CFG, SafetyCheck, ControlFlowNode } from '../../types';
-import { FLOWCHART_CODE_TOPICS, generateCppFromGraph } from '../../services/CodeGenerator';
-import { validateGraph } from '../../services/GraphValidator';
+import type { CFG, SafetyCheck, ControlFlowNode } from '@/types';
+import { FLOWCHART_CODE_TOPICS, generateCppFromGraph } from '@/services/CodeGenerator';
+import { validateGraph } from '@/services/GraphValidator';
+import type { ValidationResult } from '@/services/GraphValidator';
 import { ValidationPanel } from './ValidationPanel';
 
 // ── Data attached to every node ──────────────────────────────────────────────
@@ -340,6 +341,10 @@ const PALETTE_ITEMS: {
   },
 ];
 
+const BUILD_PALETTE_ITEMS = PALETTE_ITEMS.filter(
+  item => item.type !== 'document' && item.type !== 'delay',
+);
+
 function isEndTerminator(node: Node<ExtendedNodeData>): boolean {
   return node.type === 'terminator' && String(node.data?.label ?? '').toLowerCase() !== 'start';
 }
@@ -459,17 +464,23 @@ const ViolationBadge = () => (
 
 /** Label block rendered inside rectangular/box-type nodes. */
 const NodeLabel: React.FC<{ data: ExtendedNodeData }> = ({ data }) => (
-  <div style={{ pointerEvents: 'none', userSelect: 'none', textAlign: 'center' }}>
-    <strong style={{ display: 'block', fontSize: 12, fontWeight: 700, color: 'white', letterSpacing: '0.3px', textShadow: '0 2px 3px rgba(0,0,0,0.6)' }}>
+  <div style={{ pointerEvents: 'none', userSelect: 'none', textAlign: 'center', width: '100%', minWidth: 0 }}>
+    <strong style={{ display: 'block', fontSize: 12, fontWeight: 700, color: 'white', letterSpacing: '0.3px', textShadow: '0 2px 3px rgba(0,0,0,0.6)', overflowWrap: 'anywhere', lineHeight: 1.25 }}>
       {String(data.label ?? '')}
     </strong>
     {data.code && (
-      <code style={{ display: 'block', fontSize: 10, marginTop: 5, fontFamily: "'JetBrains Mono','Fira Code',monospace", background: 'rgba(0,0,0,0.4)', padding: '4px 6px', borderRadius: 4, color: 'rgba(255,255,255,0.9)', whiteSpace: 'pre-wrap', wordBreak: 'break-word', lineHeight: 1.4 }}>
+      <code style={{ display: 'block', fontSize: 10, marginTop: 5, fontFamily: "'JetBrains Mono','Fira Code',monospace", background: 'rgba(0,0,0,0.4)', padding: '5px 7px', borderRadius: 4, color: 'rgba(255,255,255,0.9)', whiteSpace: 'pre-wrap', overflowWrap: 'anywhere', wordBreak: 'break-word', lineHeight: 1.45, maxWidth: '100%', boxSizing: 'border-box' }}>
         {String(data.code)}
       </code>
     )}
   </div>
 );
+
+function isReturnLikeNode(data: ExtendedNodeData): boolean {
+  const label = String(data.label ?? '').trim().toLowerCase();
+  const code = String(data.code ?? '').trim().toLowerCase();
+  return label === 'return' || code === 'return' || code.startsWith('return ');
+}
 
 // ─────────────────────────────────────────────────────────────────────────────
 // §4  ISO 5807 NODE COMPONENTS
@@ -477,14 +488,29 @@ const NodeLabel: React.FC<{ data: ExtendedNodeData }> = ({ data }) => (
 
 // ── 1. TERMINATOR — rounded pill ─────────────────────────────────────────────
 const TerminatorNode = ({ data, selected }: NodeProps<Node<ExtendedNodeData>>) => {
-  const { color, bg } = useNodeAppearance('terminator', data);
-  const background = bg ?? 'linear-gradient(135deg,#0d47a1,#1565c0)';
+  const returnLike = isReturnLikeNode(data);
+  const { color, bg } = useNodeAppearance(returnLike ? 'process' : 'terminator', data);
+  const background = bg ?? (returnLike
+    ? 'linear-gradient(135deg,#141a14,#1e271e)'
+    : 'linear-gradient(135deg,#0d47a1,#1565c0)');
+  if (returnLike) {
+    return (
+      <BaseNode data={data} selected={selected} style={{ padding: '16px 18px', minWidth: 190, maxWidth: 260, background, border: `2.5px solid ${color}`, borderRadius: 4, boxShadow: `0 3px 14px ${color}33` }}>
+        <EditHint />
+        {data.violation && <ViolationBadge />}
+        <Handle type="target" position={Position.Top}    style={handleStyle(color)} />
+        <NodeLabel data={data} />
+        <Handle type="source" position={Position.Bottom} style={handleStyle(color)} />
+      </BaseNode>
+    );
+  }
+
   return (
-    <BaseNode data={data} selected={selected} style={{ width: 160, height: 50, display: 'flex', alignItems: 'center', justifyContent: 'center', background, border: `2.5px solid ${color}`, borderRadius: 999, boxShadow: `0 4px 20px ${color}55` }}>
+    <BaseNode data={data} selected={selected} style={{ width: 200, minHeight: 56, padding: '8px 18px', boxSizing: 'border-box', display: 'flex', alignItems: 'center', justifyContent: 'center', background, border: `2.5px solid ${color}`, borderRadius: 999, boxShadow: `0 4px 20px ${color}55` }}>
       <EditHint />
       {data.violation && <ViolationBadge />}
       <Handle type="target" position={Position.Top}    style={{ ...handleStyle(color), top: -6 }} />
-      <span style={{ pointerEvents: 'none', userSelect: 'none', fontSize: 12, fontWeight: 700, color: 'white', letterSpacing: '0.5px', textShadow: '0 2px 4px rgba(0,0,0,0.5)' }}>
+      <span style={{ pointerEvents: 'none', userSelect: 'none', fontSize: 12, fontWeight: 700, color: 'white', letterSpacing: '0.5px', textShadow: '0 2px 4px rgba(0,0,0,0.5)', overflowWrap: 'anywhere', textAlign: 'center', lineHeight: 1.25 }}>
         {String(data.label ?? '')}
       </span>
       <Handle type="source" position={Position.Bottom} style={{ ...handleStyle(color), bottom: -6 }} />
@@ -497,7 +523,7 @@ const ProcessNode = ({ data, selected }: NodeProps<Node<ExtendedNodeData>>) => {
   const { color, bg } = useNodeAppearance('process', data);
   const background = bg ?? 'linear-gradient(135deg,#141a14,#1e271e)';
   return (
-    <BaseNode data={data} selected={selected} style={{ padding: '14px 16px', minWidth: 160, maxWidth: 210, background, border: `2.5px solid ${color}`, borderRadius: 4, boxShadow: `0 3px 14px ${color}33` }}>
+    <BaseNode data={data} selected={selected} style={{ padding: '16px 18px', minWidth: 190, maxWidth: 260, background, border: `2.5px solid ${color}`, borderRadius: 4, boxShadow: `0 3px 14px ${color}33` }}>
       <EditHint />
       {data.violation && <ViolationBadge />}
       <Handle type="target" position={Position.Top}    style={handleStyle(color)} />
@@ -509,7 +535,7 @@ const ProcessNode = ({ data, selected }: NodeProps<Node<ExtendedNodeData>>) => {
 
 // ── 3. DECISION — true diamond via SVG ───────────────────────────────────────
 const DecisionNode = ({ data, selected }: NodeProps<Node<ExtendedNodeData>>) => {
-  const W = 140, H = 140;
+  const W = 170, H = 170;
   const { color } = useNodeAppearance('decision', data);
   const fill = data.violation ? '#2d0a0a' : data.visited ? '#0d2010' : '#1a1608';
   const points = `${W/2},4 ${W-4},${H/2} ${W/2},${H-4} 4,${H/2}`;
@@ -525,7 +551,7 @@ const DecisionNode = ({ data, selected }: NodeProps<Node<ExtendedNodeData>>) => 
       <Handle type="source" id="right" position={Position.Right} style={{ ...handleStyle(color), right: 0, top: '50%', transform: 'translateY(-50%)' }} />
       <Handle type="source" id="left"  position={Position.Left}  style={{ ...handleStyle(color), left: 0,  top: '50%', transform: 'translateY(-50%)' }} />
       <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', pointerEvents: 'none' }}>
-        <span style={{ fontSize: 11, fontWeight: 700, color: 'white', textAlign: 'center', maxWidth: 80, lineHeight: 1.3, textShadow: '0 2px 4px rgba(0,0,0,0.7)' }}>
+        <span style={{ fontSize: 11, fontWeight: 700, color: 'white', textAlign: 'center', maxWidth: 112, lineHeight: 1.35, textShadow: '0 2px 4px rgba(0,0,0,0.7)', overflowWrap: 'anywhere' }}>
           {String(data.label ?? 'Condition')}
         </span>
       </div>
@@ -535,7 +561,7 @@ const DecisionNode = ({ data, selected }: NodeProps<Node<ExtendedNodeData>>) => 
 
 // ── 4. I/O — parallelogram ───────────────────────────────────────────────────
 const IONode = ({ data, selected }: NodeProps<Node<ExtendedNodeData>>) => {
-  const W = 180, H = 65, SKEW = 20;
+  const W = 260, H = 92, SKEW = 26;
   const { color } = useNodeAppearance('io', data);
   const fill = data.violation ? '#2d0a0a' : data.visited ? '#0d2010' : '#081c33';
   const points = `${SKEW},2 ${W-2},2 ${W-SKEW-2},${H-2} 2,${H-2}`;
@@ -548,7 +574,7 @@ const IONode = ({ data, selected }: NodeProps<Node<ExtendedNodeData>>) => {
       </svg>
       <Handle type="target" position={Position.Top}    style={{ ...handleStyle(color), zIndex: 5, left: W - SKEW / 2 }} />
       <Handle type="source" position={Position.Bottom} style={{ ...handleStyle(color), zIndex: 5, left: W / 2 - SKEW / 2 }} />
-      <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1, paddingLeft: SKEW / 2 }}>
+      <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1, padding: `10px ${SKEW + 12}px 10px ${SKEW}px`, boxSizing: 'border-box' }}>
         <NodeLabel data={data} />
       </div>
     </BaseNode>
@@ -560,7 +586,7 @@ const PredefinedNode = ({ data, selected }: NodeProps<Node<ExtendedNodeData>>) =
   const { color, bg } = useNodeAppearance('predefined', data);
   const background = bg ?? 'linear-gradient(135deg,#18091f,#271040)';
   return (
-    <BaseNode data={data} selected={selected} style={{ padding: '14px 30px', minWidth: 160, maxWidth: 210, background, border: `2.5px solid ${color}`, borderRadius: 4, boxShadow: `0 3px 14px ${color}33` }}>
+    <BaseNode data={data} selected={selected} style={{ padding: '16px 36px', minWidth: 220, maxWidth: 285, background, border: `2.5px solid ${color}`, borderRadius: 4, boxShadow: `0 3px 14px ${color}33` }}>
       <div style={{ position: 'absolute', left: 16, top: 2, bottom: 2, width: 2, background: color, opacity: 0.9, borderRadius: 1 }} />
       <div style={{ position: 'absolute', right: 16, top: 2, bottom: 2, width: 2, background: color, opacity: 0.9, borderRadius: 1 }} />
       <EditHint />
@@ -577,11 +603,11 @@ const ConnectorNode = ({ data, selected }: NodeProps<Node<ExtendedNodeData>>) =>
   const { color, bg } = useNodeAppearance('connector', data);
   const background = bg ?? 'linear-gradient(135deg,#042a2e,#073540)';
   return (
-    <BaseNode data={data} selected={selected} style={{ width: 60, height: 60, borderRadius: '50%', background, border: `2.5px solid ${color}`, display: 'flex', alignItems: 'center', justifyContent: 'center', boxShadow: `0 3px 16px ${color}55` }}>
+    <BaseNode data={data} selected={selected} style={{ width: 76, height: 76, borderRadius: '50%', background, border: `2.5px solid ${color}`, display: 'flex', alignItems: 'center', justifyContent: 'center', boxShadow: `0 3px 16px ${color}55`, padding: 8, boxSizing: 'border-box' }}>
       <EditHint />
       {data.violation && <ViolationBadge />}
       <Handle type="target" position={Position.Top}    style={handleStyle(color)} />
-      <span style={{ color: 'white', fontSize: 14, fontWeight: 800, pointerEvents: 'none' }}>
+      <span style={{ color: 'white', fontSize: 13, fontWeight: 800, pointerEvents: 'none', textAlign: 'center', overflowWrap: 'anywhere', lineHeight: 1.2 }}>
         {String(data.label ?? 'A')}
       </span>
       <Handle type="source" position={Position.Bottom} style={handleStyle(color)} />
@@ -591,7 +617,7 @@ const ConnectorNode = ({ data, selected }: NodeProps<Node<ExtendedNodeData>>) =>
 
 // ── 6b. OFF-PAGE CONNECTOR — pentagon / home-plate ───────────────────────────
 const OffPageConnectorNode = ({ data, selected }: NodeProps<Node<ExtendedNodeData>>) => {
-  const W = 70, H = 70;
+  const W = 96, H = 88;
   const { color } = useNodeAppearance('off_page_connector', data);
   const fill = data.violation ? '#2d0a0a' : data.visited ? '#1a2e1a' : '#2a2008';
   const points = `4,4 ${W-4},4 ${W-4},${H*0.6} ${W/2},${H-4} 4,${H*0.6}`;
@@ -604,7 +630,7 @@ const OffPageConnectorNode = ({ data, selected }: NodeProps<Node<ExtendedNodeDat
       </svg>
       <Handle type="target" position={Position.Top}    style={{ ...handleStyle(color), top: 0, zIndex: 5 }} />
       <div style={{ position: 'absolute', top: '38%', left: '50%', transform: 'translate(-50%,-50%)', zIndex: 1, pointerEvents: 'none', userSelect: 'none' }}>
-        <span style={{ color: 'white', fontSize: 14, fontWeight: 800, textShadow: '0 2px 4px rgba(0,0,0,0.6)' }}>
+        <span style={{ color: 'white', fontSize: 12, fontWeight: 800, textShadow: '0 2px 4px rgba(0,0,0,0.6)', display: 'block', maxWidth: W - 24, textAlign: 'center', overflowWrap: 'anywhere', lineHeight: 1.2 }}>
           {String(data.label ?? '1')}
         </span>
       </div>
@@ -615,7 +641,7 @@ const OffPageConnectorNode = ({ data, selected }: NodeProps<Node<ExtendedNodeDat
 
 // ── 7. DOCUMENT — rectangle with wavy bottom ─────────────────────────────────
 const DocumentNode = ({ data, selected }: NodeProps<Node<ExtendedNodeData>>) => {
-  const W = 185, H = 90;
+  const W = 260, H = 118;
   const { color } = useNodeAppearance('document', data);
   const fill = data.violation ? '#2d0a0a' : data.visited ? '#0d2010' : '#180303';
   const path = `M 3,3 L ${W-3},3 L ${W-3},${H-20}
@@ -631,7 +657,7 @@ const DocumentNode = ({ data, selected }: NodeProps<Node<ExtendedNodeData>>) => 
         <path d={path} fill={fill} stroke={color} strokeWidth={selected ? 3 : 2} strokeLinejoin="round" />
       </svg>
       <Handle type="target" position={Position.Top}    style={{ ...handleStyle(color), zIndex: 5 }} />
-      <div style={{ position: 'absolute', top: '28%', left: '50%', transform: 'translate(-50%,-50%)', width: 150, zIndex: 1 }}>
+      <div style={{ position: 'absolute', top: '40%', left: '50%', transform: 'translate(-50%,-50%)', width: W - 46, zIndex: 1 }}>
         <NodeLabel data={data} />
       </div>
       <Handle type="source" position={Position.Bottom} style={{ ...handleStyle(color), bottom: 10, zIndex: 5 }} />
@@ -641,7 +667,7 @@ const DocumentNode = ({ data, selected }: NodeProps<Node<ExtendedNodeData>>) => 
 
 // ── 8. MANUAL INPUT — trapezoid, top slopes upward left-to-right ─────────────
 const ManualInputNode = ({ data, selected }: NodeProps<Node<ExtendedNodeData>>) => {
-  const W = 185, H = 72, SLOPE = 18;
+  const W = 240, H = 92, SLOPE = 22;
   const { color } = useNodeAppearance('manual_input', data);
   const fill = data.violation ? '#2d0a0a' : data.visited ? '#0d2010' : '#180b00';
   const points = `2,${SLOPE} ${W-2},2 ${W-2},${H-2} 2,${H-2}`;
@@ -653,7 +679,7 @@ const ManualInputNode = ({ data, selected }: NodeProps<Node<ExtendedNodeData>>) 
         <polygon points={points} fill={fill} stroke={color} strokeWidth={selected ? 3 : 2} strokeLinejoin="round" />
       </svg>
       <Handle type="target" position={Position.Top}    style={{ ...handleStyle(color), top: SLOPE / 2, zIndex: 5 }} />
-      <div style={{ position: 'absolute', top: '55%', left: '50%', transform: 'translate(-50%,-50%)', width: 145, zIndex: 1 }}>
+      <div style={{ position: 'absolute', top: '55%', left: '50%', transform: 'translate(-50%,-50%)', width: W - 46, zIndex: 1 }}>
         <NodeLabel data={data} />
       </div>
       <Handle type="source" position={Position.Bottom} style={{ ...handleStyle(color), zIndex: 5 }} />
@@ -663,7 +689,7 @@ const ManualInputNode = ({ data, selected }: NodeProps<Node<ExtendedNodeData>>) 
 
 // ── 9. DELAY — D-shape: flat left, semicircle right ──────────────────────────
 const DelayNode = ({ data, selected }: NodeProps<Node<ExtendedNodeData>>) => {
-  const W = 185, H = 68;
+  const W = 240, H = 88;
   const R = H / 2 - 2;
   const { color } = useNodeAppearance('delay', data);
   const fill = data.violation ? '#2d0a0a' : data.visited ? '#1a2e1a' : '#0e1418';
@@ -676,7 +702,7 @@ const DelayNode = ({ data, selected }: NodeProps<Node<ExtendedNodeData>>) => {
         <path d={path} fill={fill} stroke={color} strokeWidth={selected ? 3 : 2} strokeLinejoin="round" />
       </svg>
       <Handle type="target" position={Position.Top}    style={{ ...handleStyle(color), zIndex: 5 }} />
-      <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1, paddingRight: R / 2 }}>
+      <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1, padding: `10px ${R}px 10px 16px`, boxSizing: 'border-box' }}>
         <NodeLabel data={data} />
       </div>
       <Handle type="source" position={Position.Bottom} style={{ ...handleStyle(color), zIndex: 5 }} />
@@ -686,7 +712,7 @@ const DelayNode = ({ data, selected }: NodeProps<Node<ExtendedNodeData>>) => {
 
 // ── 10. DATABASE — cylinder ───────────────────────────────────────────────────
 const DatabaseNode = ({ data, selected }: NodeProps<Node<ExtendedNodeData>>) => {
-  const W = 175, H = 95;
+  const W = 240, H = 118;
   const rx = (W - 6) / 2, ry = 14;
   const { color } = useNodeAppearance('database', data);
   const fillTop  = data.violation ? '#2d0a0a' : data.visited ? '#0d220d' : '#071407';
@@ -765,10 +791,10 @@ const NodePalette: React.FC<{
   hasGeneratePanel?: boolean;
 }> = ({ onAddNode, onClearCanvas, hasGeneratePanel = false }) => {
   const [expanded, setExpanded] = useState(true);
-  const listMaxHeight = hasGeneratePanel ? 'calc(100vh - 420px)' : 'calc(100vh - 100px)';
+  const listMaxHeight = hasGeneratePanel ? 'calc(100vh - 470px)' : 'calc(100vh - 100px)';
 
   return (
-    <div style={{ background: 'linear-gradient(135deg,rgba(13,17,23,0.98),rgba(22,27,34,0.98))', border: '2px solid #30363d', borderRadius: 12, padding: expanded ? 14 : '10px 14px', boxShadow: '0 8px 32px rgba(0,0,0,0.6)', backdropFilter: 'blur(12px)', transition: 'all 0.3s ease', flexShrink: 0 }}>
+    <div style={{ background: 'linear-gradient(135deg,rgba(13,17,23,0.98),rgba(22,27,34,0.98))', border: '2px solid #30363d', borderRadius: 12, padding: expanded ? 16 : '12px 16px', boxShadow: '0 8px 32px rgba(0,0,0,0.6)', backdropFilter: 'blur(12px)', transition: 'all 0.3s ease', flexShrink: 0 }}>
 
       <div
         role="button"
@@ -776,30 +802,30 @@ const NodePalette: React.FC<{
         aria-expanded={expanded}
         onClick={() => setExpanded(v => !v)}
         onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setExpanded(v => !v); } }}
-        style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', cursor: 'pointer', userSelect: 'none', marginBottom: expanded ? 10 : 0 }}
+        style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', cursor: 'pointer', userSelect: 'none', marginBottom: expanded ? 12 : 0 }}
         title={expanded ? 'Collapse node palette' : 'Expand node palette'}
       >
-        <div style={{ fontSize: 11, fontWeight: 700, color: '#58a6ff', letterSpacing: '0.5px' }}>➕ ADD NODE</div>
-        <div style={{ fontSize: 12, color: '#58a6ff', transform: expanded ? 'rotate(180deg)' : 'none', transition: 'transform 0.3s', marginLeft: 8 }}>▼</div>
+        <div style={{ fontSize: 13, fontWeight: 700, color: '#58a6ff', letterSpacing: '0.5px' }}>➕ ADD NODE</div>
+        <div style={{ fontSize: 13, color: '#58a6ff', transform: expanded ? 'rotate(180deg)' : 'none', transition: 'transform 0.3s', marginLeft: 8 }}>▼</div>
       </div>
 
       {expanded && (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 4, maxHeight: listMaxHeight, overflowY: 'auto' }}>
-          {PALETTE_ITEMS.map(({ type, label, iso, shape }) => {
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 8, maxHeight: listMaxHeight, overflowY: 'auto' }}>
+          {BUILD_PALETTE_ITEMS.map(({ type, label, iso, shape }) => {
             const color = NODE_COLORS[type];
             return (
               <button
                 key={type}
                 onClick={() => onAddNode(type)}
                 title={`Add a ${label} node (${iso})`}
-                style={{ display: 'flex', alignItems: 'center', gap: 9, background: 'rgba(255,255,255,0.02)', border: `1px solid ${color}33`, borderRadius: 7, padding: '6px 9px', cursor: 'pointer', transition: 'all 0.2s', textAlign: 'left' }}
+                style={{ display: 'flex', alignItems: 'center', gap: 12, minHeight: 58, background: 'rgba(255,255,255,0.02)', border: `1px solid ${color}33`, borderRadius: 8, padding: '9px 12px', cursor: 'pointer', transition: 'all 0.2s', textAlign: 'left' }}
                 onMouseEnter={e => { const b = e.currentTarget; b.style.background = `${color}14`; b.style.borderColor = `${color}88`; b.style.transform = 'translateX(-2px)'; }}
                 onMouseLeave={e => { const b = e.currentTarget; b.style.background = 'rgba(255,255,255,0.02)'; b.style.borderColor = `${color}33`; b.style.transform = 'none'; }}
               >
-                <div style={{ width: 48, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>{shape}</div>
-                <div>
-                  <div style={{ fontSize: 11, color: '#c9d1d9', fontWeight: 600, lineHeight: 1.2 }}>{label}</div>
-                  <div style={{ fontSize: 9,  color: '#484f58', marginTop: 1 }}>{iso}</div>
+                <div style={{ width: 58, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>{shape}</div>
+                <div style={{ minWidth: 0 }}>
+                  <div style={{ fontSize: 13, color: '#c9d1d9', fontWeight: 700, lineHeight: 1.25, overflowWrap: 'anywhere' }}>{label}</div>
+                  <div style={{ fontSize: 11, color: '#6e7681', marginTop: 2, lineHeight: 1.25, overflowWrap: 'anywhere' }}>{iso}</div>
                 </div>
               </button>
             );
@@ -810,15 +836,15 @@ const NodePalette: React.FC<{
           <button
             onClick={onClearCanvas}
             title="Remove all nodes and edges from the canvas"
-            style={{ display: 'flex', alignItems: 'center', gap: 8, background: 'rgba(255,68,68,0.04)', border: '1px solid rgba(255,68,68,0.25)', borderRadius: 7, padding: '7px 9px', cursor: 'pointer', transition: 'all 0.2s' }}
+            style={{ display: 'flex', alignItems: 'center', gap: 10, background: 'rgba(255,68,68,0.04)', border: '1px solid rgba(255,68,68,0.25)', borderRadius: 8, padding: '10px 12px', cursor: 'pointer', transition: 'all 0.2s' }}
             onMouseEnter={e => { const b = e.currentTarget; b.style.background = 'rgba(255,68,68,0.12)'; b.style.borderColor = '#ff4444'; }}
             onMouseLeave={e => { const b = e.currentTarget; b.style.background = 'rgba(255,68,68,0.04)'; b.style.borderColor = 'rgba(255,68,68,0.25)'; }}
           >
-            <span style={{ fontSize: 12 }}>🗑️</span>
-            <span style={{ fontSize: 11, color: '#ff6b6b', fontWeight: 600 }}>Clear Canvas</span>
+            <span style={{ fontSize: 14 }}>🗑️</span>
+            <span style={{ fontSize: 13, color: '#ff6b6b', fontWeight: 700 }}>Clear Canvas</span>
           </button>
 
-          <div style={{ padding: '5px 4px', fontSize: 9, color: '#484f58', lineHeight: 1.7, borderTop: '1px solid #21262d', marginTop: 2 }}>
+          <div style={{ padding: '8px 4px', fontSize: 11, color: '#6e7681', lineHeight: 1.65, borderTop: '1px solid #21262d', marginTop: 2 }}>
             <strong style={{ color: '#3d444d' }}>Tips:</strong> Double-click a node to edit it · Double-click an edge to label it · Press <kbd style={{ background: '#1c2128', border: '1px solid #30363d', borderRadius: 3, padding: '0 3px', fontSize: 8 }}>Backspace</kbd> to delete the selected item · <strong style={{ color: '#e040fb' }}>Alt+click</strong> an edge to insert a Junction at that point
           </div>
         </div>
@@ -828,15 +854,35 @@ const NodePalette: React.FC<{
 };
 
 // ── FlowchartLegend ───────────────────────────────────────────────────────────
-const FlowchartLegend: React.FC<{ isDrawerOpen?: boolean }> = ({ isDrawerOpen = false }) => {
+const FlowchartLegend: React.FC<{
+  isBuildMode: boolean;
+  graphNodes:  Node<ExtendedNodeData>[];
+  isDrawerOpen?: boolean;
+}> = ({ isBuildMode, graphNodes, isDrawerOpen = false }) => {
   const [expanded, setExpanded] = useState(false);
+  const visibleNodeTypes = new Set(graphNodes.map(node => String(node.type ?? '')));
+  const analysisItems = PALETTE_ITEMS.filter(item => visibleNodeTypes.has(item.type));
+  const legendItems = isBuildMode
+    ? BUILD_PALETTE_ITEMS
+    : analysisItems.length > 0
+    ? analysisItems
+    : PALETTE_ITEMS.filter(item => item.type === 'terminator');
+  const legendTitle = isBuildMode ? 'BUILD LEGEND' : 'LEGEND';
+  const legendNote = isBuildMode
+    ? 'Build Mode shows the shapes currently supported by Generate C++. Use the full ISO shapes only when they are enabled in the tools panel.'
+    : 'Analysis Mode shows only the shape types currently present in this CFG.';
+  const legendPosition: React.CSSProperties = isBuildMode
+    ? { bottom: 12, left: 12 }
+    : { top: 12, right: 12 };
+  const legendMaxHeight = isBuildMode ? 'calc(100vh - 200px)' : '260px';
   return (
     <div style={{
-      position: 'absolute', bottom: 12, left: 12, zIndex: 1000,
+      position: 'absolute', zIndex: 1000,
+      ...legendPosition,
       background: 'linear-gradient(135deg,rgba(13,17,23,0.98),rgba(22,27,34,0.98))',
       border: '2px solid #30363d', borderRadius: 12,
       padding: expanded ? 14 : '10px 14px',
-      width: expanded ? 240 : 'auto',
+      width: expanded ? (isBuildMode ? 270 : 245) : 'auto',
       boxShadow: '0 8px 32px rgba(0,0,0,0.5)', backdropFilter: 'blur(10px)',
       transition: 'all 0.3s ease',
       opacity: isDrawerOpen ? 0.25 : 1,
@@ -852,13 +898,16 @@ const FlowchartLegend: React.FC<{ isDrawerOpen?: boolean }> = ({ isDrawerOpen = 
         style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', cursor: 'pointer', userSelect: 'none' }}
         title={expanded ? 'Hide legend' : 'Show ISO 5807 shape legend'}
       >
-        <div style={{ fontSize: 11, fontWeight: 700, color: '#58a6ff', letterSpacing: '0.5px' }}>📊 LEGEND</div>
+        <div style={{ fontSize: 11, fontWeight: 700, color: '#58a6ff', letterSpacing: '0.5px' }}>📊 {legendTitle}</div>
         <div style={{ fontSize: 12, color: '#58a6ff', transform: expanded ? 'rotate(180deg)' : 'none', transition: 'transform 0.3s', marginLeft: 8 }}>▼</div>
       </div>
 
       {expanded && (
-        <div style={{ marginTop: 12, borderTop: '1px solid #21262d', paddingTop: 10, display: 'flex', flexDirection: 'column', gap: 7, maxHeight: 'calc(100vh - 200px)', overflowY: 'auto' }}>
-          {PALETTE_ITEMS.map(({ type, label, iso, shape }) => (
+        <div style={{ marginTop: 12, borderTop: '1px solid #21262d', paddingTop: 10, display: 'flex', flexDirection: 'column', gap: 7, maxHeight: legendMaxHeight, overflowY: 'auto', overflowX: 'hidden' }}>
+          <div style={{ fontSize: 10, color: '#6e7681', lineHeight: 1.5, paddingBottom: 4 }}>
+            {legendNote}
+          </div>
+          {legendItems.map(({ type, label, iso, shape }) => (
             <div key={type} style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
               <div style={{ width: 48, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>{shape}</div>
               <div>
@@ -867,9 +916,11 @@ const FlowchartLegend: React.FC<{ isDrawerOpen?: boolean }> = ({ isDrawerOpen = 
               </div>
             </div>
           ))}
-          <div style={{ marginTop: 4, padding: '5px 4px', fontSize: 9, color: '#484f58', lineHeight: 1.7, borderTop: '1px solid #21262d' }}>
-            💡 One decision edge creates a single-arm <strong>if</strong>; label two-way decisions <strong style={{ color: '#4caf50' }}>true</strong> / <strong style={{ color: '#ff6b6b' }}>false</strong>.
-          </div>
+          {isBuildMode && (
+            <div style={{ marginTop: 4, padding: '5px 4px', fontSize: 9, color: '#484f58', lineHeight: 1.7, borderTop: '1px solid #21262d' }}>
+              💡 One decision edge creates a single-arm <strong>if</strong>; label two-way decisions <strong style={{ color: '#4caf50' }}>true</strong> / <strong style={{ color: '#ff6b6b' }}>false</strong>. Validation errors include a <strong style={{ color: '#ff6b6b' }}>Fix</strong> helper.
+            </div>
+          )}
         </div>
       )}
     </div>
@@ -1016,10 +1067,103 @@ add one to score`}
           <span><b style={{ color: '#64b5f6' }}>Output</b> print text/value</span>
           <span><b style={{ color: '#ff7043' }}>Input</b> ask/read value</span>
           <span><b style={{ color: '#ab47bc' }}>Function</b> helper calls</span>
-          <span><b style={{ color: '#ef5350' }}>Document</b> files/reports</span>
-          <span><b style={{ color: '#78909c' }}>Delay</b> wait/pause</span>
           <span><b style={{ color: '#66bb6a' }}>Stored Data</b> arrays/storage</span>
           <span><b style={{ color: '#e040fb' }}>Junction</b> merge paths</span>
+        </div>
+      </div>
+      <div>
+        <div style={{ color: '#e6edf3', fontWeight: 700, marginBottom: 4 }}>Examples</div>
+        <div style={{ display: 'grid', gap: 6 }}>
+          <details style={{ background: 'rgba(255,255,255,0.025)', border: '1px solid #21262d', borderRadius: 6, padding: '7px 8px' }}>
+            <summary style={{ cursor: 'pointer', color: '#9ecbff', fontWeight: 700 }}>Straight-line input to output</summary>
+            <code style={{ display: 'block', marginTop: 7, background: '#010409', border: '1px solid #21262d', borderRadius: 6, padding: 8, color: '#c9d1d9', whiteSpace: 'pre-wrap', lineHeight: 1.6 }}>
+{`Start
+-> Manual Input: ask the user for age
+-> Process: int nextAge = age + 1;
+-> Output: display nextAge
+-> End
+
+C++ result:
+int age;
+cin >> age;
+int nextAge = age + 1;
+cout << nextAge << endl;`}
+            </code>
+          </details>
+          <details style={{ background: 'rgba(255,255,255,0.025)', border: '1px solid #21262d', borderRadius: 6, padding: '7px 8px' }}>
+            <summary style={{ cursor: 'pointer', color: '#9ecbff', fontWeight: 700 }}>Decision with merge</summary>
+            <code style={{ display: 'block', marginTop: 7, background: '#010409', border: '1px solid #21262d', borderRadius: 6, padding: 8, color: '#c9d1d9', whiteSpace: 'pre-wrap', lineHeight: 1.6 }}>
+{`Start
+-> Manual Input: ask the user for score
+-> Decision: score >= 75
+   true  -> Output: display passed
+   false -> Output: display try again
+-> Junction: merge
+-> End
+
+C++ result:
+int score;
+cin >> score;
+if (score >= 75) {
+    cout << "passed" << endl;
+} else {
+    cout << "try again" << endl;
+}`}
+            </code>
+          </details>
+          <details style={{ background: 'rgba(255,255,255,0.025)', border: '1px solid #21262d', borderRadius: 6, padding: '7px 8px' }}>
+            <summary style={{ cursor: 'pointer', color: '#9ecbff', fontWeight: 700 }}>Loop with connector</summary>
+            <code style={{ display: 'block', marginTop: 7, background: '#010409', border: '1px solid #21262d', borderRadius: 6, padding: 8, color: '#c9d1d9', whiteSpace: 'pre-wrap', lineHeight: 1.6 }}>
+{`Start
+-> Process: int i = 0;
+-> Decision: i < 5
+   true  -> Process: i++;
+         -> Decision: i % 2 == 0
+            true  -> Connector: continue
+            false -> Output: display i
+         -> back to Decision i < 5
+   false -> End
+
+C++ result:
+int i = 0;
+while (i < 5) {
+    i++;
+    if (i % 2 == 0) {
+        continue;
+    }
+    cout << i << endl;
+}`}
+            </code>
+          </details>
+          <details style={{ background: 'rgba(255,255,255,0.025)', border: '1px solid #21262d', borderRadius: 6, padding: '7px 8px' }}>
+            <summary style={{ cursor: 'pointer', color: '#9ecbff', fontWeight: 700 }}>Storage, helper, file, delay, reference</summary>
+            <code style={{ display: 'block', marginTop: 7, background: '#010409', border: '1px solid #21262d', borderRadius: 6, padding: 8, color: '#c9d1d9', whiteSpace: 'pre-wrap', lineHeight: 1.6 }}>
+{`Start
+-> Stored Data: int scores[3];
+-> Process: int total = 0;
+-> Manual Input: ask for first score
+-> Process: scores[0] = firstScore;
+-> Predefined Process: call show summary with total
+-> Document: ofstream reportFile("report.txt");
+-> Document: reportFile << "Total: " << total << endl;
+-> Delay: wait 1 second
+-> Off-page Connector: Report page 2
+-> Output: display total
+-> End
+
+C++ result:
+int scores[3];
+int total = 0;
+cin >> firstScore;
+scores[0] = firstScore;
+showSummary(total);
+ofstream reportFile("report.txt");
+reportFile << "Total: " << total << endl;
+// wait 1 second(s)
+// Off-page connector: Report page 2
+cout << total << endl;`}
+            </code>
+          </details>
         </div>
       </div>
     </div>
@@ -1027,6 +1171,25 @@ add one to score`}
 );
 
 // ── GenerateCodePanel ─────────────────────────────────────────────────────────
+function generationFailureResult(error: unknown): ValidationResult {
+  const message = error instanceof Error ? error.message : String(error);
+  const issue = {
+    severity: 'error' as const,
+    code: 'CODE_GENERATION_FAILED',
+    message: `Code generation failed: ${message}`,
+  };
+  return {
+    isValid: false,
+    errors: [issue],
+    warnings: [],
+    all: [issue],
+  };
+}
+
+function isGenerationFailureResult(result: ValidationResult | null): boolean {
+  return result?.errors.some(issue => issue.code === 'CODE_GENERATION_FAILED') ?? false;
+}
+
 const GenerateCodePanel: React.FC<{
   nodes:             Node[];
   edges:             Edge[];
@@ -1037,7 +1200,7 @@ const GenerateCodePanel: React.FC<{
   const [expanded,         setExpanded]         = useState(true);
   const [generatedCode,    setGeneratedCode]    = useState<string | null>(null);
   const [copied,           setCopied]           = useState(false);
-  const [validationResult, setValidationResult] = useState<import('../../services/GraphValidator').ValidationResult | null>(null);
+  const [validationResult, setValidationResult] = useState<ValidationResult | null>(null);
   const [showValidation,   setShowValidation]   = useState(false);
 
   const handleGenerate = () => {
@@ -1053,10 +1216,14 @@ const GenerateCodePanel: React.FC<{
       onMarkClean?.();
     } catch (err) {
       console.error('Code generation failed:', err);
+      setValidationResult(generationFailureResult(err));
+      setShowValidation(true);
     }
   };
 
-  const liveValidation = showValidation ? validateGraph(nodes, edges) : null;
+  const liveValidation = showValidation && !isGenerationFailureResult(validationResult)
+    ? validateGraph(nodes, edges)
+    : null;
 
   const handleCopy = () => {
     if (!generatedCode) return;
@@ -1113,7 +1280,7 @@ const GenerateCodePanel: React.FC<{
       background:     'linear-gradient(135deg,rgba(13,17,23,0.98),rgba(22,27,34,0.98))',
       border:         `2px solid ${borderColor}`,
       borderRadius:   12,
-      padding:        expanded ? 14 : '10px 14px',
+      padding:        expanded ? 18 : '12px 16px',
       boxShadow:      `0 8px 32px ${hasErrors ? 'rgba(255,68,68,0.25)' : isDirty && generatedCode ? 'rgba(255,167,38,0.3)' : 'rgba(168,85,247,0.3)'}`,
       backdropFilter: 'blur(10px)',
       transition:     'all 0.3s ease',
@@ -1126,19 +1293,19 @@ const GenerateCodePanel: React.FC<{
         aria-expanded={expanded}
         onClick={() => setExpanded(v => !v)}
         onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setExpanded(v => !v); } }}
-        style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', cursor: 'pointer', userSelect: 'none', marginBottom: expanded ? 10 : 0 }}
+        style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, cursor: 'pointer', userSelect: 'none', marginBottom: expanded ? 14 : 0 }}
         title={expanded ? 'Collapse code generator' : 'Expand code generator'}
       >
-        <div style={{ fontSize: 11, fontWeight: 700, color: borderColor, letterSpacing: '0.5px' }}>
+        <div style={{ fontSize: 14, fontWeight: 800, color: borderColor, letterSpacing: '0.5px', lineHeight: 1.25 }}>
           ⚡ GENERATE C++{' '}
           {hasErrors                ? '— fix errors first' :
            isDirty && generatedCode ? '— graph changed, regenerate to update' : ''}
         </div>
-        <div style={{ fontSize: 12, color: '#a855f7', transform: expanded ? 'rotate(180deg)' : 'none', transition: 'transform 0.3s', marginLeft: 8 }}>▼</div>
+        <div style={{ fontSize: 13, color: '#a855f7', transform: expanded ? 'rotate(180deg)' : 'none', transition: 'transform 0.3s', flexShrink: 0 }}>▼</div>
       </div>
 
       {expanded && (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
 
           {showValidation && activeValidation && hasIssues && (
             <ValidationPanel
@@ -1148,7 +1315,7 @@ const GenerateCodePanel: React.FC<{
           )}
 
           {(!showValidation || !hasIssues) && !isDirty && (
-            <div style={{ fontSize: 9, color: '#484f58', lineHeight: 1.6, padding: '5px 8px', background: 'rgba(168,85,247,0.06)', borderRadius: 6, border: '1px solid rgba(168,85,247,0.2)' }}>
+            <div style={{ fontSize: 12, color: '#8b949e', lineHeight: 1.55, padding: '10px 12px', background: 'rgba(168,85,247,0.06)', borderRadius: 8, border: '1px solid rgba(168,85,247,0.2)' }}>
               Type simple sentence steps. No AI, no compilation. For two-way decisions, label edges{' '}
               <strong style={{ color: '#4caf50' }}>true</strong> /{' '}
               <strong style={{ color: '#ff6b6b' }}>false</strong>{' '}
@@ -1156,9 +1323,9 @@ const GenerateCodePanel: React.FC<{
             </div>
           )}
 
-          <details style={{ fontSize: 9, color: '#8b949e', background: 'rgba(255,255,255,0.025)', border: '1px solid #21262d', borderRadius: 6, padding: '6px 8px' }}>
+          <details style={{ fontSize: 12, color: '#8b949e', background: 'rgba(255,255,255,0.025)', border: '1px solid #21262d', borderRadius: 8, padding: '9px 11px' }}>
             <summary style={{ cursor: 'pointer', color: '#c9d1d9', fontWeight: 700 }}>Supported topics</summary>
-            <div style={{ display: 'grid', gap: 3, marginTop: 6, lineHeight: 1.45 }}>
+            <div style={{ display: 'grid', gap: 5, marginTop: 8, lineHeight: 1.5 }}>
               {FLOWCHART_CODE_TOPICS.map(topic => (
                 <span key={topic}>- {topic}</span>
               ))}
@@ -1166,7 +1333,7 @@ const GenerateCodePanel: React.FC<{
           </details>
 
           {!hasErrors && isDirty && generatedCode && (
-            <div style={{ fontSize: 9, color: '#ffa726', padding: '5px 8px', background: 'rgba(255,167,38,0.08)', border: '1px solid rgba(255,167,38,0.3)', borderRadius: 6 }}>
+            <div style={{ fontSize: 12, color: '#ffa726', padding: '9px 11px', background: 'rgba(255,167,38,0.08)', border: '1px solid rgba(255,167,38,0.3)', borderRadius: 8, lineHeight: 1.45 }}>
               ⚠️ The graph has changed since the last generation — click Generate to update the output.
             </div>
           )}
@@ -1176,7 +1343,7 @@ const GenerateCodePanel: React.FC<{
             disabled={nodes.length === 0}
             title={hasErrors ? 'Fix the errors shown above before generating code' : 'Generate C++ code from the current flowchart'}
             style={{
-              width: '100%', padding: 10, borderRadius: 8, border: 'none',
+              width: '100%', padding: '13px 14px', borderRadius: 8, border: 'none',
               background:
                 nodes.length === 0       ? 'rgba(168,85,247,0.15)' :
                 hasErrors                ? 'rgba(255,68,68,0.2)'   :
@@ -1186,9 +1353,9 @@ const GenerateCodePanel: React.FC<{
                 nodes.length === 0 ? '#6b21a8' :
                 hasErrors          ? '#ff8888' :
                                      'white',
-              fontWeight: 700, fontSize: 12,
+              fontWeight: 800, fontSize: 14,
               cursor: nodes.length === 0 ? 'not-allowed' : 'pointer',
-              letterSpacing: '0.5px', transition: 'all 0.2s',
+              letterSpacing: '0.5px', lineHeight: 1.25, transition: 'all 0.2s',
               opacity: hasErrors ? 0.7 : 1,
             }}
             onMouseEnter={e => { if (canGenerate) e.currentTarget.style.transform = 'translateY(-1px)'; }}
@@ -1199,23 +1366,23 @@ const GenerateCodePanel: React.FC<{
 
           {generatedCode && !hasErrors && (
             <>
-              <div style={{ background: '#0d1117', border: `1px solid ${isDirty ? 'rgba(255,167,38,0.3)' : 'rgba(168,85,247,0.3)'}`, borderRadius: 8, padding: 10, maxHeight: 140, overflowY: 'auto' }}>
-                <pre style={{ margin: 0, fontSize: 10, color: isDirty ? '#8b949e' : '#c9d1d9', fontFamily: "'JetBrains Mono','Fira Code',monospace", whiteSpace: 'pre-wrap', wordBreak: 'break-word', lineHeight: 1.6, opacity: isDirty ? 0.6 : 1 }}>
+              <div style={{ background: '#0d1117', border: `1px solid ${isDirty ? 'rgba(255,167,38,0.3)' : 'rgba(168,85,247,0.3)'}`, borderRadius: 8, padding: 12, maxHeight: 180, overflowY: 'auto' }}>
+                <pre style={{ margin: 0, fontSize: 12, color: isDirty ? '#8b949e' : '#c9d1d9', fontFamily: "'JetBrains Mono','Fira Code',monospace", whiteSpace: 'pre-wrap', wordBreak: 'break-word', lineHeight: 1.65, opacity: isDirty ? 0.6 : 1 }}>
                   {generatedCode}
                 </pre>
               </div>
-              <div style={{ display: 'flex', gap: 6 }}>
+              <div style={{ display: 'flex', gap: 8 }}>
                 <button
                   onClick={handleCopy}
                   title="Copy generated code to clipboard"
-                  style={{ flex: 1, padding: 8, borderRadius: 7, border: '1px solid rgba(168,85,247,0.5)', background: copied ? 'rgba(76,175,80,0.2)' : 'rgba(168,85,247,0.1)', color: copied ? '#4caf50' : '#a855f7', fontSize: 11, fontWeight: 700, cursor: 'pointer', transition: 'all 0.2s' }}
+                  style={{ flex: 1, padding: '10px 8px', borderRadius: 7, border: '1px solid rgba(168,85,247,0.5)', background: copied ? 'rgba(76,175,80,0.2)' : 'rgba(168,85,247,0.1)', color: copied ? '#4caf50' : '#a855f7', fontSize: 12, fontWeight: 700, cursor: 'pointer', transition: 'all 0.2s' }}
                 >
                   {copied ? '✓ Copied!' : '📋 Copy'}
                 </button>
                 <button
                   onClick={handleExport}
                   title="Download as generated.cpp"
-                  style={{ flex: 1, padding: 8, borderRadius: 7, border: '1px solid rgba(168,85,247,0.5)', background: 'rgba(168,85,247,0.1)', color: '#a855f7', fontSize: 11, fontWeight: 700, cursor: 'pointer', transition: 'all 0.2s' }}
+                  style={{ flex: 1, padding: '10px 8px', borderRadius: 7, border: '1px solid rgba(168,85,247,0.5)', background: 'rgba(168,85,247,0.1)', color: '#a855f7', fontSize: 12, fontWeight: 700, cursor: 'pointer', transition: 'all 0.2s' }}
                 >
                   💾 Export .cpp
                 </button>
@@ -1857,16 +2024,29 @@ const FlowGraphInner: React.FC<Props> = ({
   // ── Analysis mode: build graph from CFG with ELK layout ───────────────────
 
   useEffect(() => {
+    let cancelled = false;
+    const applyGraph = (nextNodes: Node<ExtendedNodeData>[], nextEdges: Edge[]) => {
+      queueMicrotask(() => {
+        if (cancelled) return;
+        setNodes(nextNodes);
+        setEdges(nextEdges);
+        onGraphChange?.(nextNodes, nextEdges);
+      });
+    };
+
     if (!cfg?.nodes?.length) {
-      setNodes([]);
-      setEdges([]);
-      return;
+      applyGraph([], []);
+      return () => { cancelled = true; };
     }
 
     const inferNodeType = (node: ControlFlowNode): FlowNodeType => {
       const lbl  = String(node.label ?? '').toLowerCase();
       const code = String(node.code  ?? '').toLowerCase();
+      const isReturnStatement = lbl === 'return' || code.startsWith('return');
+      const isFunctionBoundary = lbl.startsWith('function:') || lbl.startsWith('end:');
 
+      if (isReturnStatement)                         return 'process';
+      if (isFunctionBoundary)                        return 'predefined';
       if (node.type === 'start' || node.type === 'end') return 'terminator';
       if (node.type === 'decision')                     return 'decision';
       if (node.type === 'output')                       return 'io';
@@ -1966,11 +2146,10 @@ const FlowGraphInner: React.FC<Props> = ({
       };
     });
 
-    setNodes(initialNodes);
-    setEdges(initialEdges);
-    onGraphChange?.(initialNodes, initialEdges);
+    applyGraph(initialNodes, initialEdges);
+    return () => { cancelled = true; };
   // FIX: depend on stableSafetyChecks (stable ref) instead of safetyChecks (new [] each render)
-  }, [cfg, stableSafetyChecks]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [cfg, handleOpenEdit, stableSafetyChecks, onGraphChange]);
 
   // ── Derived values ─────────────────────────────────────────────────────────
 
@@ -1989,7 +2168,7 @@ const FlowGraphInner: React.FC<Props> = ({
       onMouseMove={e => setMousePos({ x: e.clientX + 15, y: e.clientY + 15 })}
       style={{ width: '100%', height: '100%', position: 'relative', background: '#0d1117' }}
     >
-      <FlowchartLegend isDrawerOpen={isDrawerOpen} />
+      <FlowchartLegend isBuildMode={isBuildMode} graphNodes={nodes} isDrawerOpen={isDrawerOpen} />
 
       {!isBuildMode && (
         <GameStats
@@ -2052,7 +2231,7 @@ const FlowGraphInner: React.FC<Props> = ({
           {showPanel && (
             <div style={{
               position: 'absolute', top: 52, right: 12, zIndex: 1000,
-              width: 230,
+              width: 'min(340px, calc(100vw - 32px))',
               display: 'flex', flexDirection: 'column', gap: 10,
               maxHeight: 'calc(100vh - 170px)',
               overflowY: 'auto', overflowX: 'visible',
@@ -2157,7 +2336,7 @@ const FlowGraphInner: React.FC<Props> = ({
             <strong style={{ color: '#30363d', display: 'block', marginBottom: 6 }}>The canvas is empty</strong>
             {isBuildMode ? (
               <>
-                Use <strong style={{ color: '#58a6ff' }}>➕ ADD NODE</strong> — 11 ISO 5807 shapes are available.<br />
+                Use <strong style={{ color: '#58a6ff' }}>➕ ADD NODE</strong> — {BUILD_PALETTE_ITEMS.length} Generate C++ shapes are available.<br />
                 Use one decision edge for a single-arm <strong>if</strong>, or label two branches <strong style={{ color: '#4caf50' }}>true</strong> / <strong style={{ color: '#ff6b6b' }}>false</strong>, then click <strong style={{ color: '#a855f7' }}>⚡ GENERATE C++</strong>.<br />
                 <span style={{ fontSize: 10, color: '#3d444d' }}>💡 <strong style={{ color: '#e040fb' }}>Alt+click</strong> any edge to insert a Junction node at that point.</span>
               </>

@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, fireEvent, act } from '@testing-library/react';
-import { DragDropGame } from '../DragDropGame';
-import type { GameItem, DropZone } from '../../types/campaign';
+import { DragDropGame } from '@/games/DragDropGame';
+import type { GameItem, DropZone } from '@/types/campaign';
 
 // ─── Fixtures ─────────────────────────────────────────────────────────────────
 

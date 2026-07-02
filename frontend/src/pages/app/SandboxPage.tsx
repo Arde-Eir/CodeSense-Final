@@ -1,20 +1,20 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
-import './layout.css';
-import { CodeEditor } from './components/Editor/CodeEditor';
-import { analyzeCode } from './services/api';
-import { FlowGraph } from './components/Visualizer/FlowGraph';
-import { TokenDrawer } from './components/Visualizer/TokenDrawer';
-import { TokenChart } from './components/Visualizer/TokenChart';
-import { useAuth } from './components/AuthScreen';
-import { DataIsolationService } from './Dataisolationservice';
-import { DatabaseService } from './services/DatabaseService';
-import { supabase } from './services/supabase';
-import { getLevelProgress, getXPToNextLevel, getRank } from './types';
-import type { AnalysisResult, SymbolInfo } from './types';
-import { ASTViewer } from './components/Visualizer/Astviewer';
-import { MathTab } from './components/Visualizer/MathTab';
-import { LogsTab } from './components/Visualizer/LogsTab';
+import '@/layout.css';
+import { CodeEditor } from '@/components/Editor/CodeEditor';
+import { analyzeCode } from '@/services/api';
+import { FlowGraph } from '@/components/Visualizer/FlowGraph';
+import { TokenDrawer } from '@/components/Visualizer/TokenDrawer';
+import { TokenChart } from '@/components/Visualizer/TokenChart';
+import { useAuth } from '@/components/AuthContext';
+import { DataIsolationService } from '@/services/DataIsolationService';
+import { DatabaseService } from '@/services/DatabaseService';
+import { supabase } from '@/services/supabase';
+import { getLevelProgress, getXPToNextLevel, getRank } from '@/types';
+import type { AnalysisError, AnalysisResult, SymbolInfo } from '@/types';
+import { ASTViewer } from '@/components/Visualizer/Astviewer';
+import { MathTab } from '@/components/Visualizer/MathTab';
+import { LogsTab } from '@/components/Visualizer/LogsTab';
 
 type AppMode = 'analyze' | 'build';
 
@@ -23,6 +23,45 @@ interface LiveStats {
   currentLevel: 1 | 2 | 3 | 4 | 5;
   sandboxRuns: number;
   rankName: string;
+}
+
+function analysisFailureFromError(error: unknown): AnalysisResult {
+  const message = error instanceof Error ? error.message : String(error);
+  const analysisError: AnalysisError = {
+    type: 'semantic',
+    severity: 'error',
+    message: `Analysis request failed: ${message}`,
+    line: 1,
+  };
+
+  return {
+    success: false,
+    tokens: [],
+    ast: null,
+    symbolTable: {},
+    safetyChecks: [],
+    explanations: [
+      'Analysis could not complete. Check that the backend is running and the API URL is configured correctly.',
+      message,
+    ],
+    errors: [analysisError],
+    warnings: [],
+    cfg: { nodes: [], edges: [] },
+    cognitiveComplexity: 0,
+    symbolicExecution: [],
+    cyclomaticComplexity: {
+      score: 0,
+      edges: 0,
+      nodes: 0,
+      rating: 'low',
+      interpretation: 'Analysis did not complete.',
+    },
+    gamification: {
+      xpEarned: 0,
+      levelTitle: 'Squire',
+      qualityBonus: 0,
+    },
+  };
 }
 
 // ─── Rank config ──────────────────────────────────────────────────────────────
@@ -214,46 +253,132 @@ const GeneratedCodeViewer: React.FC<{
   );
 };
 
+const BUILD_MANUAL_STEPS = [
+  { n: '01', title: 'Build one complete path', body: 'Start must reach End. Every branch should reconnect or finish cleanly.' },
+  { n: '02', title: 'Write plain intent', body: 'Use simple C++-like sentences. The generator handles common verbs and comparisons.' },
+  { n: '03', title: 'Choose the shape by purpose', body: 'Input reads values, Process changes values, Output prints, Decision branches.' },
+  { n: '04', title: 'Generate, then verify', body: 'Generate C++, load it into the editor, then analyze the result like normal code.' },
+]
+
+const BUILD_MANUAL_SHAPES = [
+  { label: 'Start / End', color: '#3fb950', use: 'program boundaries' },
+  { label: 'Input', color: '#ff7043', use: 'cin or ask for' },
+  { label: 'Process', color: '#58a6ff', use: 'math, assign, update' },
+  { label: 'Output', color: '#e3b341', use: 'cout or print' },
+  { label: 'Decision', color: '#a371f7', use: 'if, while, checks' },
+]
+
+const BUILD_MANUAL_PATTERNS = [
+  'create integer score equals 0',
+  'ask for name',
+  'set total to price plus tax',
+  'increase counter by 1',
+  'if score is greater than or equal to 75',
+  'print Passed',
+]
+
 const BuildModeManual: React.FC = () => (
   <div style={{
-    padding: '14px 16px',
-    background: 'rgba(163,113,247,0.05)',
-    border: '1px solid rgba(163,113,247,0.2)',
-    borderRadius: '10px',
+    padding: '14px',
+    background: 'linear-gradient(180deg, rgba(163,113,247,0.09), rgba(13,17,23,0.72))',
+    border: '1px solid rgba(163,113,247,0.28)',
+    borderRadius: '12px',
     fontSize: '12px',
     color: '#8b949e',
-    lineHeight: 1.75,
+    lineHeight: 1.55,
+    boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.04)',
   }}>
-    <div style={{ color: '#a371f7', fontWeight: 700, marginBottom: 8, fontSize: 11, textTransform: 'uppercase', letterSpacing: 0.5, fontFamily: 'IBM Plex Mono, monospace' }}>
-      Flowchart to Code Manual
+    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, marginBottom: 12 }}>
+      <div>
+        <div style={{ color: '#a371f7', fontWeight: 800, fontSize: 11, textTransform: 'uppercase', letterSpacing: 0.8, fontFamily: 'IBM Plex Mono, monospace' }}>
+          Flowchart to Code
+        </div>
+        <div style={{ color: '#e6edf3', fontSize: 16, fontWeight: 800, marginTop: 2 }}>
+          Quick Build Manual
+        </div>
+      </div>
+      <div style={{
+        color: '#d2a8ff',
+        background: 'rgba(163,113,247,0.12)',
+        border: '1px solid rgba(163,113,247,0.35)',
+        borderRadius: 999,
+        padding: '4px 8px',
+        fontSize: 10,
+        fontWeight: 800,
+        whiteSpace: 'nowrap',
+      }}>
+        4-step loop
+      </div>
     </div>
-    <div style={{ display: 'grid', gap: 10 }}>
-      <div>
-        <strong style={{ color: '#e6edf3' }}>1. Build the path</strong>
-        <div>Start with a Start node, add your actions and decisions, then connect everything to End.</div>
+
+    <div style={{ display: 'grid', gap: 8 }}>
+      {BUILD_MANUAL_STEPS.map(step => (
+        <div key={step.n} style={{
+          display: 'grid',
+          gridTemplateColumns: '34px 1fr',
+          gap: 10,
+          padding: '10px',
+          background: 'rgba(1,4,9,0.42)',
+          border: '1px solid rgba(48,54,61,0.85)',
+          borderRadius: 10,
+        }}>
+          <div style={{ color: '#a371f7', fontFamily: 'IBM Plex Mono, monospace', fontSize: 11, fontWeight: 900 }}>
+            {step.n}
+          </div>
+          <div>
+            <div style={{ color: '#e6edf3', fontSize: 12, fontWeight: 800, marginBottom: 3 }}>{step.title}</div>
+            <div style={{ color: '#9aa7b5', fontSize: 12 }}>{step.body}</div>
+          </div>
+        </div>
+      ))}
+    </div>
+
+    <div style={{ marginTop: 12 }}>
+      <div style={{ color: '#58a6ff', fontWeight: 800, marginBottom: 8, fontSize: 11, textTransform: 'uppercase', letterSpacing: 0.6 }}>
+        Shape Cheat Sheet
       </div>
-      <div>
-        <strong style={{ color: '#e6edf3' }}>2. Write naturally</strong>
-        <div>Nodes accept C++ or simple sentences like <code>create integer age equals 18</code>, <code>ask for name</code>, and <code>print total</code>.</div>
-      </div>
-      <div>
-        <strong style={{ color: '#e6edf3' }}>3. Use the right shapes</strong>
-        <div>Process for math/variables, Manual Input for <code>cin</code>, Output for <code>cout</code>, Decision for <code>if</code> or loop checks.</div>
-      </div>
-      <div>
-        <strong style={{ color: '#e6edf3' }}>4. Generate and analyze</strong>
-        <div>Click Generate C++, then Load &amp; Analyze to send the generated code through Tokens, AST, CFG, Math, and Logs.</div>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(132px, 1fr))', gap: 7 }}>
+        {BUILD_MANUAL_SHAPES.map(shape => (
+          <div key={shape.label} style={{
+            padding: '8px 9px',
+            background: 'rgba(1,4,9,0.5)',
+            border: `1px solid ${shape.color}55`,
+            borderRadius: 9,
+          }}>
+            <div style={{ color: shape.color, fontWeight: 800, fontSize: 11 }}>{shape.label}</div>
+            <div style={{ color: '#8b949e', fontSize: 10, marginTop: 2 }}>{shape.use}</div>
+          </div>
+        ))}
       </div>
     </div>
-    <div style={{ marginTop: 12, padding: 10, background: '#010409', border: '1px solid #21262d', borderRadius: 8 }}>
-      <div style={{ color: '#58a6ff', fontWeight: 700, marginBottom: 5, fontSize: 11 }}>Good sentence patterns</div>
-      <code style={{ color: '#9ecbff', whiteSpace: 'pre-wrap', lineHeight: 1.65 }}>
-{`create integer score equals 0
-set total to price plus tax
-increase counter by 1
-if score is greater than or equal to 75
-print Passed`}
-      </code>
+
+    <div style={{ marginTop: 12, padding: 11, background: '#010409', border: '1px solid #21262d', borderRadius: 10 }}>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, marginBottom: 8 }}>
+        <div style={{ color: '#3fb950', fontWeight: 800, fontSize: 11, textTransform: 'uppercase', letterSpacing: 0.6 }}>Sentence Patterns</div>
+        <span style={{ color: '#484f58', fontSize: 10 }}>copy the style, not the exact words</span>
+      </div>
+      <div style={{ display: 'grid', gap: 5 }}>
+        {BUILD_MANUAL_PATTERNS.map(pattern => (
+          <code key={pattern} style={{
+            display: 'block',
+            color: '#9ecbff',
+            background: 'rgba(88,166,255,0.06)',
+            border: '1px solid rgba(88,166,255,0.12)',
+            borderRadius: 7,
+            padding: '6px 8px',
+            fontSize: 11,
+            lineHeight: 1.35,
+            whiteSpace: 'pre-wrap',
+            wordBreak: 'break-word',
+          }}>
+            {pattern}
+          </code>
+        ))}
+      </div>
+    </div>
+
+    <div style={{ marginTop: 10, padding: '9px 10px', borderRadius: 9, background: 'rgba(227,179,65,0.08)', border: '1px solid rgba(227,179,65,0.2)', color: '#c9a646', fontSize: 11 }}>
+      Tip: if Generate C++ is blocked, open the validation panel first. Fix red errors before warnings.
     </div>
   </div>
 );
@@ -417,7 +542,7 @@ int main() {
     const onMouseMove = (evt: MouseEvent) => {
       const viewport = window.innerWidth || 1200;
       const maxWidth = Math.min(720, viewport * 0.5);
-      setBuildRailWidth(Math.min(maxWidth, Math.max(360, viewport - evt.clientX - 14)));
+      setBuildRailWidth(Math.min(maxWidth, Math.max(360, evt.clientX - 14)));
     };
     const onMouseUp = () => {
       document.body.style.cursor = '';
@@ -455,7 +580,7 @@ int main() {
     setOpenPanels(prev => ({ ...prev, [panel]: !prev[panel] }));
   };
 
-  const fetchLiveStats = async () => {
+  const fetchLiveStats = useCallback(async () => {
     if (!user?.id) return;
     try {
       const { data } = await supabase.from('users').select('totalxp, sandbox_runs').eq('id', user.id).single();
@@ -464,9 +589,9 @@ int main() {
         setLiveStats({ totalXP: data.totalxp ?? 0, currentLevel: rank.level, sandboxRuns: data.sandbox_runs ?? 0, rankName: rank.name });
       }
     } catch (err) { console.error('Failed to fetch live stats:', err); }
-  };
+  }, [user?.id]);
 
-  useEffect(() => { fetchLiveStats(); }, [user?.id]);
+  useEffect(() => { fetchLiveStats(); }, [fetchLiveStats]);
 
   useEffect(() => {
     const handleKey = (e: KeyboardEvent) => {
@@ -483,17 +608,19 @@ int main() {
     if (!editorRef.current) return;
     const model = editorRef.current.getModel();
     if (model) {
-      const len = model.getLineContent(line).length;
-      editorRef.current.setSelection({ startLineNumber: line, startColumn: 1, endLineNumber: line, endColumn: len + 1 });
-      editorRef.current.revealLineInCenterIfOutsideViewport(line);
+      const lineCount = model.getLineCount();
+      const targetLine = Math.min(Math.max(Math.trunc(line), 1), lineCount);
+      const len = model.getLineContent(targetLine).length;
+      editorRef.current.setSelection({ startLineNumber: targetLine, startColumn: 1, endLineNumber: targetLine, endColumn: len + 1 });
+      editorRef.current.revealLineInCenterIfOutsideViewport(targetLine);
       editorRef.current.focus();
     }
   };
 
-  const handleAnalyze = async () => {
+  const performAnalyzeSource = async (sourceCode: string) => {
     if (!user && !isGuest) return;
     (document.activeElement as HTMLElement | null)?.blur?.();
-    DataIsolationService.saveSandboxCode(isGuest ? null : user?.id || null, code, 'main.cpp');
+    DataIsolationService.saveSandboxCode(isGuest ? null : user?.id || null, sourceCode, 'main.cpp');
     setResult(null);
     setAnalysisRunKey(prev => prev + 1);
     setIsAnalyzing(true);
@@ -502,28 +629,41 @@ int main() {
 
     let data: AnalysisResult | null = null;
     try {
-      data = await analyzeCode(code, {
+      data = await analyzeCode(sourceCode, {
         currentLevel: liveStats?.currentLevel,
       });
       setResult(data);
       if (data.success && isGuest) {
-        DataIsolationService.saveGuestProgress({ sandboxProgress: { lastCode: code } });
+        DataIsolationService.saveGuestProgress({ sandboxProgress: { lastCode: sourceCode } });
       }
     } catch (err) {
       console.error('Analysis failed:', err);
+      data = analysisFailureFromError(err);
+      setResult(data);
     } finally {
       setIsAnalyzing(false);
-      try { editorRef.current?.focus?.(); } catch {/* editor may have unmounted */}
+      editorRef.current?.focus?.();
     }
 
     if (data?.success && user) {
       setLiveStats(prev => prev ? { ...prev, sandboxRuns: prev.sandboxRuns + 1 } : prev);
       setRunFlash(true);
       setTimeout(() => setRunFlash(false), 2200);
-      DatabaseService.logSandboxRun(user.id, code, data.cognitiveComplexity ?? 0, data.symbolTable ?? {})
+      DatabaseService.logSandboxRun(user.id, sourceCode, data.cognitiveComplexity ?? 0, data.symbolTable ?? {})
         .then(() => fetchLiveStats())
         .catch(err => console.error('DB log failed:', err));
     }
+  };
+
+  const handleAnalyze = async () => {
+    await performAnalyzeSource(code);
+  };
+
+  const handleLoadGeneratedCode = (generatedCode: string) => {
+    setCode(generatedCode);
+    setMode('analyze');
+    setResult(null);
+    void performAnalyzeSource(generatedCode);
   };
 
   const getSymbolList = (): SymbolInfo[] => {
@@ -578,7 +718,7 @@ int main() {
       {/* ── Main ───────────────────────────────────────────────────────── */}
       <main
         className={`main-layout ${mode === 'build' ? 'build-layout' : ''} ${mode === 'build' && !buildRailOpen ? 'build-layout-rail-closed' : ''}`}
-        style={mode === 'build' && buildRailOpen ? { gridTemplateColumns: `minmax(0, 1fr) ${buildRailWidth}px` } : undefined}
+        style={mode === 'build' && buildRailOpen ? { gridTemplateColumns: `${buildRailWidth}px minmax(0, 1fr)` } : undefined}
       >
 
         {/* ══════════════════ ANALYZE MODE ══════════════════════════════ */}
@@ -768,18 +908,6 @@ int main() {
 
         {/* ══════════════════ BUILD MODE ════════════════════════════════ */}
         {mode === 'build' && (<>
-          <div className="right-column build-canvas-column">
-            <div className="section-title build-title">
-              <span>Flowchart Canvas</span>
-              <span style={{ marginLeft: 'auto', color: '#484f58', fontSize: 10, textTransform: 'none', letterSpacing: 0 }}>
-                More room for building. Use the Guide button inside the canvas for quick help.
-              </span>
-            </div>
-            <div className="visualizer-container">
-              <FlowGraph onCodeGenerated={setBuiltCode} />
-            </div>
-          </div>
-
           <aside className={`build-side-rail ${buildRailOpen ? 'open' : 'closed'}`}>
             {buildRailOpen && (
               <div
@@ -794,14 +922,14 @@ int main() {
               className="build-rail-toggle"
               title={buildRailOpen ? 'Collapse generated output and manual' : 'Open generated output and manual'}
             >
-              {buildRailOpen ? '>' : '<'}
+              {buildRailOpen ? '<' : '>'}
             </button>
             {buildRailOpen ? (
               <>
                 <section className="editor-section build-output-section" style={{ flex: `0 0 ${buildOutputHeight}px` }}>
                   <div className="section-title build-title">Generated C++ Output</div>
                   <div className="editor-container build-code-container" style={{ padding: '16px', display: 'flex', flexDirection: 'column' }}>
-                    <GeneratedCodeViewer code={builtCode} onLoadInEditor={c => { setCode(c); setMode('analyze'); setResult(null); }} />
+                    <GeneratedCodeViewer code={builtCode} onLoadInEditor={handleLoadGeneratedCode} />
                   </div>
                 </section>
                 <div
@@ -819,6 +947,18 @@ int main() {
               </div>
             )}
           </aside>
+
+          <div className="right-column build-canvas-column">
+            <div className="section-title build-title">
+              <span>Flowchart Canvas</span>
+              <span style={{ marginLeft: 'auto', color: '#484f58', fontSize: 10, textTransform: 'none', letterSpacing: 0 }}>
+                More room for building. Use the Guide button inside the canvas for quick help.
+              </span>
+            </div>
+            <div className="visualizer-container">
+              <FlowGraph onCodeGenerated={setBuiltCode} />
+            </div>
+          </div>
         </>)}
       </main>
 

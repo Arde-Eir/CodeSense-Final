@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
-import { buildQuests } from '../buildQuests';
-import type { Quest, MissionProgress } from '../../types/campaign';
+import { buildQuests } from '@/campaign/buildQuests';
+import type { Quest, MissionProgress } from '@/types/campaign';
 
 // ─── Fixture builders ─────────────────────────────────────────────────────
 // Quest fields we don't care about for gating — null/empty defaults that

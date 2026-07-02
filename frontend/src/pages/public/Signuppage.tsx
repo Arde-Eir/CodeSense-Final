@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { useAuth } from './components/AuthScreen';
+import { useAuth } from '@/components/AuthContext';
 
 
 // ── Reusable field component ──────────────────────────────────────────────────

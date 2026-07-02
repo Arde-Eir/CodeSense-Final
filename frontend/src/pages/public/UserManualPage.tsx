@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { useAuth } from './components/AuthScreen'
-import { resolveTier, tierColor, tierLabel } from './services/Roles'
+import { useAuth } from '@/components/AuthContext'
+import { resolveTier, tierColor, tierLabel } from '@/services/Roles'
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 

@@ -1,4 +1,4 @@
-import type { MCQ } from '../types/campaign';
+import type { MCQ } from '@/types/campaign';
 
 export function normalizeMCQOptions(question: MCQ): MCQ {
   const options = Array.isArray(question.options) ? question.options : [];

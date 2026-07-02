@@ -10,8 +10,8 @@
 //   • `isCompleted` is the durable "has this quest ever been completed"
 //     flag. In the DB-backed UI it is derived from first_completed_at.
 
-import type { ActivityTab, CorePhase, Phase } from '../types/campaign';
-import { levelForPhase } from '../types/campaign';
+import type { ActivityTab, CorePhase, Phase } from '@/types/campaign';
+import { levelForPhase } from '@/types/campaign';
 
 export const FIRST_COMPLETION_XP = 200;
 export const RETAKE_COMPLETION_XP = 20;

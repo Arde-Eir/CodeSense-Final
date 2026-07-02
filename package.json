@@ -1,5 +1,15 @@
 {
   "scripts": {
-    "test": "node --test tests/run-integration-tests.mjs"
+    "build": "npm run build:frontend && npm run build:backend",
+    "build:backend": "npm --prefix backend run build",
+    "build:frontend": "npm --prefix frontend run build",
+    "check": "npm run scan:secrets && npm run lint && npm test && npm run build",
+    "lint": "npm --prefix frontend run lint",
+    "scan:secrets": "node tests/scan-secrets.mjs",
+    "test": "npm run test:report",
+    "test:backend:unit": "npm --prefix backend test",
+    "test:frontend": "npm --prefix frontend run test",
+    "test:integration": "node --test tests/run-integration-tests.mjs",
+    "test:report": "node tests/run-testing-report.mjs"
   }
 }

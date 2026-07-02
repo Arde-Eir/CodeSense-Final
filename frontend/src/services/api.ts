@@ -1,5 +1,5 @@
 // frontend/src/services/api.ts
-import type { AnalysisResult } from '../types';
+import type { AnalysisResult, CFG, ControlFlowNode, GraphEdge } from '@/types';
 import { findPreprocessorDependencyErrors } from './PreprocessorDependencies';
 
 const API_BASE_URL = (
@@ -58,7 +58,7 @@ export const analyzeCode = async (
     }
 
     const result = await response.json();
-    return enforceStrictPreprocessorDependencies(sourceCode, result);
+    return normalizeAnalysisResult(sourceCode, result);
   } catch (err: unknown) {
     if (err instanceof DOMException && err.name === 'AbortError') {
       throw new Error('Analysis timed out or was cancelled');
@@ -71,6 +71,15 @@ export const analyzeCode = async (
     }
   }
 };
+
+function normalizeAnalysisResult(
+  sourceCode: string,
+  result: AnalysisResult,
+): AnalysisResult {
+  return addFunctionCallConnectorEdges(
+    enforceStrictPreprocessorDependencies(sourceCode, result),
+  );
+}
 
 function enforceStrictPreprocessorDependencies(
   sourceCode: string,
@@ -94,5 +103,69 @@ function enforceStrictPreprocessorDependencies(
       ...errors.map(error => `🔗 ${error.message}`),
       ...(result.explanations ?? []).filter(entry => !entry.includes('Analysis Successful')),
     ],
+  };
+}
+
+function extractFunctionDefinitionName(node: ControlFlowNode): string | null {
+  const label = String(node.label ?? '').trim();
+  const fromLabel = label.match(/^Function:\s*([A-Za-z_][A-Za-z0-9_:]*)\b/i)?.[1];
+  if (fromLabel) return fromLabel;
+
+  const code = String(node.code ?? '').trim();
+  return code.match(/^(?:[\w:<>~*&\s]+)\s+([A-Za-z_][A-Za-z0-9_:]*)\s*\(/)?.[1] ?? null;
+}
+
+function extractFunctionCallName(node: ControlFlowNode): string | null {
+  const label = String(node.label ?? '').trim();
+  const fromLabel = label.match(/^Call:\s*([A-Za-z_][A-Za-z0-9_:]*)\b/i)?.[1];
+  if (fromLabel) return fromLabel;
+
+  const code = String(node.code ?? '').trim();
+  return code.match(/^([A-Za-z_][A-Za-z0-9_:]*)\s*\(/)?.[1] ?? null;
+}
+
+function addFunctionCallConnectorEdges(result: AnalysisResult): AnalysisResult {
+  const cfg = result.cfg;
+  if (!cfg?.nodes?.length || !cfg?.edges) return result;
+
+  const functionEntries = new Map<string, ControlFlowNode>();
+  cfg.nodes.forEach(node => {
+    if (node.type !== 'predefined') return;
+    const name = extractFunctionDefinitionName(node);
+    if (name && name !== 'main') functionEntries.set(name, node);
+  });
+
+  if (functionEntries.size === 0) return result;
+
+  const existingEdges = new Set(cfg.edges.map(edge => `${edge.from}->${edge.to}`));
+  const connectorEdges: GraphEdge[] = [];
+
+  cfg.nodes.forEach(node => {
+    if (node.type !== 'predefined') return;
+    const callName = extractFunctionCallName(node);
+    const functionEntry = callName ? functionEntries.get(callName) : undefined;
+    if (!functionEntry || functionEntry.id === node.id) return;
+
+    const key = `${node.id}->${functionEntry.id}`;
+    if (existingEdges.has(key)) return;
+
+    existingEdges.add(key);
+    connectorEdges.push({
+      from: node.id,
+      to: functionEntry.id,
+      label: 'calls',
+    });
+  });
+
+  if (connectorEdges.length === 0) return result;
+
+  const nextCfg: CFG = {
+    ...cfg,
+    edges: [...cfg.edges, ...connectorEdges],
+  };
+
+  return {
+    ...result,
+    cfg: nextCfg,
   };
 }

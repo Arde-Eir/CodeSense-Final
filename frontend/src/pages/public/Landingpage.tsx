@@ -1,6 +1,6 @@
 import React, { useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { useAuth } from './components/AuthScreen';
+import { useAuth } from '@/components/AuthContext';
 
 export const LandingPage: React.FC = () => {
   const navigate = useNavigate();

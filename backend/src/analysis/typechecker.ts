@@ -1879,6 +1879,34 @@ if (['&', '|', '^', '<<', '>>'].includes(bin.operator)) {
     return vars;
   }
 
+  private extractCinTargetNames(node: any): Set<string> {
+    const names = new Set<string>();
+    const walk = (target: any): void => {
+      if (target == null) return;
+      if (Array.isArray(target)) {
+        target.forEach(walk);
+        return;
+      }
+      if (typeof target === 'string') {
+        names.add(target);
+        return;
+      }
+      if (target.type === 'BinaryOp' && (target.operator === '>>' || target.operator === '<<')) {
+        walk(target.left);
+        walk(target.right);
+        return;
+      }
+      if (target.type === 'ArrayAccess' && target.name) {
+        names.add(target.name);
+        return;
+      }
+      if (target.name) names.add(target.name);
+    };
+    if (node.targets) walk(node.targets);
+    if (node.target) walk(node.target);
+    return names;
+  }
+
   // FIX 16 helper — extract all variables modified in a statement list
   private extractModifiedVariables(body: ASTNode[]): Set<string> {
     const s = new Set<string>();
@@ -1889,6 +1917,9 @@ if (['&', '|', '^', '<<', '>>'].includes(bin.operator)) {
           case 'Assignment':
             if (typeof any.target === 'string') s.add(any.target);
             else if (any.target?.name) s.add(any.target.name);
+            break;
+          case 'CinStatement':
+            this.extractCinTargetNames(any).forEach(name => s.add(name));
             break;
           case 'PreIncrement': case 'PostIncrement':
           case 'PreDecrement': case 'PostDecrement': {

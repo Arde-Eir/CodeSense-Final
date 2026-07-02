@@ -7,7 +7,7 @@
 //
 // Extracted from lessonactivity.tsx for unit testing.
 
-import type { ActivityTab, HintItem } from '../types/campaign';
+import type { ActivityTab, HintItem } from '@/types/campaign';
 
 export type ItemHintInput = string | string[] | HintItem | HintItem[] | null | undefined;
 

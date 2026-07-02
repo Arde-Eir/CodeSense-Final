@@ -13,7 +13,7 @@
  * what to render per-user. Never inline `isAdmin` checks elsewhere — update this
  * module so permission rules stay consolidated.
  */
-import type { ExplorerProfile } from '../types'
+import type { ExplorerProfile } from '@/types'
 
 export type UserTier = 'guest' | 'student' | 'professional' | 'admin'
 

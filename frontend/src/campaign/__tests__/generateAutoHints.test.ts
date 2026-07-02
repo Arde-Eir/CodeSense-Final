@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
-import { generateAutoHints } from '../generateAutoHints';
-import type { Quest } from '../../types/campaign';
+import { generateAutoHints } from '@/campaign/generateAutoHints';
+import type { Quest } from '@/types/campaign';
 
 const baseQuest: Quest = {
   id: 'q1',

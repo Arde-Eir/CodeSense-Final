@@ -2,7 +2,7 @@
 // Drag rows up/down until their correct_order matches the visual position.
 
 import React from 'react';
-import type { OrderItem } from '../types/campaign';
+import type { OrderItem } from '@/types/campaign';
 
 interface Props {
   items:       OrderItem[];

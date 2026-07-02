@@ -1,9 +1,9 @@
 // src/ProgressPage.tsx
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { useAuth } from './components/AuthScreen';
-import { supabase } from './services/supabase';
-import { getLevelProgress, getXPToNextLevel, getLevelName, XP_LEVELS, getRank } from './types'
+import { useAuth } from '@/components/AuthContext';
+import { supabase } from '@/services/supabase';
+import { calculateLevel, getLevelProgress, getXPToNextLevel, getLevelName, XP_LEVELS, getRank } from '@/types'
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -137,7 +137,8 @@ function buildHeatmapData(dates: string[]) {
   const map: Record<string, { count: number; times: string[] }> = {}
   dates.forEach(dateStr => {
     if (!dateStr) return
-    const key = dateStr.slice(0, 10)
+    const key = localDateKey(dateStr)
+    if (!key) return
     if (!map[key]) map[key] = { count: 0, times: [] }
     map[key].count++
     const t = new Date(dateStr)
@@ -155,7 +156,7 @@ function buildHeatmapData(dates: string[]) {
     const week = Math.floor((d.getTime() - start.getTime()) / (7 * 24 * 60 * 60 * 1000))
     if (week !== prevWeek) { col = week; prevWeek = week }
     if (targetDays.includes(d.getDay())) {
-      const key = d.toISOString().slice(0, 10)
+      const key = localDateKeyFromDate(d)
       const entry = map[key]
       cells.push({ date: key, count: entry?.count ?? 0, times: entry?.times ?? [], col, rowIndex: targetDays.indexOf(d.getDay()) })
     }
@@ -185,21 +186,22 @@ function getMonthLabels() {
 /** Compute current streak (days ending today with activity) + longest streak ever. */
 function computeStreaks(dates: string[]): { current: number; longest: number } {
   if (dates.length === 0) return { current: 0, longest: 0 }
-  const daysSet = new Set(dates.map(d => d.slice(0, 10)))
+  const daysSet = new Set(dates.map(localDateKey).filter((date): date is string => Boolean(date)))
+  if (daysSet.size === 0) return { current: 0, longest: 0 }
   const allDays = Array.from(daysSet).sort()
 
   let current = 0
   const today = new Date()
   today.setHours(0, 0, 0, 0)
   const cursor = new Date(today)
-  while (daysSet.has(cursor.toISOString().slice(0, 10))) {
+  while (daysSet.has(localDateKeyFromDate(cursor))) {
     current++
     cursor.setDate(cursor.getDate() - 1)
   }
   // Allow a one-day gap if today itself has nothing (count from yesterday)
   if (current === 0) {
     cursor.setDate(cursor.getDate() - 1)
-    while (daysSet.has(cursor.toISOString().slice(0, 10))) {
+    while (daysSet.has(localDateKeyFromDate(cursor))) {
       current++
       cursor.setDate(cursor.getDate() - 1)
     }
@@ -253,8 +255,36 @@ function missionCompletionDate(mission: MissionProgress): string | null {
   return mission.first_completed_at ?? mission.completedat ?? null
 }
 
+function localDateKey(dateStr: string): string {
+  const date = new Date(dateStr)
+  if (Number.isNaN(date.getTime())) return ''
+  return localDateKeyFromDate(date)
+}
+
+function localDateKeyFromDate(date: Date): string {
+  const year = date.getFullYear()
+  const month = String(date.getMonth() + 1).padStart(2, '0')
+  const day = String(date.getDate()).padStart(2, '0')
+  return `${year}-${month}-${day}`
+}
+
+function missionSortTime(mission: MissionProgress): number {
+  const time = new Date(mission.updatedat ?? missionCompletionDate(mission) ?? 0).getTime()
+  return Number.isNaN(time) ? 0 : time
+}
+
+function dedupeMissionsByQuest(missions: MissionProgress[]): MissionProgress[] {
+  const byQuest = new Map<string, MissionProgress>()
+  for (const mission of missions) {
+    const key = mission.quest_uuid || mission.id
+    const current = byQuest.get(key)
+    if (!current || missionSortTime(mission) >= missionSortTime(current)) byQuest.set(key, mission)
+  }
+  return Array.from(byQuest.values()).sort((a, b) => missionSortTime(b) - missionSortTime(a))
+}
+
 function uniqueCompletedQuestCount(missions: MissionProgress[]): number {
-  return new Set(missions.filter(isMissionCompleted).map(m => m.quest_uuid || m.id)).size
+  return dedupeMissionsByQuest(missions).filter(isMissionCompleted).length
 }
 
 // ── Main Component ───────────────────────────────────────────────────────────
@@ -295,7 +325,7 @@ export const ProgressPage: React.FC = () => {
   )
   const pastActivity = useMemo(
     () => stats ? getPastWeeklyActivity(stats.reports, stats.missions) : [],
-    [stats?.reports, stats?.missions]
+    [stats]
   )
   const heatmapCells = useMemo(() => buildHeatmapData(allActivityDates), [allActivityDates])
   const monthLabels = useMemo(() => getMonthLabels(), [])
@@ -328,7 +358,7 @@ export const ProgressPage: React.FC = () => {
       setLoadError(null)
       const [profileRes, reportsRes, missionsRes, questsRes] = await Promise.all([
         supabase
-          .from('users').select('totalxp, currentlevel, sandbox_runs')
+          .from('users').select('totalxp, sandbox_runs')
           .eq('id', user.id).single(),
         supabase
           .from('reports')
@@ -388,12 +418,14 @@ export const ProgressPage: React.FC = () => {
         const { data: urlData } = supabase.storage.from('Avatars')
           .getPublicUrl(`${user.id}/${avatarData[0].name}`)
         setAvatarUrl(urlData.publicUrl)
+      } else {
+        setAvatarUrl(null)
       }
 
       const totalXP = profile?.totalxp ?? 0
       setStats({
         totalXP,
-        currentLevel: profile?.currentlevel ?? 1,
+        currentLevel: calculateLevel(totalXP),
         sandboxRuns: profile?.sandbox_runs ?? 0,
         questsCompleted,
         phaseTotals,
@@ -410,12 +442,12 @@ export const ProgressPage: React.FC = () => {
       setLoading(false)
       setRefreshing(false)
     }
-  }, [user?.id])
+  }, [user])
 
   useEffect(() => {
     if (!user) { navigate('/login'); return }
     fetchAll()
-  }, [fetchAll, navigate, user?.id])
+  }, [fetchAll, navigate, user])
 
   useEffect(() => {
     if (!user) return
@@ -442,7 +474,7 @@ export const ProgressPage: React.FC = () => {
       }
       supabase.removeChannel(channel)
     }
-  }, [fetchAll, user?.id])
+  }, [fetchAll, user])
 
   if (loading) {
     return (
@@ -494,14 +526,23 @@ export const ProgressPage: React.FC = () => {
       `🔥 ${streaks.current}-day streak (best: ${streaks.longest})`,
       avgComplexity != null ? `📈 Avg cognitive complexity: ${avgComplexity}` : '',
     ].filter(Boolean).join('\n')
-    navigator.clipboard?.writeText(txt).then(() => {
+    if (!navigator.clipboard) {
+      setShareMsg('Clipboard unavailable')
+      setTimeout(() => setShareMsg(''), 2500)
+      return
+    }
+    navigator.clipboard.writeText(txt).then(() => {
       setShareMsg('Copied to clipboard!')
+      setTimeout(() => setShareMsg(''), 2500)
+    }).catch(() => {
+      setShareMsg('Copy failed')
       setTimeout(() => setShareMsg(''), 2500)
     })
   }
 
   // ── Campaign tab filtering ────────────────────────────────────────────────
-  const filteredMissions = stats.missions.filter(m => {
+  const displayMissions = dedupeMissionsByQuest(stats.missions)
+  const filteredMissions = displayMissions.filter(m => {
     if (campaignFilter !== 'all' && m.questid?.phase !== campaignFilter) return false
     if (campaignSearch.trim()) {
       const q = campaignSearch.toLowerCase()
@@ -510,23 +551,14 @@ export const ProgressPage: React.FC = () => {
     return true
   })
 
-  const completedMissionRows = (() => {
-    const byQuest = new Map<string, MissionProgress>()
-    for (const mission of stats.missions.filter(isMissionCompleted)) {
-      const key = mission.quest_uuid || mission.id
-      const current = byQuest.get(key)
-      const currentTime = current ? new Date(current.updatedat ?? missionCompletionDate(current) ?? 0).getTime() : -1
-      const nextTime = new Date(mission.updatedat ?? missionCompletionDate(mission) ?? 0).getTime()
-      if (!current || nextTime >= currentTime) byQuest.set(key, mission)
-    }
-    return Array.from(byQuest.values())
-  })()
+  const completedMissionRows = displayMissions.filter(isMissionCompleted)
 
   // Phase progress rings (completed vs active campaign quests per phase)
   const phaseProgress = (['beginner','intermediate','advanced'] as const).map(phase => {
     const total = stats.phaseTotals[phase] ?? stats.missions.filter(m => m.questid?.phase === phase).length
     const done = completedMissionRows.filter(m => m.questid?.phase === phase).length
-    return { phase, done, total, pct: total === 0 ? 0 : Math.round((done / total) * 100) }
+    const pct = total === 0 ? 0 : Math.min(100, Math.round((done / total) * 100))
+    return { phase, done, total, pct }
   })
 
   const avgHintsUsed = (() => {
@@ -1128,8 +1160,8 @@ export const ProgressPage: React.FC = () => {
 
             {filteredMissions.length === 0 ? (
               <div style={emptyStyle}>
-                {stats.missions.length === 0 ? 'No campaign quests started yet.' : 'No quests match those filters.'}
-                {stats.missions.length === 0 && (
+                {displayMissions.length === 0 ? 'No campaign quests started yet.' : 'No quests match those filters.'}
+                {displayMissions.length === 0 && (
                   <div>
                     <button onClick={() => navigate('/campaign')} style={{
                       marginTop: 14, background: 'rgba(255,167,38,0.12)', border: '1px solid rgba(255,167,38,0.3)',
@@ -1211,8 +1243,8 @@ export const ProgressPage: React.FC = () => {
               // Badge definition now includes a `progress` function so we show
               // how close the user is to the locked ones.
               const completedInPhase = (phase: 'beginner' | 'intermediate' | 'advanced') =>
-                stats.missions.filter(m => m.questid?.phase === phase && isMissionCompleted(m)).length
-              const completedWithoutHints = stats.missions.some(m => isMissionCompleted(m) && m.hintsused === 0)
+                completedMissionRows.filter(m => m.questid?.phase === phase).length
+              const completedWithoutHints = completedMissionRows.some(m => m.hintsused === 0)
               const allBadges = [
                 { id: 'first_quest',       icon: '⚔️', name: 'First Quest',      desc: 'Complete your first campaign quest',  earned: stats.questsCompleted >= 1,       progress: () => Math.min(1, stats.questsCompleted) / 1, detail: `${Math.min(stats.questsCompleted, 1)}/1` },
                 { id: 'beginner_clear',    icon: '🌱', name: 'Beginner Clear',   desc: 'Complete a beginner quest',           earned: completedInPhase('beginner') >= 1, progress: () => Math.min(1, completedInPhase('beginner')) / 1, detail: '' },

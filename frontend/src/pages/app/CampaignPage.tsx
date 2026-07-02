@@ -10,12 +10,12 @@
 // accidental NULLing — see migration_mission_progress_v2.sql), so playing
 // through the level once unlocks the next one and never gets undone.
 
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { useAuth } from './components/AuthScreen';
-import { supabase } from './services/supabase';
-import type { Phase } from './types/campaign';
-import { isCampaignPhase, levelForPhase, phaseForLevel } from './types/campaign';
+import { useAuth } from '@/components/AuthContext';
+import { supabase } from '@/services/supabase';
+import type { Phase } from '@/types/campaign';
+import { isCampaignPhase, levelForPhase, phaseForLevel } from '@/types/campaign';
 
 // ─── Visual config (level cards' look, not gameplay) ───────────────────────
 interface LevelCardConfig {
@@ -157,9 +157,9 @@ export const CampaignPage: React.FC = () => {
   useEffect(() => {
     if (!user?.id) return;
     let cancelled = false;
-    setProgressLoaded(false);
 
     const fetchProgress = async () => {
+      setProgressLoaded(false);
       const { data: quests } = await supabase
         .from('quests')
         .select('id, phase')
@@ -216,15 +216,15 @@ export const CampaignPage: React.FC = () => {
   }, [user?.id]);
 
   // ── Status derivation ───────────────────────────────────────────────────
-  const isLevelComplete = (phase: Phase): boolean => {
+  const isLevelComplete = useCallback((phase: Phase): boolean => {
     const p = progress[phase] ?? { total: 0, finished: 0 };
     return progressLoaded && p.finished >= p.total;
-  };
-  const isLevelUnlocked = (id: number): boolean => {
+  }, [progress, progressLoaded]);
+  const isLevelUnlocked = useCallback((id: number): boolean => {
     if (id === 1) return true;
     const previous = dynamicLevels.find(level => level.id === id - 1);
     return previous ? isLevelComplete(previous.phase) : true;
-  };
+  }, [dynamicLevels, isLevelComplete]);
 
   // The "next up" level is the first unlocked-but-not-complete level. It gets
   // a subtle pulse-glow so the user can see at a glance where to continue.
@@ -233,7 +233,7 @@ export const CampaignPage: React.FC = () => {
       if (isLevelUnlocked(lvl.id) && !isLevelComplete(lvl.phase)) return lvl.id;
     }
     return null;
-  }, [dynamicLevels, progress, progressLoaded]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [dynamicLevels, isLevelComplete, isLevelUnlocked]);
 
   const statusFor = (lvl: LevelCardConfig): LevelStatus => {
     if (!isLevelUnlocked(lvl.id))      return 'locked';

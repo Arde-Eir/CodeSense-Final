@@ -1,7 +1,7 @@
 import { describe, it, expect, vi } from 'vitest';
 import { render, screen, fireEvent } from '@testing-library/react';
-import { TokenDrawer } from '../TokenDrawer';
-import type { Token } from '../../../types';
+import { TokenDrawer } from '@/components/Visualizer/TokenDrawer';
+import type { Token } from '@/types';
 
 // ─── Fixtures ─────────────────────────────────────────────────────────────────
 

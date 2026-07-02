@@ -13,7 +13,7 @@
 //    long text wraps inside the card rather than overflowing.
 
 import React from 'react';
-import type { GameItem, DropZone } from '../types/campaign';
+import type { GameItem, DropZone } from '@/types/campaign';
 
 interface Props {
   items:       GameItem[];

@@ -17,15 +17,15 @@
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
-import { useAuth } from './components/AuthScreen';
-import { supabase } from './services/supabase';
+import { useAuth } from '@/components/AuthContext';
+import { supabase } from '@/services/supabase';
 import type {
   Phase, Quest, MissionProgress, QuestRow,
   LevelInfo, LevelStats,
-} from './types/campaign';
-import { defaultLevelInfoForPhase, isCampaignPhase, levelForPhase, phaseForLevel } from './types/campaign';
-import { buildQuests } from './campaign/buildQuests';
-import { FIRST_COMPLETION_XP, RETAKE_COMPLETION_XP, levelXpCapForPhase } from './campaign/retakeXp';
+} from '@/types/campaign';
+import { defaultLevelInfoForPhase, isCampaignPhase, levelForPhase, phaseForLevel } from '@/types/campaign';
+import { buildQuests } from '@/campaign/buildQuests';
+import { FIRST_COMPLETION_XP, RETAKE_COMPLETION_XP, levelXpCapForPhase } from '@/campaign/retakeXp';
 
 // ─── Visual constants ──────────────────────────────────────────────────────
 const ACTIVITY_ICON: Record<string, string> = {
@@ -76,6 +76,11 @@ const activityTypesForQuest = (q: QuestRow): string[] => {
   }
   return types;
 };
+
+const lessonPathForQuest = (quest: QuestRow): string =>
+  quest.everCompleted && quest.uiStatus === 'active'
+    ? `/lesson/${quest.id}?retake=1`
+    : `/lesson/${quest.id}`;
 
 // ─── Small UI bits ─────────────────────────────────────────────────────────
 const StatBar: React.FC<{
@@ -523,7 +528,7 @@ export const CampaignInside: React.FC = () => {
                     </span>
                   </div>
                 : quests.map((q, i) => (
-                    <QuestCard key={q.id} quest={q} index={i} onClick={() => navigate(`/lesson/${q.id}`)} />
+                    <QuestCard key={q.id} quest={q} index={i} onClick={() => navigate(lessonPathForQuest(q))} />
                   ))
               }
             </div>
@@ -536,7 +541,7 @@ export const CampaignInside: React.FC = () => {
 
               {/* Continue CTA */}
               {!loading && nextQuest && (
-                <button onClick={() => navigate(`/lesson/${nextQuest.id}`)} style={{ width: '100%', padding: 12, borderRadius: 10, border: 'none', background: `linear-gradient(135deg,${accent},${accent}cc)`, color: '#080c11', fontSize: 12, fontWeight: 900, cursor: 'pointer', letterSpacing: '.3px', fontFamily: "'Syne',sans-serif", boxShadow: `0 4px 18px ${accent}40`, transition: 'all .2s', animation: 'questIn .5s ease .38s both', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6 }}
+                <button onClick={() => navigate(lessonPathForQuest(nextQuest))} style={{ width: '100%', padding: 12, borderRadius: 10, border: 'none', background: `linear-gradient(135deg,${accent},${accent}cc)`, color: '#080c11', fontSize: 12, fontWeight: 900, cursor: 'pointer', letterSpacing: '.3px', fontFamily: "'Syne',sans-serif", boxShadow: `0 4px 18px ${accent}40`, transition: 'all .2s', animation: 'questIn .5s ease .38s both', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6 }}
                   onMouseEnter={e => { e.currentTarget.style.transform = 'translateY(-2px)'; e.currentTarget.style.boxShadow = `0 8px 26px ${accent}55`; }}
                   onMouseLeave={e => { e.currentTarget.style.transform = 'none'; e.currentTarget.style.boxShadow = `0 4px 18px ${accent}40`; }}>
                   <span style={{ flexShrink: 0 }}>▶ Continue —</span>

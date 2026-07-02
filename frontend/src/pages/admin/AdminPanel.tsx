@@ -2,20 +2,21 @@
 // Loads Tabler CSS from CDN on mount, removes it on unmount to avoid style bleed.
 import React, { useEffect, useState, useCallback, useMemo } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { useAuth } from './components/AuthScreen'
-import { supabase } from './services/supabase'
-import type { ExplorerProfile } from './types'
+import { useAuth } from '@/components/AuthContext'
+import { supabase } from '@/services/supabase'
+import type { ExplorerProfile } from '@/types'
 import {
   computeUserStats, filterUsers, levelToPhase,
   patchMCQuestions, parseCodeFillAnswers,
   normalizeMCQuestionOptions, normalizeMCQuestions,
   loadHintsForEdit, serializeHints, HINT_ACTIVITY_OPTIONS,
+  validateQuestBuilderForm,
   type HintFormRow,
-} from './admin/adminHelpers'
-import { extractTextFromPdf, generateQuestDraftFromText } from './admin/questAutoGenerator'
-import { generateAutoHints } from './campaign/generateAutoHints'
-import type { ActivityTab, Quest } from './types/campaign'
-import { isCampaignPhase, levelForPhase, phaseForLevel } from './types/campaign'
+} from '@/admin/adminHelpers'
+import { extractTextFromPdf, generateQuestDraftFromText } from '@/admin/questAutoGenerator'
+import { generateAutoHints } from '@/campaign/generateAutoHints'
+import type { ActivityTab, Quest } from '@/types/campaign'
+import { isCampaignPhase, levelForPhase, phaseForLevel } from '@/types/campaign'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -673,11 +674,13 @@ export const AdminPanel: React.FC = () => {
 
   const fetchAuditLogs = useCallback(async () => {
     // Try with FK joins first; fall back to plain select if the joins aren't set up.
-    let { data, error } = await supabase
+    const joined = await supabase
       .from('admin_audit_log')
       .select('*, admin:admin_id(playername), target:target_user_id(playername)')
       .order('created_at', { ascending: false })
       .limit(100)
+    let data = joined.data
+    const error = joined.error
     if (error) {
       const plain = await supabase
         .from('admin_audit_log')
@@ -972,6 +975,12 @@ export const AdminPanel: React.FC = () => {
 
   const saveQuest = async (replaceId?: string) => {
     if (!user || !questForm.title.trim()) { showToast('Title is required', 'error'); return }
+    const validation = validateQuestBuilderForm(questForm)
+    if (!validation.ok) {
+      showToast(validation.errors.slice(0, 3).join(' '), 'error')
+      setAutoQuestResult(`Fix before saving: ${validation.errors.join(' ')}`)
+      return
+    }
     const phase = levelToPhase(questForm.level)
     const qTypeMap: Record<string, string> = {
       act_drag: 'drag_drop', act_balloon: 'pop_balloon', act_mc: 'multiple_choice',
@@ -1016,30 +1025,40 @@ export const AdminPanel: React.FC = () => {
     const game_items = (() => {
       if (questForm.act_drag && questForm.drag_problems.length > 0) {
         const all: any[] = []
-        questForm.drag_problems.forEach(p =>
-          p.items.forEach(g => all.push({ id: g.id, label: g.label, color: g.color, problem_id: p.id, question: p.question }))
-        )
+        questForm.drag_problems.forEach(p => {
+          const validIds = new Set(p.items.filter(g => g.label.trim()).map(g => g.id))
+          const hasValidZone = p.drop_zones.some(z => z.label.trim() && validIds.has(z.accepted))
+          if (!hasValidZone) return
+          p.items
+            .filter(g => g.label.trim())
+            .forEach(g => all.push({ id: g.id, label: g.label.trim(), color: g.color, problem_id: p.id, question: p.question.trim() }))
+        })
         return all.length > 0 ? all : null
       }
       return null
     })()
 
     const drop_zones_final = questForm.act_drag && questForm.drag_problems.length > 0
-      ? (() => {
+        ? (() => {
           const all: any[] = []
-          questForm.drag_problems.forEach(p =>
-            p.drop_zones.forEach(z => all.push({ id: z.id, label: z.label, accepted: z.accepted, problem_id: p.id }))
-          )
+          questForm.drag_problems.forEach(p => {
+            const validIds = new Set(p.items.filter(g => g.label.trim()).map(g => g.id))
+            p.drop_zones
+              .filter(z => z.label.trim() && validIds.has(z.accepted))
+              .forEach(z => all.push({ id: z.id, label: z.label.trim(), accepted: z.accepted, problem_id: p.id }))
+          })
           return all.length > 0 ? all : null
         })()
       : null
 
     const ordering_items = questForm.act_ordering && questForm.ordering_problems.length > 0
-      ? (() => {
+        ? (() => {
           const all: any[] = []
           questForm.ordering_problems.forEach(p =>
-            p.items.forEach((o, i) => all.push({
-              id: o.id, label: o.label, description: o.description || undefined,
+            p.items
+            .filter(o => o.label.trim())
+            .forEach((o, i) => all.push({
+              id: o.id, label: o.label.trim(), description: o.description.trim() || undefined,
               correct_order: i + 1, problem_id: p.id, question: p.question,
             }))
           )
@@ -1048,7 +1067,7 @@ export const AdminPanel: React.FC = () => {
       : null
 
     const code_fill_items = questForm.act_codefill && questForm.code_fill_items.length > 0
-      ? questForm.code_fill_items.map(c => ({
+      ? questForm.code_fill_items.filter(c => c.code_lines.trim() && parseCodeFillAnswers(c.answers).length > 0).map(c => ({
           id: c.id,
           code_lines: c.code_lines.split('\n'),
           language: c.language || 'c',
@@ -1097,7 +1116,6 @@ export const AdminPanel: React.FC = () => {
 
   // q is typed as any because the function body uses internal casts against
   // the DB shape, which diverges from the ExistingQuest interface in places.
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const loadQuestForEdit = (q: any) => {
     const isDrag = q.question_type === 'drag_drop' || !!(q.game_items?.length && q.drop_zones?.length)
 

@@ -4,7 +4,7 @@
 // come from `answers[]` in the same order.
 
 import React, { useEffect } from 'react';
-import type { CodeFillItem } from '../types/campaign';
+import type { CodeFillItem } from '@/types/campaign';
 
 interface Props {
   items:       CodeFillItem[];

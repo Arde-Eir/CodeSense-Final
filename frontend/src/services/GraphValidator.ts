@@ -50,6 +50,20 @@ const EXECUTABLE_PLACEHOLDERS = new Set([
   'data store',
 ]);
 
+function isStartTerminator(node: Node): boolean {
+  return node.type === 'terminator' && str(node.data?.label).toLowerCase() === 'start';
+}
+
+function isReturnTerminator(node: Node): boolean {
+  const label = str(node.data?.label).toLowerCase();
+  const code = str(node.data?.code).toLowerCase();
+  return node.type === 'terminator' && (label === 'return' || code === 'return' || code.startsWith('return '));
+}
+
+function isEndTerminator(node: Node): boolean {
+  return node.type === 'terminator' && !isStartTerminator(node) && !isReturnTerminator(node);
+}
+
 function hasOddCount(value: string, needle: string): boolean {
   return value.split(needle).length % 2 === 0;
 }
@@ -241,7 +255,7 @@ function shapeMismatchIssue(node: Node): string | null {
     return 'This raw C++ writes output. Use Output for cout/display steps.';
   }
   if ((type === 'process' || type === 'io' || type === 'manual_input') && rawFile) {
-    return 'This raw C++ uses file streams. Use the Document shape for file work.';
+    return 'File/document steps are outside this simplified flowchart-to-code palette. Keep build-mode graphs to variables, input, output, decisions, arrays, and helper calls.';
   }
   if (type !== 'database' && rawData && !rawInput && !rawOutput) {
     return 'This raw C++ represents array/storage or dynamic memory work. Use the Stored Data shape.';
@@ -272,10 +286,10 @@ function shapeMismatchIssue(node: Node): string | null {
     return 'This is an output step. Use Output for cout/display steps.';
   }
   if ((type === 'process' || type === 'io' || type === 'manual_input') && isFile) {
-    return 'This is a file/document step. Use the Document shape for report or file work.';
+    return 'File/document steps are outside this simplified flowchart-to-code palette. Keep build-mode graphs to variables, input, output, decisions, arrays, and helper calls.';
   }
   if (type !== 'delay' && isDelay) {
-    return 'This is a wait/delay step. Use the Delay shape.';
+    return 'Wait/delay steps are outside this simplified flowchart-to-code palette. Model the next meaningful program step instead.';
   }
   if (type !== 'predefined' && type !== 'off_page_connector' && isCall) {
     return 'This is a helper/function call. Use the Predefined Process shape. On-page and off-page connectors are routing references, not function-call shapes.';
@@ -287,7 +301,7 @@ function shapeMismatchIssue(node: Node): string | null {
     return 'This is a stored-data/array step. Use the Stored Data shape.';
   }
   if (type === 'predefined' && (isInput || isOutput || isFile || isDelay || isData)) {
-    return 'This shape is for a helper/function call. Use the matching input, output, document, delay, or stored-data shape instead.';
+    return 'This shape is for a helper/function call. Use the matching input, output, or stored-data shape instead.';
   }
   if (type === 'delay' && (isInput || isOutput || isFile || isCall || isData)) {
     return 'This shape is for a wait/delay step. Use the matching shape for this instruction.';
@@ -425,9 +439,7 @@ export function validateGraph(nodes: Node[], edges: Edge[]): ValidationResult {
   }
 
   // ── 2. Start terminator ────────────────────────────────────────────────────
-  const startNodes = nodes.filter(
-    n => n.type === 'terminator' && str(n.data?.label).toLowerCase() === 'start'
-  );
+  const startNodes = nodes.filter(isStartTerminator);
   if (startNodes.length === 0) {
     push('error', 'NO_START_NODE',
       'No "Start" terminator found. Add a Start node — it is the required entry point for code generation.');
@@ -440,9 +452,14 @@ export function validateGraph(nodes: Node[], edges: Edge[]): ValidationResult {
   // ── 3. End terminator ──────────────────────────────────────────────────────
   // A proper End terminator: type=terminator AND label is NOT "start".
   // We do NOT require the label to be exactly "end" — any non-start terminator counts.
-  const endNodes = nodes.filter(
-    n => n.type === 'terminator' && str(n.data?.label).toLowerCase() !== 'start'
-  );
+  const returnTerminators = nodes.filter(isReturnTerminator);
+  if (returnTerminators.length > 0) {
+    push('error', 'RETURN_USES_TERMINATOR_SHAPE',
+      'Return is an executable C++ statement, not a Start/End terminator. Use a Process node with code like "return 0;" instead.',
+      { nodeIds: returnTerminators.map(n => n.id) });
+  }
+
+  const endNodes = nodes.filter(isEndTerminator);
   if (endNodes.length === 0) {
     push('error', 'NO_END_NODE',
       'No "End" terminator found. Add an End node so the program has a defined exit point.');

@@ -207,34 +207,34 @@ export class CFGGenerator {
   private calculateCoordinates(layers: ControlFlowNode[][]): void {
     // Per-type heights mirror the ReactFlow NODE_SIZES defined in FlowGraph.tsx.
     const NODE_H: Record<string, number> = {
-      start: 50, end: 50,       // terminator pill
-      decision: 140,             // diamond
+      start: 60, end: 60,        // terminator pill
+      decision: 170,             // diamond
       junction: 36,              // small routing merge point
-      connector: 60,             // circle
-      off_page_connector: 70,
-      document: 80,
-      delay: 70,
-      database: 90,
-      output: 70, input: 75,
-      predefined: 90,
-      process: 90,
+      connector: 80,             // circle
+      off_page_connector: 90,
+      document: 120,
+      delay: 90,
+      database: 120,
+      output: 95, input: 95,
+      predefined: 105,
+      process: 105,
     };
     const NODE_W: Record<string, number> = {
-      start: 160, end: 160,
-      decision: 140,
+      start: 200, end: 200,
+      decision: 170,
       junction: 36,
-      connector: 60,
-      off_page_connector: 70,
-      document: 185,
-      delay: 150,
-      database: 180,
-      output: 185, input: 185,
-      predefined: 180,
-      process: 180,
+      connector: 80,
+      off_page_connector: 100,
+      document: 260,
+      delay: 240,
+      database: 240,
+      output: 260, input: 240,
+      predefined: 285,
+      process: 260,
     };
 
-    const V_GAP = 80; // minimum vertical breathing room between layers
-    const H_GAP = 60; // minimum horizontal breathing room between siblings
+    const V_GAP = 96; // minimum vertical breathing room between layers
+    const H_GAP = 76; // minimum horizontal breathing room between siblings
 
     // Compute per-layer widths and the tallest node in each layer.
     const layerWidths = layers.map(layer =>
@@ -354,7 +354,7 @@ export class CFGGenerator {
       (node as any).line,
       node,
     );
-    const fnEnd = this.createNode('end', `End: ${node.name}`);
+    const fnEnd = this.createNode('predefined', `End: ${node.name}`);
 
     const prevEntry = this.currentFunctionEntry;
     const prevName  = this.currentFunctionName;
@@ -812,7 +812,9 @@ export class CFGGenerator {
     current: ControlFlowNode,
     exit: ControlFlowNode,
   ): ControlFlowNode {
-    const ret = this.createNode('end', 'Return', '', (node as any).line, node);
+    const returnValue = this.nodeToString((node as any).value);
+    const returnCode = returnValue ? `return ${returnValue}` : 'return';
+    const ret = this.createNode('process', 'Return', returnCode, (node as any).line, node);
     this.connect(current, ret);
     // PDF #3: route to the FUNCTION exit, not whatever local merge node the
     // surrounding control-flow construct passed as `exit`. A return jumps to

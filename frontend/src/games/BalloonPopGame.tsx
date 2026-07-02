@@ -15,7 +15,7 @@
 //    overflows on very narrow viewports.
 
 import React, { useEffect, useRef, useState, useCallback } from 'react';
-import type { MCQ } from '../types/campaign';
+import type { MCQ } from '@/types/campaign';
 import { normalizeMCQList } from './normalizeMCQ';
 
 const BALLOON_SCALE = 0.085;

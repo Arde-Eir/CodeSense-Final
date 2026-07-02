@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { useAuth } from './components/AuthScreen';
+import { useAuth } from '@/components/AuthContext';
 
 // ── Account-suspended modal — shown when a banned user tries to log in ───────
 const BannedModal: React.FC<{ reason: string; onClose: () => void }> = ({ reason, onClose }) => (

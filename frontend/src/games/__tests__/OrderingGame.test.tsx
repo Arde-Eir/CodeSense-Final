@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, fireEvent, act } from '@testing-library/react';
-import { OrderingGame } from '../OrderingGame';
-import type { OrderItem } from '../../types/campaign';
+import { OrderingGame } from '@/games/OrderingGame';
+import type { OrderItem } from '@/types/campaign';
 
 // ─── Fixtures ─────────────────────────────────────────────────────────────────
 

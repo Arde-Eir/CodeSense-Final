@@ -1,24 +1,26 @@
 import React, { useEffect, useState } from 'react';
 import { BrowserRouter, Routes, Route, Navigate, useNavigate } from 'react-router-dom';
-import { AuthProvider, useAuth } from './components/AuthScreen';
-import { OnboardingWalkthrough, ONBOARD_ACTIVE_KEY, ONBOARD_KEY, ONBOARD_STEP_KEY } from './components/OnboardingWalkthrough';
-import { HomeDashboard } from './HomeDashboard';
-import { SignupPage } from './Signuppage';
-import { LoginPage } from './Loginpage';
-import { SandboxPage } from './SandboxPage';
-import { LandingPage } from './Landingpage';
-import { ProgressPage } from './Progresspage';
-import { ProfileSettings } from './ProfileSettings';
-import { LeaderboardPage } from './LeaderboardPage';
-import { WelcomePage } from './WelcomePage';
-import { CampaignPage } from './CampaignPage';
-import CampaignInside from './CampaignInside';
+import { AuthProvider } from '@/components/AuthScreen';
+import { useAuth } from '@/components/AuthContext';
+import { OnboardingWalkthrough, ONBOARD_ACTIVE_KEY, ONBOARD_KEY, ONBOARD_STEP_KEY } from '@/components/OnboardingWalkthrough';
+import { AccountRoute, AdminRoute, ProtectedRoute } from '@/routes/guards';
+import { HomeDashboard } from '@/pages/app/HomeDashboard';
+import { SignupPage } from '@/pages/public/Signuppage';
+import { LoginPage } from '@/pages/public/Loginpage';
+import { SandboxPage } from '@/pages/app/SandboxPage';
+import { LandingPage } from '@/pages/public/Landingpage';
+import { ProgressPage } from '@/pages/app/Progresspage';
+import { ProfileSettings } from '@/pages/app/ProfileSettings';
+import { LeaderboardPage } from '@/pages/app/LeaderboardPage';
+import { WelcomePage } from '@/pages/public/WelcomePage';
+import { CampaignPage } from '@/pages/app/CampaignPage';
+import CampaignInside from '@/pages/app/CampaignInside';
 // LevelOneDashboard removed — CampaignInside now handles all three phases.
-import LessonActivity from './lessonactivity';
-import { AdminPanel } from './AdminPanel';
-import UserManualPage from './UserManualPage';
-import TutorialsPage from './TutorialsPage';
-import PatchNotesPage from './PatchNotesPage';
+import LessonActivity from '@/pages/app/lessonactivity';
+import { AdminPanel } from '@/pages/admin/AdminPanel';
+import UserManualPage from '@/pages/public/UserManualPage';
+import TutorialsPage from '@/pages/public/TutorialsPage';
+import PatchNotesPage from '@/pages/public/PatchNotesPage';
 
 // ── Impersonation banner — shown globally when an admin is previewing a user ──
 const BANNER_HEIGHT = 40; // px — keep in sync with banner padding + line-height
@@ -64,45 +66,26 @@ const ImpersonationBanner: React.FC = () => {
   );
 };
 
-// ── Route guards ──────────────────────────────────────────────────────────────
-
-// Allows any session — both real accounts AND guest sessions.
-const ProtectedRoute: React.FC<{ children: React.ReactElement }> = ({ children }) => {
-  const { isAuthenticated, isGuest } = useAuth();
-  if (!isAuthenticated && !isGuest) return <Navigate to="/login" replace />;
-  return children;
-};
-
-// Requires a real account — guests are redirected to sign up.
-const AccountRoute: React.FC<{ children: React.ReactElement }> = ({ children }) => {
-  const { isAuthenticated, isGuest } = useAuth();
-  if (!isAuthenticated || isGuest) return <Navigate to="/signup" replace />;
-  return children;
-};
-
-const AdminRoute: React.FC<{ children: React.ReactElement }> = ({ children }) => {
-  const { isAuthenticated, isAdmin, impersonatingUser } = useAuth();
-  if (!isAuthenticated) return <Navigate to="/login" replace />;
-  // During impersonation isAdmin=false, but impersonatingUser holds the real
-  // admin — allow access so stopImpersonation can navigate back to /admin.
-  if (!isAdmin && !impersonatingUser) return <Navigate to="/home" replace />;
-  return children;
-};
-
 // ── Tour controller — lives outside <Routes> so the overlay persists across ──
 // all page navigations. Auto-shows for new accounts; responds to the global
 // 'cs-replay-tour' event dispatched by the profile-menu "Replay Welcome Tour"
-// button. Guests never see the tour.
+// button. Guests can start the tour manually from the same menu.
 const TourController: React.FC = () => {
   const { user, isGuest, isAdmin } = useAuth();
-  const [showTour, setShowTour] = useState(false);
+  const [tourSession, setTourSession] = useState(0);
+  const [showTour, setShowTour] = useState(() => {
+    try {
+      return localStorage.getItem(ONBOARD_ACTIVE_KEY) === 'true';
+    } catch {
+      return false;
+    }
+  });
 
   // Auto-trigger for new users (localStorage key not yet set).
   useEffect(() => {
     if (!user || isGuest) return;
     try {
       if (localStorage.getItem(ONBOARD_ACTIVE_KEY) === 'true') {
-        setShowTour(true);
         return;
       }
       if (localStorage.getItem(ONBOARD_KEY) !== 'done') {
@@ -112,15 +95,19 @@ const TourController: React.FC = () => {
         return () => clearTimeout(t);
       }
     } catch { /* localStorage unavailable */ }
-  }, [user?.id, isGuest]);
+  }, [user, user?.id, isGuest]);
 
   useEffect(() => {
     if (!isGuest) return;
+    let timer: ReturnType<typeof setTimeout> | null = null;
     try {
       if (localStorage.getItem(ONBOARD_ACTIVE_KEY) === 'true') {
-        setShowTour(true);
+        timer = setTimeout(() => setShowTour(true), 0);
       }
     } catch { /* localStorage unavailable */ }
+    return () => {
+      if (timer) clearTimeout(timer);
+    };
   }, [isGuest]);
 
   // Allow any page to trigger a replay via a custom event.
@@ -130,6 +117,7 @@ const TourController: React.FC = () => {
         localStorage.setItem(ONBOARD_ACTIVE_KEY, 'true');
         localStorage.setItem(ONBOARD_STEP_KEY, '0');
       } catch { /* localStorage unavailable */ }
+      setTourSession(session => session + 1);
       if (user || isGuest) setShowTour(true);
     };
     window.addEventListener('cs-replay-tour', handler);
@@ -139,6 +127,7 @@ const TourController: React.FC = () => {
   if (!showTour || (!user && !isGuest)) return null;
   return (
     <OnboardingWalkthrough
+      key={tourSession}
       isAdmin={isAdmin}
       isGuest={isGuest}
       onFinish={() => setShowTour(false)}

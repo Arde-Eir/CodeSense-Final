@@ -1,6 +1,6 @@
 // src/services/DatabaseService.ts
 import { supabase } from './supabase'
-import type { ExplorerProfile } from '../types'
+import type { ExplorerProfile } from '@/types'
 
 export const DatabaseService = {
 

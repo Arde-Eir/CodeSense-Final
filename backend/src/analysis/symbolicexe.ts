@@ -1170,6 +1170,34 @@ export class SymbolicExecutor {
     return { type: 'unknown' as const };
   }
 
+  private extractCinTargetNames(node: any): Set<string> {
+    const names = new Set<string>();
+    const walk = (target: any): void => {
+      if (target == null) return;
+      if (Array.isArray(target)) {
+        target.forEach(walk);
+        return;
+      }
+      if (typeof target === 'string') {
+        names.add(target);
+        return;
+      }
+      if (target.type === 'BinaryOp' && (target.operator === '>>' || target.operator === '<<')) {
+        walk(target.left);
+        walk(target.right);
+        return;
+      }
+      if (target.type === 'ArrayAccess' && target.name) {
+        names.add(target.name);
+        return;
+      }
+      if (target.name) names.add(target.name);
+    };
+    if (node.targets) walk(node.targets);
+    if (node.target) walk(node.target);
+    return names;
+  }
+
   private visitCoutStatement(node: any): SymbolicValue {
     // node.values is now the root of the BinaryOp tree (e.g., cout << "hello")
     if (node.values) {
@@ -1390,6 +1418,10 @@ export class SymbolicExecutor {
             if (any.operator && any.operator !== '=') s.add(name);
             break;
           }
+          case 'CinStatement': {
+            this.extractCinTargetNames(any).forEach(name => s.add(name));
+            break;
+          }
           case 'PreIncrement': case 'PostIncrement':
           case 'PreDecrement': case 'PostDecrement': {
             const name = typeof any.operand === 'string' ? any.operand : any.operand?.name;
@@ -1445,6 +1477,10 @@ export class SymbolicExecutor {
         switch (n.type) {
           case 'Assignment': {
             if (typeof any.target === 'string') s.add(any.target);
+            break;
+          }
+          case 'CinStatement': {
+            this.extractCinTargetNames(any).forEach(name => s.add(name));
             break;
           }
           case 'PreIncrement': case 'PostIncrement':

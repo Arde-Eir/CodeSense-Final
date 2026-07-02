@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { useAuth } from './components/AuthScreen'
+import { useAuth } from '@/components/AuthContext'
 
 // ─── Tutorial data ───────────────────────────────────────────────────────────
 
@@ -128,27 +128,233 @@ const TUTORIALS: Tutorial[] = [
     id: 'build-mode',
     icon: '🧩',
     title: 'Draw a Flowchart, Generate C++',
-    tagline: 'Reverse the pipeline: the visualiser becomes your source of truth.',
+    tagline: 'Use every supported flowchart shape and convert clean designs into valid C++.',
     category: 'Build Mode',
     difficulty: 'Intermediate',
-    estMinutes: 10,
+    estMinutes: 18,
     steps: [
       {
         title: 'Switch to Build mode',
         instruction: 'In the Sandbox, toggle to Build mode. Click ☰ TOOLS (top-right of the canvas) to open the shape palette and code generator. The panel can be hidden again with the same button to give you a full-canvas view.',
       },
       {
-        title: 'Lay out a simple loop',
-        instruction: 'Drag: Start → Process (int i = 0;) → Decision (i < 5) → Process (i++) → back to the Decision. Add a false-edge → End.',
-        hint: 'Double-click the decision\'s outgoing edges and label them `true` / `false`. The generator relies on those labels.',
+        title: 'Shape-to-code map',
+        instruction: 'Use the shape for the job it actually performs. This keeps the generated C++ readable and prevents the validator from blocking generation.',
+        code: `Terminator Start / End
+  Use for: entry and final exit only
+  C++: no emitted statement
+
+Process
+  Use for: declarations, assignments, arithmetic
+  Example text: create integer total equal to zero
+  C++: int total = 0;
+
+Manual Input
+  Use for: cin reads
+  Example text: ask the user for score
+  C++: cin >> score;
+
+Output
+  Use for: cout writes
+  Example text: display passed
+  C++: cout << "passed" << endl;
+
+Decision
+  Use for: if/else and loop checks
+  Example text: score >= 75
+  C++: if (score >= 75) { ... } or while (score >= 75) { ... }
+
+Junction
+  Use for: merge after true/false branches
+  C++: no emitted statement
+
+Connector
+  Use for: on-page break or continue routing
+  Example text: continue
+  C++: continue;
+
+Off-page Connector
+  Use for: page/reference continuation, not a function call
+  Example text: Score page B
+  C++: // Off-page connector: Score page B
+
+Predefined Process
+  Use for: helper/subroutine calls
+  Example text: call show summary with total
+  C++: showSummary(total);
+
+Document
+  Use for: file/report operations
+  Example text: ofstream reportFile("report.txt");
+  C++: ofstream reportFile("report.txt");
+
+Delay
+  Use for: wait/pause notes
+  Example text: wait 1 second
+  C++: // wait 1 second(s)
+
+Stored Data
+  Use for: arrays or fixed data storage
+  Example text: int scores[5];
+  C++: int scores[5];`,
+        hint: 'Do not put `cin >> age;` in a Process shape or `showSummary(total);` in an Off-page Connector. The validator expects the shape to match the meaning.',
       },
       {
-        title: 'Hit GENERATE C++',
-        instruction: 'The CodeGenerator service walks your graph and emits a `for`/`while` equivalent. If the ValidationPanel blocks you, it tells you exactly which rule failed.',
+        title: 'Scenario 1: straight-line input, process, output',
+        instruction: 'Build this when the algorithm has no branches. It uses Start, Manual Input, Process, Output, and End.',
+        code: `Flowchart:
+Start
+  -> Manual Input: ask the user for age
+  -> Process: int nextAge = age + 1;
+  -> Output: display nextAge
+  -> End
+
+Generated C++:
+#include <iostream>
+using namespace std;
+
+int main() {
+    int age;
+
+    cin >> age;
+    int nextAge = age + 1;
+    cout << nextAge << endl;
+    return 0;
+}`,
+        why: 'This is the simplest valid flow: every linear node has exactly one next step, and input is separated from computation.',
       },
       {
-        title: 'Run ANALYZE on the generated code',
-        instruction: 'You\'ve just proved the round-trip: flowchart → C++ → AST → CFG → back to a renderable graph. Congratulations.',
+        title: 'Scenario 2: decision with a junction',
+        instruction: 'Build this for an if/else. Label the decision edges `true` and `false`, then connect both branches into one Junction before End.',
+        code: `Flowchart:
+Start
+  -> Manual Input: ask the user for score
+  -> Decision: score >= 75
+    true  -> Output: display passed
+    false -> Output: display try again
+  -> Junction: merge
+  -> End
+
+Generated C++:
+#include <iostream>
+using namespace std;
+
+int main() {
+    int score;
+
+    cin >> score;
+    if (score >= 75) {
+        cout << "passed" << endl;
+    } else {
+        cout << "try again" << endl;
+    }
+    return 0;
+}`,
+        hint: 'A Junction is structural. It tells the graph where branches rejoin, but it should not contain C++ logic.',
+      },
+      {
+        title: 'Scenario 3: loop with connector routing',
+        instruction: 'Build this for repeated work with an early skip. The Connector represents `continue`, so the even-number branch jumps back to the loop condition instead of running the output step.',
+        code: `Flowchart:
+Start
+  -> Process: create integer i equal to zero
+  -> Decision: i < 5
+    true  -> Process: increment i
+          -> Decision: i % 2 == 0
+              true  -> Connector: continue -> back to Decision i < 5
+              false -> Output: display i -> back to Decision i < 5
+    false -> End
+
+Generated C++:
+#include <iostream>
+using namespace std;
+
+int main() {
+    int i = 0;
+    while (i < 5) {
+        i++;
+        if (i % 2 == 0) {
+            continue;
+        }
+        cout << i << endl;
+    }
+    return 0;
+}`,
+        why: 'The back edge is what makes the decision become a `while` loop. Without the return edge, it is just an `if`.',
+      },
+      {
+        title: 'Scenario 4: stored data, helper call, document, delay, off-page connector',
+        instruction: 'Use this bigger example when you need every remaining shape. Off-page connectors are comments, Predefined Process is the helper call, Document handles file/report statements, Delay becomes a clear wait comment, and Stored Data creates the array.',
+        code: `Flowchart:
+Start
+  -> Stored Data: int scores[3];
+  -> Process: create integer total equal to zero
+  -> Manual Input: ask the user for first score
+  -> Process: scores[0] = firstScore;
+  -> Manual Input: ask the user for second score
+  -> Process: scores[1] = secondScore;
+  -> Manual Input: ask the user for third score
+  -> Process: scores[2] = thirdScore;
+  -> Process: total = scores[0] + scores[1] + scores[2];
+  -> Predefined Process: call show summary with total
+  -> Document: ofstream reportFile("report.txt");
+  -> Document: reportFile << "Total: " << total << endl;
+  -> Delay: wait 1 second
+  -> Off-page Connector: Report page 2
+  -> Output: display total
+  -> End
+
+Generated C++:
+#include <iostream>
+#include <fstream>
+using namespace std;
+
+void showSummary(int total) {
+    cout << total << endl;
+}
+
+int main() {
+    int firstScore;
+    int secondScore;
+    int thirdScore;
+
+    int scores[3];
+    int total = 0;
+    cin >> firstScore;
+    scores[0] = firstScore;
+    cin >> secondScore;
+    scores[1] = secondScore;
+    cin >> thirdScore;
+    scores[2] = thirdScore;
+    total = scores[0] + scores[1] + scores[2];
+    showSummary(total);
+    ofstream reportFile("report.txt");
+    reportFile << "Total: " << total << endl;
+    // wait 1 second(s)
+    // Off-page connector: Report page 2
+    cout << total << endl;
+    return 0;
+}`,
+        hint: 'If you want a function call, use Predefined Process. If you only want to mark a continuation to another page, use Off-page Connector.',
+      },
+      {
+        title: 'Generation checklist',
+        instruction: 'Before pressing GENERATE C++, check that every path reaches End, every decision edge is labelled, every branch rejoins at a Junction when needed, and every node uses the correct shape. Then run ANALYZE on the generated code to confirm the round trip.',
+        code: `Good flowchart habits:
+1. One Start and at least one End.
+2. Process nodes do assignments/math only.
+3. Manual Input nodes read values.
+4. Output nodes display values/messages.
+5. Decision nodes contain conditions such as total >= 50.
+6. Decision edges use true/false or yes/no labels.
+7. Loop bodies return to the Decision with a back edge.
+8. Branches rejoin through a Junction.
+9. Connectors route break/continue only.
+10. Off-page connectors are references, not helper calls.
+11. Predefined Process handles helper/function calls.
+12. Stored Data handles arrays/data containers.
+13. Document handles file/report statements.
+14. Delay is a wait/pause note, not a C++ sleep implementation.`,
       },
     ],
   },

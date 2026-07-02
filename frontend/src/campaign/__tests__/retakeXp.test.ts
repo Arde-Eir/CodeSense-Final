@@ -10,7 +10,7 @@ import {
   HINT_XP_COST,
   HINT_PENALTY_CAP_RATIO,
   LEVEL_XP_CAP_BY_PHASE,
-} from '../retakeXp';
+} from '@/campaign/retakeXp';
 
 describe('computeActivityXP', () => {
   it('awards exactly 200 XP for first full quest completion', () => {

@@ -1,10 +1,10 @@
 // src/HomeDashboard.tsx
-import React, { useEffect, useState, useRef, useCallback } from 'react';
+import React, { useEffect, useState, useRef, useCallback, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { useAuth } from './components/AuthScreen';
-import { supabase } from './services/supabase';
-import { getLevelProgress, getXPToNextLevel, getRank } from './types'
-import { PlayerDetailModal } from './components/PlayerDetailModal'
+import { useAuth } from '@/components/AuthContext';
+import { supabase } from '@/services/supabase';
+import { getLevelProgress, getXPToNextLevel, getRank } from '@/types'
+import { PlayerDetailModal } from '@/components/PlayerDetailModal'
 
 const isCompletedMissionRow = (row: { first_completed_at?: string | null; status?: string | null }) =>
   Boolean(row.first_completed_at || row.status === 'completed')
@@ -300,16 +300,21 @@ const PRIORITY_CONFIG: Record<Announcement['priority'], { color: string; bg: str
 const NOTIF_SEEN_KEY      = 'cs-seen-notifs-v2'
 const NOTIF_DISMISSED_KEY = 'cs-dismissed-notifs-v1'
 const MILESTONE_TS_KEY    = 'cs-milestone-ts-v1'
+const NOTIF_LIMIT = 25
+
+const scopedStorageKey = (baseKey: string, ownerKey: string): string =>
+  `${baseKey}:${ownerKey}`
 
 /** Return the ISO timestamp for when this milestone was first observed.
  *  Stable across refreshes — written once to localStorage. */
-function getMilestoneTimestamp(id: string): string {
+function getMilestoneTimestamp(id: string, ownerKey: string): string {
   try {
-    const stored: Record<string, string> = JSON.parse(localStorage.getItem(MILESTONE_TS_KEY) ?? '{}')
+    const key = scopedStorageKey(MILESTONE_TS_KEY, ownerKey)
+    const stored: Record<string, string> = JSON.parse(localStorage.getItem(key) ?? localStorage.getItem(MILESTONE_TS_KEY) ?? '{}')
     if (stored[id]) return stored[id]
     const now = new Date().toISOString()
     stored[id] = now
-    localStorage.setItem(MILESTONE_TS_KEY, JSON.stringify(stored))
+    localStorage.setItem(key, JSON.stringify(stored))
     return now
   } catch {
     return new Date().toISOString()
@@ -329,17 +334,46 @@ interface NotifItem {
   onClick?: () => void
 }
 
-const getSeenIds = (): string[] => {
-  try { return JSON.parse(localStorage.getItem(NOTIF_SEEN_KEY) ?? '[]') } catch { return [] }
+const parseStoredIds = (storageKey: string): string[] => {
+  try {
+    const parsed = JSON.parse(localStorage.getItem(storageKey) ?? '[]')
+    return Array.isArray(parsed) ? parsed.filter((id): id is string => typeof id === 'string') : []
+  } catch {
+    return []
+  }
 }
-const setSeenIds = (ids: string[]) => {
-  try { localStorage.setItem(NOTIF_SEEN_KEY, JSON.stringify(ids.slice(0, 500))) } catch { /* quota */ }
+
+const getScopedIds = (baseKey: string, ownerKey: string): string[] => {
+  const key = scopedStorageKey(baseKey, ownerKey)
+  if (localStorage.getItem(key) !== null) return parseStoredIds(key)
+  const legacy = parseStoredIds(baseKey)
+  if (legacy.length > 0) {
+    try {
+      localStorage.setItem(key, JSON.stringify(legacy.slice(0, 500)))
+      localStorage.removeItem(baseKey)
+    } catch { /* quota */ }
+  }
+  return legacy
 }
-const getDismissedIds = (): string[] => {
-  try { return JSON.parse(localStorage.getItem(NOTIF_DISMISSED_KEY) ?? '[]') } catch { return [] }
+
+const setScopedIds = (baseKey: string, ownerKey: string, ids: string[]) => {
+  try {
+    localStorage.setItem(scopedStorageKey(baseKey, ownerKey), JSON.stringify(ids.slice(0, 500)))
+    localStorage.removeItem(baseKey)
+  } catch { /* quota */ }
 }
-const setDismissedIds = (ids: string[]) => {
-  try { localStorage.setItem(NOTIF_DISMISSED_KEY, JSON.stringify(ids.slice(0, 500))) } catch { /* quota */ }
+
+const getSeenIds = (ownerKey: string): string[] => {
+  return getScopedIds(NOTIF_SEEN_KEY, ownerKey)
+}
+const setSeenIds = (ownerKey: string, ids: string[]) => {
+  setScopedIds(NOTIF_SEEN_KEY, ownerKey, ids)
+}
+const getDismissedIds = (ownerKey: string): string[] => {
+  return getScopedIds(NOTIF_DISMISSED_KEY, ownerKey)
+}
+const setDismissedIds = (ownerKey: string, ids: string[]) => {
+  setScopedIds(NOTIF_DISMISSED_KEY, ownerKey, ids)
 }
 
 interface Derived {
@@ -369,163 +403,218 @@ const QUEST_MILESTONES: Derived[] = [
 
 const NotificationBell: React.FC<{ userId: string | undefined; onViewAllAnnouncements: () => void }> = ({ userId, onViewAllAnnouncements }) => {
   const navigate = useNavigate()
+  const notificationOwnerKey = userId ?? 'guest'
   const [items, setItems] = useState<NotifItem[]>([])
   const [open, setOpen] = useState(false)
-  const [seen, setSeen] = useState<string[]>(() => getSeenIds())
-  const [dismissed, setDismissed] = useState<string[]>(() => getDismissedIds())
+  const [seen, setSeen] = useState<string[]>(() => getSeenIds(notificationOwnerKey))
+  const [dismissed, setDismissed] = useState<string[]>(() => getDismissedIds(notificationOwnerKey))
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
+  const [lastUpdatedAt, setLastUpdatedAt] = useState<string | null>(null)
   const bellRef = useRef<HTMLDivElement>(null)
   const onViewAllRef = useRef(onViewAllAnnouncements)
+  const refreshRunRef = useRef(0)
   useEffect(() => { onViewAllRef.current = onViewAllAnnouncements }, [onViewAllAnnouncements])
   const [activeFilter, setActiveFilter] = useState<'all' | NotifKind>('all')
 
+  useEffect(() => {
+    setSeen(getSeenIds(notificationOwnerKey))
+    setDismissed(getDismissedIds(notificationOwnerKey))
+    setItems([])
+    setActiveFilter('all')
+  }, [notificationOwnerKey])
+
   const refresh = useCallback(async () => {
+    const runId = refreshRunRef.current + 1
+    refreshRunRef.current = runId
     const out: NotifItem[] = []
+    setLoading(true)
+    setError(null)
 
-    const { data: anns } = await supabase
-      .from('announcements')
-      .select('id, title, body, createdat, priority, author, ispinned')
-      .order('ispinned', { ascending: false })
-      .order('createdat', { ascending: false })
-      .limit(10)
-    if (anns) {
-      for (const a of anns as Announcement[]) {
-        const cfg = PRIORITY_CONFIG[a.priority] ?? PRIORITY_CONFIG.info
-        out.push({
-          id: `announcement:${a.id}`, kind: 'announcement',
-          icon: cfg.icon, color: cfg.color,
-          title: a.ispinned ? `📌 ${a.title}` : a.title,
-          body: a.body, timestamp: a.createdat,
-          onClick: () => onViewAllRef.current(),
-        })
-      }
-    }
-
-    if (userId) {
-      const { data: quests } = await supabase
-        .from('mission_progress')
-        .select('questid, status, completedat, first_completed_at, updatedat, hintsused, quests(title)')
-        .eq('userid', userId)
-        .order('updatedat', { ascending: false })
-        .limit(30)
-      const completedQuests = ((quests ?? []) as any[])
-        .filter(isCompletedMissionRow)
-        .filter(q => Boolean(missionDoneAt(q)))
-        .sort((a, b) => new Date(missionDoneAt(b)!).getTime() - new Date(missionDoneAt(a)!).getTime())
-        .slice(0, 10)
-      for (const q of completedQuests) {
-        const completedAt = missionDoneAt(q)!
-        const title = Array.isArray(q.quests) ? q.quests[0]?.title : q.quests?.title
-        out.push({
-          id: `quest:${q.questid}:${completedAt}`, kind: 'quest',
-          icon: '⚔️', color: '#ffa726',
-          title: `Quest completed: ${title ?? 'Unknown'}`,
-          body: q.hintsused > 0 ? `Used ${q.hintsused} hint${q.hintsused > 1 ? 's' : ''}.` : 'No hints used — clean clear 🎯.',
-          timestamp: completedAt,
-          onClick: () => navigate('/campaign'),
-        })
-      }
-
-      const { data: adminEvents } = await supabase
-        .from('admin_audit_log')
-        .select('id, action, details, created_at')
-        .eq('target_user_id', userId)
-        .order('created_at', { ascending: false })
+    try {
+      const { data: anns, error: annError } = await supabase
+        .from('announcements')
+        .select('id, title, body, createdat, priority, author, ispinned')
+        .order('ispinned', { ascending: false })
+        .order('createdat', { ascending: false })
         .limit(10)
-      for (const e of (adminEvents ?? []) as any[]) {
-        const meta = ADMIN_ACTION_META[e.action] ?? { icon: '🛡', color: '#58a6ff', title: e.action }
-        out.push({
-          id: `admin:${e.id}`, kind: 'admin',
-          icon: meta.icon, color: meta.color,
-          title: meta.title,
-          body: typeof e.details?.reason === 'string' ? `Reason: ${e.details.reason}` : '—',
-          timestamp: e.created_at,
-          onClick: () => navigate('/profile'),
-        })
-      }
-
-      const { data: profile } = await supabase
-        .from('users').select('totalxp, sandbox_runs').eq('id', userId).maybeSingle()
-      const { data: progressRows } = await supabase
-        .from('mission_progress')
-        .select('id, questid, status, first_completed_at')
-        .eq('userid', userId)
-
-      if (profile) {
-        const stats = {
-          totalxp: profile.totalxp ?? 0,
-          sandboxRuns: profile.sandbox_runs ?? 0,
-          quests: countUniqueCompletedQuests((progressRows ?? []) as any[]),
-        }
-        for (const m of [...XP_MILESTONES, ...RUN_MILESTONES, ...QUEST_MILESTONES]) {
-          if (!m.check(stats)) continue
+      if (annError) throw new Error(`Announcements failed: ${annError.message}`)
+      if (anns) {
+        for (const a of anns as Announcement[]) {
+          const cfg = PRIORITY_CONFIG[a.priority] ?? PRIORITY_CONFIG.info
           out.push({
-            id: m.id, kind: m.id.startsWith('rank:') ? 'rank' : 'achievement',
-            icon: m.icon, color: m.color,
-            title: m.title, body: m.body,
-            timestamp: getMilestoneTimestamp(m.id),
-            onClick: () => navigate('/profile'),
+            id: `announcement:${a.id}`, kind: 'announcement',
+            icon: cfg.icon, color: cfg.color,
+            title: a.ispinned ? `📌 ${a.title}` : a.title,
+            body: a.body, timestamp: a.createdat,
+            onClick: () => onViewAllRef.current(),
           })
         }
       }
-    }
 
-    const dismissedSet = new Set(getDismissedIds())
-    const visible = out.filter(n => !dismissedSet.has(n.id))
-    visible.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime())
-    setItems(visible.slice(0, 25))
-  }, [userId, navigate])
+      if (userId) {
+        const { data: quests, error: questError } = await supabase
+          .from('mission_progress')
+          .select('questid, status, completedat, first_completed_at, updatedat, hintsused, quests(title)')
+          .eq('userid', userId)
+          .order('updatedat', { ascending: false })
+          .limit(30)
+        if (questError) throw new Error(`Quest notifications failed: ${questError.message}`)
+        const completedQuests = ((quests ?? []) as any[])
+          .filter(isCompletedMissionRow)
+          .filter(q => Boolean(missionDoneAt(q)))
+          .sort((a, b) => new Date(missionDoneAt(b)!).getTime() - new Date(missionDoneAt(a)!).getTime())
+          .slice(0, 10)
+        for (const q of completedQuests) {
+          const completedAt = missionDoneAt(q)!
+          const title = Array.isArray(q.quests) ? q.quests[0]?.title : q.quests?.title
+          out.push({
+            id: `quest:${q.questid}:${completedAt}`, kind: 'quest',
+            icon: '⚔️', color: '#ffa726',
+            title: `Quest completed: ${title ?? 'Unknown'}`,
+            body: q.hintsused > 0 ? `Used ${q.hintsused} hint${q.hintsused > 1 ? 's' : ''}.` : 'No hints used. Clean clear.',
+            timestamp: completedAt,
+            onClick: () => navigate('/campaign'),
+          })
+        }
+
+        const { data: adminEvents, error: adminError } = await supabase
+          .from('admin_audit_log')
+          .select('id, action, details, created_at')
+          .eq('target_user_id', userId)
+          .order('created_at', { ascending: false })
+          .limit(10)
+        if (adminError) throw new Error(`Admin notifications failed: ${adminError.message}`)
+        for (const e of (adminEvents ?? []) as any[]) {
+          const meta = ADMIN_ACTION_META[e.action] ?? { icon: '🛡', color: '#58a6ff', title: e.action }
+          out.push({
+            id: `admin:${e.id}`, kind: 'admin',
+            icon: meta.icon, color: meta.color,
+            title: meta.title,
+            body: typeof e.details?.reason === 'string' ? `Reason: ${e.details.reason}` : 'Account activity recorded.',
+            timestamp: e.created_at,
+            onClick: () => navigate('/profile'),
+          })
+        }
+
+        const { data: profile, error: profileError } = await supabase
+          .from('users').select('totalxp, sandbox_runs').eq('id', userId).maybeSingle()
+        if (profileError) throw new Error(`Profile notification stats failed: ${profileError.message}`)
+        const { data: progressRows, error: progressError } = await supabase
+          .from('mission_progress')
+          .select('id, questid, status, first_completed_at')
+          .eq('userid', userId)
+        if (progressError) throw new Error(`Progress notification stats failed: ${progressError.message}`)
+
+        if (profile) {
+          const stats = {
+            totalxp: profile.totalxp ?? 0,
+            sandboxRuns: profile.sandbox_runs ?? 0,
+            quests: countUniqueCompletedQuests((progressRows ?? []) as any[]),
+          }
+          for (const m of [...XP_MILESTONES, ...RUN_MILESTONES, ...QUEST_MILESTONES]) {
+            if (!m.check(stats)) continue
+            out.push({
+              id: m.id, kind: m.id.startsWith('rank:') ? 'rank' : 'achievement',
+              icon: m.icon, color: m.color,
+              title: m.title, body: m.body,
+              timestamp: getMilestoneTimestamp(m.id, notificationOwnerKey),
+              onClick: () => navigate('/profile'),
+            })
+          }
+        }
+      }
+
+      const dismissedSet = new Set(getDismissedIds(notificationOwnerKey))
+      const visible = out.filter(n => !dismissedSet.has(n.id))
+      visible.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime())
+      if (refreshRunRef.current !== runId) return
+      setItems(visible.slice(0, NOTIF_LIMIT))
+      setLastUpdatedAt(new Date().toISOString())
+    } catch (err) {
+      if (refreshRunRef.current !== runId) return
+      const message = err instanceof Error ? err.message : 'Failed to load notifications'
+      console.error('[NotificationBell]', err)
+      setError(message)
+    } finally {
+      if (refreshRunRef.current === runId) setLoading(false)
+    }
+  }, [userId, navigate, notificationOwnerKey])
 
   useEffect(() => {
-    refresh()
+    const initialRefresh = setTimeout(refresh, 0)
     const channel = supabase.channel('notif-bell-realtime')
       .on('postgres_changes', { event: '*', schema: 'public', table: 'announcements' }, () => refresh())
       .on('postgres_changes', { event: '*', schema: 'public', table: 'mission_progress' }, () => refresh())
       .subscribe()
     const poll = setInterval(refresh, 90_000)
-    return () => { supabase.removeChannel(channel); clearInterval(poll) }
+    return () => { clearTimeout(initialRefresh); supabase.removeChannel(channel); clearInterval(poll) }
   }, [refresh])
 
   useEffect(() => {
     const onClick = (e: MouseEvent) => {
       if (bellRef.current && !bellRef.current.contains(e.target as Node)) setOpen(false)
     }
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setOpen(false)
+    }
     document.addEventListener('mousedown', onClick)
-    return () => document.removeEventListener('mousedown', onClick)
+    document.addEventListener('keydown', onKey)
+    return () => {
+      document.removeEventListener('mousedown', onClick)
+      document.removeEventListener('keydown', onKey)
+    }
   }, [])
 
-  // Auto-mark all visible items as seen when the dropdown opens
-  useEffect(() => {
-    if (!open) return
+  const markIdsRead = useCallback((ids: string[]) => {
+    if (ids.length === 0) return
     setSeen(prev => {
-      const merged = Array.from(new Set([...prev, ...items.map(i => i.id)]))
+      const merged = Array.from(new Set([...prev, ...ids])).slice(0, 500)
       if (merged.length === prev.length) return prev
-      setSeenIds(merged)
+      setSeenIds(notificationOwnerKey, merged)
       return merged
     })
-  }, [open]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [notificationOwnerKey])
+
+  // Auto-mark the current snapshot as seen when the dropdown opens. New
+  // realtime notifications that arrive while it is already open stay unread.
+  useEffect(() => {
+    if (!open) return
+    const idsToMark = items.map(i => i.id)
+    let cancelled = false
+    queueMicrotask(() => {
+      if (cancelled) return
+      markIdsRead(idsToMark)
+    })
+    return () => { cancelled = true }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open])
 
   const filtered = activeFilter === 'all' ? items : items.filter(i => i.kind === activeFilter)
   const unread = items.filter(i => !seen.includes(i.id))
   const unreadCount = Math.min(unread.length, 99)
+  const unreadFiltered = filtered.filter(i => !seen.includes(i.id)).length
 
   const toggle = () => setOpen(o => !o)
 
   const markAllRead = () => {
-    const merged = Array.from(new Set([...seen, ...items.map(i => i.id)]))
-    setSeen(merged); setSeenIds(merged)
+    markIdsRead(items.map(i => i.id))
   }
 
   const clearRead = () => {
     const readIds = items.filter(i => seen.includes(i.id)).map(i => i.id)
     if (readIds.length === 0) return
     const mergedDismissed = Array.from(new Set([...dismissed, ...readIds]))
-    setDismissed(mergedDismissed); setDismissedIds(mergedDismissed)
+    setDismissed(mergedDismissed); setDismissedIds(notificationOwnerKey, mergedDismissed)
     setItems(prev => prev.filter(i => !readIds.includes(i.id)))
+    if (activeFilter !== 'all' && filtered.length === readIds.filter(id => filtered.some(i => i.id === id)).length) {
+      setActiveFilter('all')
+    }
   }
 
   const dismissItem = (id: string) => {
     const mergedDismissed = Array.from(new Set([...dismissed, id]))
-    setDismissed(mergedDismissed); setDismissedIds(mergedDismissed)
+    setDismissed(mergedDismissed); setDismissedIds(notificationOwnerKey, mergedDismissed)
     setItems(prev => prev.filter(i => i.id !== id))
   }
 
@@ -543,6 +632,8 @@ const NotificationBell: React.FC<{ userId: string | undefined; onViewAllAnnounce
           display: 'flex', alignItems: 'center', justifyContent: 'center', position: 'relative',
         }}
         aria-label="Notifications"
+        aria-expanded={open}
+        aria-haspopup="menu"
       >
         🔔
         {unreadCount > 0 && (
@@ -570,10 +661,21 @@ const NotificationBell: React.FC<{ userId: string | undefined; onViewAllAnnounce
         >
           <div style={{ padding: '14px 16px 10px', borderBottom: '1px solid #21262d' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10, gap: 8 }}>
-              <div style={{ color: '#e6edf3', fontSize: '13px', fontWeight: '700' }}>
-                🔔 Inbox{unread.length > 0 ? ` · ${unread.length} new` : ''}
+              <div>
+                <div style={{ color: '#e6edf3', fontSize: '13px', fontWeight: '700' }}>
+                  🔔 Inbox{unread.length > 0 ? ` · ${unread.length} new` : ''}
+                </div>
+                <div style={{ color: '#6e7681', fontSize: '10px', marginTop: 2 }}>
+                  {loading ? 'Refreshing notifications...' : lastUpdatedAt ? `Updated ${timeAgo(lastUpdatedAt)}` : 'Ready'}
+                </div>
               </div>
               <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                <button onClick={() => refresh()}
+                  disabled={loading}
+                  title="Refresh notifications"
+                  style={{ background: 'transparent', border: 'none', color: loading ? '#484f58' : '#58a6ff', fontSize: '10px', cursor: loading ? 'wait' : 'pointer', padding: 0, textDecoration: 'underline' }}>
+                  Refresh
+                </button>
                 {unread.length > 0 && (
                   <button onClick={markAllRead}
                     style={{ background: 'transparent', border: 'none', color: '#8b949e', fontSize: '10px', cursor: 'pointer', padding: 0, textDecoration: 'underline' }}>
@@ -618,10 +720,29 @@ const NotificationBell: React.FC<{ userId: string | undefined; onViewAllAnnounce
                 )
               })}
             </div>
+            {error && (
+              <div style={{
+                marginTop: 10,
+                padding: '8px 10px',
+                borderRadius: 8,
+                border: '1px solid rgba(248,81,73,0.35)',
+                background: 'rgba(248,81,73,0.08)',
+                color: '#ffb4ae',
+                fontSize: 11,
+                lineHeight: 1.4,
+              }}>
+                {error}
+              </div>
+            )}
           </div>
 
           <div style={{ overflowY: 'auto', flex: 1 }}>
-            {filtered.length === 0 ? (
+            {loading && items.length === 0 ? (
+              <div style={{ padding: '36px 20px', textAlign: 'center', color: '#8b949e' }}>
+                <div style={{ fontSize: '28px', marginBottom: '8px', animation: 'pulse 1.5s ease infinite' }}>🔔</div>
+                <div style={{ fontSize: '12px' }}>Loading notifications...</div>
+              </div>
+            ) : filtered.length === 0 ? (
               <div style={{ padding: '36px 20px', textAlign: 'center', color: '#484f58' }}>
                 <div style={{ fontSize: '32px', marginBottom: '8px' }}>📭</div>
                 <div style={{ fontSize: '12px' }}>
@@ -661,6 +782,7 @@ const NotificationBell: React.FC<{ userId: string | undefined; onViewAllAnnounce
                         </div>
                         <div style={{ color: n.color, fontSize: '10px', marginTop: '4px', fontWeight: 600, letterSpacing: 0.3 }}>
                           {n.kind.toUpperCase()} · {timeAgo(n.timestamp)}
+                          {isUnread && <span style={{ color: '#f85149', marginLeft: 6 }}>NEW</span>}
                         </div>
                       </div>
                     </button>
@@ -688,7 +810,9 @@ const NotificationBell: React.FC<{ userId: string | undefined; onViewAllAnnounce
               cursor: 'pointer', textAlign: 'center', width: '100%',
             }}
           >
-            View full announcement history →
+            {activeFilter === 'all'
+              ? `View full announcement history${unreadFiltered > 0 ? ` · ${unreadFiltered} unread shown` : ''} →`
+              : `${filtered.length} ${activeFilter} notification${filtered.length === 1 ? '' : 's'} shown →`}
           </button>
         </div>
       )}
@@ -1214,15 +1338,6 @@ export const HomeDashboard: React.FC = () => {
   }, [])
 
   useEffect(() => {
-    if (!user) { setStatsLoading(false); return }
-    fetchStats()
-    const channel = supabase.channel('leaderboard-realtime')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'users' }, () => fetchLeaderboard())
-      .subscribe()
-    return () => { supabase.removeChannel(channel) }
-  }, [user?.id])
-
-  useEffect(() => {
     const handler = (e: MouseEvent) => {
       if (searchRef.current && !searchRef.current.contains(e.target as Node)) setSearchOpen(false)
     }
@@ -1231,30 +1346,23 @@ export const HomeDashboard: React.FC = () => {
   }, [])
 
   useEffect(() => {
-    if (!searchQuery.trim()) { setSearchResults({ actions: [], players: [], quests: [], reports: [] }); setSearchOpen(false); return }
-    setSearchOpen(true)
-    const timer = setTimeout(() => runSearch(sanitizeSearchQuery(searchQuery)), 300)
-    return () => clearTimeout(timer)
-  }, [searchQuery])
-
-  useEffect(() => {
     const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') { setSearchOpen(false); setSearchQuery('') } }
     document.addEventListener('keydown', onKey)
     return () => document.removeEventListener('keydown', onKey)
   }, [])
 
-  const QUICK_ACTIONS = [
+  const QUICK_ACTIONS = useMemo(() => [
     { label: 'Sandbox Mode',         icon: '🔬', desc: 'Experiment freely with code',      path: '/sandbox',  guestOk: true,  keywords: ['sandbox','experiment','code','run','free'] },
     { label: 'Campaign Mode',        icon: '⚔️', desc: 'Complete quests and earn XP',      path: '/campaign', guestOk: false, keywords: ['campaign','quest','mission','learn','level'] },
     { label: 'Progress Report',      icon: '📊', desc: 'View your stats and activity',     path: '/progress', guestOk: false, keywords: ['progress','report','stats','activity','xp','chart'] },
     { label: 'Profile Settings',     icon: '👤', desc: 'Edit your profile and avatar',     path: '/profile',  guestOk: false, keywords: ['profile','avatar','settings','edit','account','image'] },
     { label: 'Leaderboard',          icon: '🏆', desc: 'See top players ranking',          path: '/leaderboard', guestOk: true, keywords: ['leaderboard','rank','ranking','top','players'] },
     { label: 'System Announcements', icon: '📢', desc: 'View latest updates and notices',  path: '',          guestOk: true,  keywords: ['announcement','announcements','news','update','notice','system'] },
-  ].filter(a => !isGuest || a.guestOk)
+  ].filter(a => !isGuest || a.guestOk), [isGuest])
 
   const searchAbortRef = useRef<AbortController | null>(null)
 
-  const runSearch = async (q: string) => {
+  const runSearch = useCallback(async (q: string) => {
     if (searchAbortRef.current) searchAbortRef.current.abort()
     const controller = new AbortController()
     searchAbortRef.current = controller
@@ -1293,9 +1401,9 @@ export const HomeDashboard: React.FC = () => {
     } finally {
       if (searchAbortRef.current === controller) setSearchLoading(false)
     }
-  }
+  }, [QUICK_ACTIONS, user])
 
-  const fetchLeaderboard = async () => {
+  const fetchLeaderboard = useCallback(async () => {
     if (!user) return
     try {
       const { data: lb } = await supabase.from('users').select('id, playername, totalxp, currentlevel').eq('isactive', true).order('totalxp', { ascending: false }).limit(10)
@@ -1309,9 +1417,9 @@ export const HomeDashboard: React.FC = () => {
         }
       }
     } catch (e) { console.error('Leaderboard fetch error:', e) }
-  }
+  }, [user])
 
-  const fetchAvatar = async (cancelled?: { current: boolean }) => {
+  const fetchAvatar = useCallback(async (cancelled?: { current: boolean }) => {
     if (!user?.id) return
     try {
       const { data: avatarFiles } = await supabase.storage.from('Avatars').list(user.id, { limit: 1 })
@@ -1321,9 +1429,9 @@ export const HomeDashboard: React.FC = () => {
         if (!cancelled?.current) setAvatarUrl(urlData.publicUrl)
       }
     } catch (e) { console.error('Avatar fetch error:', e) }
-  }
+  }, [user?.id])
 
-  const fetchStats = async () => {
+  const fetchStats = useCallback(async () => {
     if (!user) return
     try {
       const { data: profile } = await supabase.from('users').select('totalxp, currentlevel, sandbox_runs').eq('id', user.id).single()
@@ -1343,14 +1451,34 @@ export const HomeDashboard: React.FC = () => {
       await fetchLeaderboard()
     } catch (error) { console.error('Failed to fetch stats:', error) }
     finally { setStatsLoading(false) }
-  }
+  }, [fetchLeaderboard, user])
+
+  useEffect(() => {
+    if (!user) { setStatsLoading(false); return }
+    const initialStats = setTimeout(fetchStats, 0)
+    const channel = supabase.channel('leaderboard-realtime')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'users' }, () => fetchLeaderboard())
+      .subscribe()
+    return () => { clearTimeout(initialStats); supabase.removeChannel(channel) }
+  }, [fetchLeaderboard, fetchStats, user])
+
+  useEffect(() => {
+    if (!searchQuery.trim()) {
+      setSearchResults({ actions: [], players: [], quests: [], reports: [] });
+      setSearchOpen(false);
+      return
+    }
+    setSearchOpen(true)
+    const timer = setTimeout(() => runSearch(sanitizeSearchQuery(searchQuery)), 300)
+    return () => clearTimeout(timer)
+  }, [runSearch, searchQuery])
 
   useEffect(() => {
     if (!user?.id) return
     const cancelled = { current: false }
     fetchAvatar(cancelled)
     return () => { cancelled.current = true }
-  }, [user?.id])
+  }, [fetchAvatar, user?.id])
 
   const handleExit = async () => {
     if (isGuest) { sessionStorage.removeItem('guestMode'); navigate('/', { replace: true }) }

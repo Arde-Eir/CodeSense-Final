@@ -32,6 +32,61 @@ export interface MCQuestionLite {
   [k: string]: unknown;
 }
 
+export interface QuestBuilderMCQuestion {
+  question: string;
+  options: [string, string, string, string];
+  correct: number;
+  correctAnswers?: number[];
+}
+
+export interface QuestBuilderDragItem {
+  id: string;
+  label: string;
+}
+
+export interface QuestBuilderDropZone {
+  label: string;
+  accepted: string;
+}
+
+export interface QuestBuilderDragProblem {
+  question: string;
+  items: QuestBuilderDragItem[];
+  drop_zones: QuestBuilderDropZone[];
+}
+
+export interface QuestBuilderOrderItem {
+  label: string;
+}
+
+export interface QuestBuilderOrderProblem {
+  question: string;
+  items: QuestBuilderOrderItem[];
+}
+
+export interface QuestBuilderCodeFillItem {
+  code_lines: string;
+  answers: string;
+}
+
+export interface QuestBuilderValidationInput {
+  act_mc: boolean;
+  act_balloon: boolean;
+  act_drag: boolean;
+  act_ordering: boolean;
+  act_codefill: boolean;
+  mc_questions: QuestBuilderMCQuestion[];
+  balloon_questions: QuestBuilderMCQuestion[];
+  drag_problems: QuestBuilderDragProblem[];
+  ordering_problems: QuestBuilderOrderProblem[];
+  code_fill_items: QuestBuilderCodeFillItem[];
+}
+
+export interface QuestBuilderValidationResult {
+  ok: boolean;
+  errors: string[];
+}
+
 export type Level = number;
 export type Phase = 'beginner' | 'intermediate' | 'advanced' | `level_${number}`;
 
@@ -180,6 +235,137 @@ export function normalizeMCQuestions<T extends MCQuestionLite>(questions: T[]): 
   return questions
     .map(normalizeMCQuestionOptions)
     .filter(q => String(q.question ?? '').trim().length > 0 || (Array.isArray(q.options) && q.options.length > 0));
+}
+
+const countCodeFillBlanks = (code: string): number =>
+  code.match(/___/g)?.length ?? 0;
+
+const hasTextValue = (value: unknown): boolean =>
+  String(value ?? '').trim().length > 0;
+
+const validateChoiceQuestions = (
+  label: string,
+  questions: QuestBuilderMCQuestion[],
+  allowMultipleCorrect: boolean,
+): string[] => {
+  const errors: string[] = [];
+  const normalized = normalizeMCQuestions(questions as unknown as MCQuestionLite[]);
+
+  if (normalized.length === 0) {
+    errors.push(`${label}: add at least one complete question.`);
+    return errors;
+  }
+
+  normalized.forEach((question, index) => {
+    const options = Array.isArray(question.options) ? question.options : [];
+    if (!hasTextValue(question.question)) {
+      errors.push(`${label} Q${index + 1}: question text is required.`);
+    }
+    if (options.length < 2) {
+      errors.push(`${label} Q${index + 1}: add at least two answer options.`);
+    }
+
+    const correctAnswers = allowMultipleCorrect
+      ? Array.from(new Set([
+          ...(Array.isArray(question.correctAnswers) ? question.correctAnswers : []),
+          Number(question.correct),
+        ]))
+      : [Number(question.correct)];
+    const validAnswers = correctAnswers.filter(answer =>
+      Number.isInteger(answer) && answer >= 0 && answer < options.length
+    );
+
+    if (validAnswers.length === 0) {
+      errors.push(`${label} Q${index + 1}: mark at least one valid correct answer.`);
+    }
+  });
+
+  return errors;
+};
+
+export function validateQuestBuilderForm(form: QuestBuilderValidationInput): QuestBuilderValidationResult {
+  const errors: string[] = [];
+
+  if (!form.act_mc && !form.act_balloon && !form.act_drag && !form.act_ordering && !form.act_codefill) {
+    errors.push('Select at least one activity tab.');
+  }
+
+  if (form.act_mc) {
+    errors.push(...validateChoiceQuestions('Quiz', form.mc_questions, false));
+  }
+
+  if (form.act_balloon) {
+    errors.push(...validateChoiceQuestions('Balloon Pop', form.balloon_questions, true));
+  }
+
+  if (form.act_drag) {
+    const usableProblems = form.drag_problems.filter(problem =>
+      problem.items.some(item => hasTextValue(item.label)) ||
+      problem.drop_zones.some(zone => hasTextValue(zone.label) || hasTextValue(zone.accepted))
+    );
+    if (usableProblems.length === 0) {
+      errors.push('Drag & Drop: add at least one matching problem.');
+    }
+
+    usableProblems.forEach((problem, index) => {
+      const items = problem.items.filter(item => hasTextValue(item.label));
+      const itemIds = new Set(items.map(item => item.id));
+      const zones = problem.drop_zones.filter(zone => hasTextValue(zone.label));
+
+      if (items.length < 2) {
+        errors.push(`Drag & Drop problem ${index + 1}: add at least two terms.`);
+      }
+      if (zones.length < 2) {
+        errors.push(`Drag & Drop problem ${index + 1}: add at least two descriptions.`);
+      }
+      zones.forEach((zone, zoneIndex) => {
+        if (!itemIds.has(zone.accepted)) {
+          errors.push(`Drag & Drop problem ${index + 1}, description ${zoneIndex + 1}: choose a valid accepted term.`);
+        }
+      });
+    });
+  }
+
+  if (form.act_ordering) {
+    const usableProblems = form.ordering_problems.filter(problem =>
+      problem.items.some(item => hasTextValue(item.label))
+    );
+    if (usableProblems.length === 0) {
+      errors.push('Ordering: add at least one ordering problem.');
+    }
+
+    usableProblems.forEach((problem, index) => {
+      const items = problem.items.filter(item => hasTextValue(item.label));
+      if (items.length < 3) {
+        errors.push(`Ordering problem ${index + 1}: add at least three ordered items.`);
+      }
+    });
+  }
+
+  if (form.act_codefill) {
+    const usableItems = form.code_fill_items.filter(item =>
+      hasTextValue(item.code_lines) || hasTextValue(item.answers)
+    );
+    if (usableItems.length === 0) {
+      errors.push('Code Fill: add at least one code item.');
+    }
+
+    usableItems.forEach((item, index) => {
+      const blanks = countCodeFillBlanks(item.code_lines);
+      const answers = parseCodeFillAnswers(item.answers);
+      if (blanks === 0) {
+        errors.push(`Code Fill item ${index + 1}: include at least one ___ blank.`);
+      }
+      if (answers.length === 0) {
+        errors.push(`Code Fill item ${index + 1}: add at least one answer.`);
+      }
+      if (blanks > 0 && answers.length > 0 && blanks !== answers.length) {
+        errors.push(`Code Fill item ${index + 1}: ${blanks} blank(s) need ${blanks} answer(s), but ${answers.length} were provided.`);
+      }
+    });
+  }
+
+  return { ok: errors.length === 0, errors };
 }
 
 // ─── Hint editor (admin form ↔ DB JSONB round-trip) ───────────────────────

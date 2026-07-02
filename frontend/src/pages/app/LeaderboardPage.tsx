@@ -1,9 +1,10 @@
 // src/LeaderboardPage.tsx
-import React, { useEffect, useState, useRef, useMemo } from 'react'
+import React, { useCallback, useEffect, useState, useRef, useMemo } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { useAuth } from './components/AuthScreen'
-import { supabase } from './services/supabase'
-import { getLevelProgress, getXPToNextLevel, getRank } from './types'
+import { useAuth } from '@/components/AuthContext'
+import { supabase } from '@/services/supabase'
+import { getRank } from '@/types'
+import { PlayerDetailModal } from '@/components/PlayerDetailModal'
 
 interface Player {
   id: string
@@ -28,9 +29,6 @@ interface SpeedRecord {
 
 const isCompletedMissionRow = (row: { first_completed_at?: string | null; status?: string | null }) =>
   Boolean(row.first_completed_at || row.status === 'completed')
-
-const countUniqueCompletedQuests = (rows: { questid?: string | null; id?: string | null; first_completed_at?: string | null; status?: string | null }[]) =>
-  new Set(rows.filter(isCompletedMissionRow).map(row => row.questid ?? row.id)).size
 
 const completedQuestCountsByUser = (rows: { userid: string; questid?: string | null; id?: string | null; first_completed_at?: string | null; status?: string | null }[]) => {
   const byUser = new Map<string, Set<string>>()
@@ -105,191 +103,6 @@ const isRecentlyActive = (iso: string | null | undefined): boolean => {
   return mins < 30
 }
 
-// ─── Player Detail Modal ─────────────────────────────────────────────────────
-const PlayerDetailModal: React.FC<{ player: Player; currentUserId?: string; onClose: () => void }> = ({ player, currentUserId, onClose }) => {
-  const [questsCompleted, setQuestsCompleted] = useState<number | null>(null)
-  const [playerSpeed, setPlayerSpeed] = useState<{ questid: string; completion_time_seconds: number; quests: { title: string } | null }[]>([])
-
-  useEffect(() => {
-    const fetch = async () => {
-      const { data: progressRows } = await supabase
-        .from('mission_progress')
-        .select('id, questid, status, first_completed_at')
-        .eq('userid', player.id)
-      setQuestsCompleted(countUniqueCompletedQuests((progressRows ?? []) as any[]))
-
-      const { data: speedData } = await supabase
-        .from('mission_progress')
-        .select('questid, completion_time_seconds, quests(title)')
-        .eq('userid', player.id)
-        .not('completion_time_seconds', 'is', null)
-        .order('completion_time_seconds', { ascending: true })
-        .limit(5)
-      setPlayerSpeed((speedData as any[]) ?? [])
-    }
-    fetch()
-  }, [player.id])
-
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose() }
-    document.addEventListener('keydown', onKey)
-    return () => document.removeEventListener('keydown', onKey)
-  }, [onClose])
-
-  // Rank from XP, not from `currentlevel` — see types/index.ts getRank().
-  const rank     = getRank(player.totalxp ?? 0)
-  const progress = getLevelProgress(player.totalxp)
-  const xpToNext = getXPToNextLevel(player.totalxp)
-  const isMe = currentUserId === player.id
-
-  return (
-    <div
-      onClick={onClose}
-      style={{
-        position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.82)', backdropFilter: 'blur(6px)',
-        zIndex: 9998, display: 'flex', alignItems: 'center', justifyContent: 'center',
-        padding: '16px', animation: 'lbFadeIn 0.2s ease',
-      }}
-    >
-      <style>{`
-        @keyframes lbFadeIn  { from{opacity:0} to{opacity:1} }
-        @keyframes lbSlideUp { from{opacity:0;transform:translateY(14px)} to{opacity:1;transform:translateY(0)} }
-      `}</style>
-      <div
-        onClick={e => e.stopPropagation()}
-        style={{
-          background: 'linear-gradient(160deg, #161b22 0%, #0d1117 100%)',
-          border: '1px solid #30363d', borderRadius: '18px',
-          width: '100%', maxWidth: '440px', padding: '28px',
-          boxShadow: '0 24px 80px rgba(0,0,0,0.7)',
-          animation: 'lbSlideUp 0.25s ease-out',
-          fontFamily: "'IBM Plex Sans', system-ui, sans-serif",
-        }}
-      >
-        {/* Header */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: '16px', marginBottom: '22px' }}>
-          <div style={{
-            width: '68px', height: '68px', borderRadius: '50%', flexShrink: 0,
-            background: isMe ? 'linear-gradient(135deg,#4caf50,#2d7a2d)' : 'linear-gradient(135deg,#64b5f6,#1976d2)',
-            display: 'flex', alignItems: 'center', justifyContent: 'center',
-            fontSize: '28px', fontWeight: '800', color: 'white',
-            border: '3px solid rgba(255,255,255,0.08)',
-          }}>
-            {player.playername.charAt(0).toUpperCase()}
-          </div>
-          <div style={{ flex: 1, minWidth: 0 }}>
-            <div style={{ color: '#e6edf3', fontSize: '20px', fontWeight: '800', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-              {player.playername}
-              {isMe && <span style={{ fontSize: '11px', color: '#4caf50', marginLeft: '6px', fontWeight: '700' }}>(you)</span>}
-            </div>
-            <div style={{ color: '#8b949e', fontSize: '12px', marginTop: '4px' }}>
-              {rank.name} · Joined {new Date(player.createdat).toLocaleDateString([], { month: 'short', year: 'numeric' })}
-            </div>
-            <div style={{ marginTop: '6px', display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
-              {player.user_type && (
-                <span style={{
-                  fontSize: '10px', padding: '2px 8px', borderRadius: '10px', fontWeight: '700',
-                  background: player.user_type === 'professional' ? 'rgba(100,181,246,0.12)' : 'rgba(76,175,80,0.12)',
-                  color: player.user_type === 'professional' ? '#64b5f6' : '#4caf50',
-                  border: `1px solid ${player.user_type === 'professional' ? 'rgba(100,181,246,0.3)' : 'rgba(76,175,80,0.3)'}`,
-                }}>
-                  {player.user_type === 'professional' ? '💼 Professional' : '🎓 Student'}
-                </span>
-              )}
-              {player.charactertype && (
-                <span style={{
-                  fontSize: '10px', padding: '2px 8px', borderRadius: '10px', fontWeight: '700',
-                  background: 'rgba(255,193,7,0.1)', color: '#ffc107',
-                  border: '1px solid rgba(255,193,7,0.25)', textTransform: 'capitalize',
-                }}>
-                  ⭐ {player.charactertype}
-                </span>
-              )}
-              {isRecentlyActive(player.lastactive) && (
-                <span style={{
-                  fontSize: '10px', padding: '2px 8px', borderRadius: '10px', fontWeight: '700',
-                  background: 'rgba(76,175,80,0.12)', color: '#4caf50',
-                  border: '1px solid rgba(76,175,80,0.3)',
-                }}>
-                  🟢 Online
-                </span>
-              )}
-            </div>
-          </div>
-        </div>
-
-        {/* XP Progress */}
-        <div style={{ background: 'rgba(255,255,255,0.03)', border: '1px solid #21262d', borderRadius: '12px', padding: '14px', marginBottom: '14px' }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '8px' }}>
-            <span style={{ color: '#e6edf3', fontSize: '12px', fontWeight: '700' }}>Rank Progress</span>
-            <span style={{ color: '#ffc107', fontSize: '12px', fontWeight: '700' }}>{progress}%</span>
-          </div>
-          <div style={{ background: 'rgba(255,255,255,0.06)', borderRadius: '6px', height: '8px', overflow: 'hidden', marginBottom: '6px' }}>
-            <div style={{ width: `${progress}%`, height: '100%', background: 'linear-gradient(90deg,#4caf50,#66bb6a)', borderRadius: '6px', transition: 'width 0.8s ease' }} />
-          </div>
-          <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-            <span style={{ fontSize: '10px', color: '#484f58' }}>{player.totalxp.toLocaleString()} XP</span>
-            <span style={{ fontSize: '10px', color: '#ffc107' }}>
-              {xpToNext === null ? '🌟 Max rank' : `${xpToNext.toLocaleString()} to next`}
-            </span>
-          </div>
-        </div>
-
-        {/* Stats grid */}
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '8px', marginBottom: '18px' }}>
-          {[
-            { icon: '⭐', value: player.totalxp.toLocaleString(), label: 'Total XP',      color: '#ffc107' },
-            { icon: '🔬', value: player.sandbox_runs,             label: 'Analyses',      color: '#4caf50' },
-            { icon: '⚔️', value: questsCompleted ?? '…',           label: 'Quests done',   color: '#ffa726' },
-          ].map(s => (
-            <div key={s.label} style={{ background: 'rgba(255,255,255,0.03)', border: '1px solid #21262d', borderRadius: '10px', padding: '10px 6px', textAlign: 'center' }}>
-              <div style={{ fontSize: '18px', marginBottom: '3px' }}>{s.icon}</div>
-              <div style={{ color: s.color, fontSize: '15px', fontWeight: '800' }}>{s.value}</div>
-              <div style={{ color: '#484f58', fontSize: '9px', textTransform: 'uppercase', letterSpacing: '0.5px', marginTop: '2px' }}>{s.label}</div>
-            </div>
-          ))}
-        </div>
-
-        {/* Activity line */}
-        <div style={{ padding: '10px 14px', background: 'rgba(88,166,255,0.04)', border: '1px solid rgba(88,166,255,0.15)', borderRadius: '10px', fontSize: '12px', color: '#8b949e', marginBottom: '18px' }}>
-          🕒 Last active <b style={{ color: '#c9d1d9' }}>{timeAgo(player.lastactive)}</b>
-        </div>
-
-        {/* Speed records */}
-        {playerSpeed.length > 0 && (
-          <div style={{ marginBottom: '18px' }}>
-            <div style={{ fontSize: '10px', color: '#484f58', letterSpacing: '1.5px', textTransform: 'uppercase' as const, marginBottom: '8px' }}>⚡ Fastest Completions</div>
-            {playerSpeed.map((r, i) => (
-              <div key={i} style={{ display: 'flex', alignItems: 'center', gap: '10px', padding: '7px 0', borderBottom: i < playerSpeed.length - 1 ? '1px solid #21262d' : 'none' }}>
-                <span style={{ color: '#484f58', fontSize: '11px', minWidth: 18, fontFamily: "'JetBrains Mono',monospace" }}>#{i + 1}</span>
-                <span style={{ flex: 1, fontSize: '12px', color: '#c9d1d9', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' as const }}>
-                  {(r.quests as any)?.title ?? r.questid}
-                </span>
-                <span style={{ fontSize: '12px', fontFamily: "'JetBrains Mono',monospace", color: '#3fb950', fontWeight: 700 }}>
-                  {formatTime(r.completion_time_seconds)}
-                </span>
-              </div>
-            ))}
-          </div>
-        )}
-
-        <button
-          onClick={onClose}
-          style={{
-            width: '100%', background: 'rgba(255,255,255,0.06)', border: '1px solid #30363d',
-            color: '#e6edf3', padding: '11px', borderRadius: '9px', fontSize: '13px',
-            fontWeight: '700', cursor: 'pointer', transition: 'all 0.15s',
-          }}
-          onMouseEnter={e => { e.currentTarget.style.background = 'rgba(255,255,255,0.1)' }}
-          onMouseLeave={e => { e.currentTarget.style.background = 'rgba(255,255,255,0.06)' }}
-        >
-          Close
-        </button>
-      </div>
-    </div>
-  )
-}
-
 // ─── Main Leaderboard Page ───────────────────────────────────────────────────
 export const LeaderboardPage: React.FC = () => {
   const navigate = useNavigate()
@@ -320,41 +133,7 @@ export const LeaderboardPage: React.FC = () => {
     return () => { els.forEach(el => { if (el) el.style.overflow = '' }) }
   }, [])
 
-  useEffect(() => { fetchSpeedRecords() }, [])
-
-  useEffect(() => {
-    fetchPlayers()
-  }, [page, searchQuery, sortKey, filterKey])
-
-  useEffect(() => {
-    if (!user) return
-    const fetchMyRank = async () => {
-      const { data: me } = await supabase
-        .from('users').select('id, playername, totalxp, currentlevel, sandbox_runs, quests_completed, createdat, lastactive, charactertype, user_type')
-        .eq('id', user.id).single()
-      if (me) {
-        setMyPlayer(me as Player)
-        const { count } = await supabase
-          .from('users').select('*', { count: 'exact', head: true })
-          .eq('isactive', true).gt('totalxp', me.totalxp)
-        setMyRank((count ?? 0) + 1)
-      }
-    }
-    fetchMyRank()
-    fetchStatsSummary()
-
-    const channel = supabase.channel('lb-page-realtime')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'users' }, () => {
-        fetchPlayers(); fetchMyRank(); fetchStatsSummary()
-      })
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'mission_progress' }, () => {
-        fetchPlayers()
-      })
-      .subscribe()
-    return () => { supabase.removeChannel(channel) }
-  }, [user?.id])
-
-  const fetchSpeedRecords = async () => {
+  const fetchSpeedRecords = useCallback(async () => {
     setSpeedLoading(true)
     try {
       const { data } = await supabase
@@ -369,9 +148,9 @@ export const LeaderboardPage: React.FC = () => {
     } finally {
       setSpeedLoading(false)
     }
-  }
+  }, [])
 
-  const fetchStatsSummary = async () => {
+  const fetchStatsSummary = useCallback(async () => {
     const since = new Date(Date.now() - 86400_000).toISOString()
     const [usersRes, reportsRes, activityRes, progressRes] = await Promise.all([
       supabase.from('users').select('id, totalxp, lastactive').eq('isactive', true),
@@ -395,9 +174,9 @@ export const LeaderboardPage: React.FC = () => {
     for (const row of (progressRes.data ?? []) as any[]) activeIds.add(row.userid)
     const activeToday = activeIds.size
     setStatsSummary({ totalPlayers, avgXP, topXP, activeToday })
-  }
+  }, [])
 
-  const fetchPlayers = async () => {
+  const fetchPlayers = useCallback(async () => {
     setLoading(true)
     try {
       const sortCfg = SORT_OPTIONS.find(s => s.key === sortKey) ?? SORT_OPTIONS[0]
@@ -476,7 +255,43 @@ export const LeaderboardPage: React.FC = () => {
     } finally {
       setLoading(false)
     }
-  }
+  }, [filterKey, page, searchQuery, sortKey])
+
+  const fetchMyRank = useCallback(async () => {
+    if (!user) return
+    const { data: me } = await supabase
+      .from('users').select('id, playername, totalxp, currentlevel, sandbox_runs, quests_completed, createdat, lastactive, charactertype, user_type')
+      .eq('id', user.id).single()
+    if (me) {
+      setMyPlayer(me as Player)
+      const { count } = await supabase
+        .from('users').select('*', { count: 'exact', head: true })
+        .eq('isactive', true).gt('totalxp', me.totalxp)
+      setMyRank((count ?? 0) + 1)
+    }
+  }, [user])
+
+  useEffect(() => { fetchSpeedRecords() }, [fetchSpeedRecords])
+
+  useEffect(() => {
+    fetchPlayers()
+  }, [fetchPlayers])
+
+  useEffect(() => {
+    if (!user) return
+    fetchMyRank()
+    fetchStatsSummary()
+
+    const channel = supabase.channel('lb-page-realtime')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'users' }, () => {
+        fetchPlayers(); fetchMyRank(); fetchStatsSummary()
+      })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'mission_progress' }, () => {
+        fetchPlayers()
+      })
+      .subscribe()
+    return () => { supabase.removeChannel(channel) }
+  }, [fetchMyRank, fetchPlayers, fetchStatsSummary, user])
 
   const handleSearchChange = (val: string) => {
     setSearchInput(val)
@@ -1055,7 +870,7 @@ export const LeaderboardPage: React.FC = () => {
 
       {detailPlayer && (
         <PlayerDetailModal
-          player={detailPlayer}
+          userId={detailPlayer.id}
           currentUserId={user?.id}
           onClose={() => setDetailPlayer(null)}
         />

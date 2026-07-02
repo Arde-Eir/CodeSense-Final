@@ -1,7 +1,7 @@
 // src/WelcomePage.tsx
 import React, { useEffect, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { useAuth } from './components/AuthScreen'
+import { useAuth } from '@/components/AuthContext'
 
 export const WelcomePage: React.FC = () => {
   const navigate = useNavigate()

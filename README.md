@@ -1,74 +1,132 @@
-# 🚀 CodeSense: A C++ Logic Analysis Mentor
+# CodeSense
 
-CodeSense is a browser-native, rule-based gamified debugging system designed to assist users in mastering C++ programming logic. Unlike traditional IDEs that focus on machine-code production, CodeSense acts as a logic interpreter and pedagogical analyzer, helping students understand the "why" and "how" of their code through deterministic static analysis and interactive visualizations.
+CodeSense is a browser-based C++ logic analysis mentor for students. It combines a TypeScript/Express analysis backend with a React/Vite frontend for code analysis, flow graph visualization, tutorials, campaign quests, progress tracking, and admin tools.
 
----
+## Prerequisites
 
-## 🛠️ Quick Start Guide
+- Node.js 18 or newer
+- npm
+- Git
 
-### 1. Prerequisites
-Ensure you have the following installed on your machine:
-* **Node.js**: v18.0.0 or higher
-* **Git**: For cloning the project repository
+## Setup
 
-### 2. Installation
-Clone the repository and navigate to the project folder:
+Install dependencies for the root test runner, backend, and frontend:
+
 ```bash
-git clone [https://github.com/arde-eir/codesense-final.git](https://github.com/arde-eir/codesense-final.git)
-cd codesense-final
-
-
-
-
-==================================================================================================================================
-
-3. Running the Backend
-The backend handles the PEG.js parser and symbolic execution engine.
-==================================================================================================================================
-cd backend
 npm install
-npm run dev
-==================================================================================================================================
-The logic engine will start on http://localhost:3000.
+npm --prefix backend install
+npm --prefix frontend install
+```
 
+Create local environment files from the examples:
 
-4. Running the Frontend
-The frontend provides the interactive code editor and flow visualizers.
-==================================================================================================================================
-# Open a new terminal tab
-cd frontend
-npm install
-npm run dev
-==================================================================================================================================
-The interface will start on http://localhost:5173.
+```bash
+copy backend\.env.example backend\.env.local
+copy frontend\.env.example frontend\.env.local
+```
 
+Keep real secrets and deployment values in ignored `.env.local` files or hosting-provider environment settings. See [docs/SECURITY_AND_ACCESS.md](docs/SECURITY_AND_ACCESS.md) and [docs/SUPABASE_RLS_CHECKLIST.md](docs/SUPABASE_RLS_CHECKLIST.md).
 
+Backend environment values:
 
-💻 System Requirements
-End-User Hardware Requirements
-For an optimal experience, the system requires a processor equivalent to an Intel Core i3 (7th Gen), 
-AMD Ryzen 3 3000, or an Apple M1 chip at minimum, though an Intel Core i5 (10th Gen+), AMD Ryzen 5 5000,
-or Apple M2+ is recommended. While the system can run on 4 GB of RAM, 8 GB to 16 GB is highly recommended 
-to handle complex Flow Graph renderings. Users should have at least 500 MB of available storage space, with
-1 GB or more preferred. The interface is best viewed on a display with at least 1366 x 768 resolution, though
-1920 x 1080 (Full HD) is recommended for side-by-side views. While integrated graphics will suffice, a dedicated 
-GPU like a GTX 1050 or RX 560+ is recommended for smoother animations.
+```text
+PORT=3000
+CORS_ORIGINS=https://your-frontend.example
+LOG_ANALYSIS_REQUESTS=false
+```
 
-End-User Software Requirements
-CodeSense is supported on Windows 10/11, macOS 11.0 or higher (Big Sur to Sonoma), and Ubuntu 20.04+ Linux distributions.
-It requires the latest stable version of Google Chrome, Microsoft Edge, or Mozilla Firefox. The system runs on a 
-Node.js v18.0.0 or higher runtime and requires both JavaScript and WebGL 2.0 to be enabled in the browser settings.
+`CORS_ORIGINS` must contain exact trusted browser origins. Do not allow whole hosting suffixes such as every `.vercel.app` or `.netlify.app` preview domain.
 
-🏗️ Developer Build Environment
-Development Hardware
-Developers modifying the engine should use a high-performance processor like an Intel Core i7, 
-AMD Ryzen 7, or an Apple M-Series chip to handle simultaneous TypeScript compilation and analysis.
-A minimum of 16 GB of RAM is required to support the TypeScript Language Server and PEG.js parser generation. 
-High-speed storage, such as a 2 GB+ NVMe SSD, is crucial for indexing the extensive dependency folders. 
-A dual-monitor setup with at least 1080p resolution is recommended to keep the code editor and developer tools 
-visible at the same time.
+`LOG_ANALYSIS_REQUESTS=true` only logs request size metadata. It does not log submitted source code.
 
-Software Stack
-The core system is built on Node.js and TypeScript 5.x, utilizing PEG.js to compile the cpp.pegjs grammar file. 
-The frontend is powered by React 18 and Vite, using ReactFlow for dynamic Flow Graph visualizations. Styling is 
-managed through Tailwind CSS and PostCSS, while the Monaco Editor provides the high-performance coding environment.
+## Run Locally
+
+Backend:
+
+```bash
+npm --prefix backend run dev
+```
+
+The backend defaults to `http://localhost:3000`.
+
+Frontend:
+
+```bash
+npm --prefix frontend run dev
+```
+
+The frontend defaults to `http://localhost:5173`.
+
+## Verification
+
+Run the full project health check:
+
+```bash
+npm run check
+```
+
+This runs:
+
+- frontend lint
+- backend unit tests, frontend Vitest tests, and integration report
+- frontend production build
+- backend production build
+
+Useful individual commands:
+
+```bash
+npm run lint
+npm test
+npm run build
+npm run build:frontend
+npm run build:backend
+```
+
+## Project Structure
+
+```text
+backend/
+  grammar/              PEG grammar for the C++ parser
+  src/analysis/         lexer, parser output, CFG, scoring, translation, checks
+  src/gamification/     XP and reward logic
+  src/routes/           API routes
+  tests/                backend unit tests
+
+frontend/
+  src/App.tsx           route shell and route guards
+  src/pages/public/     public pages such as landing, login, signup, docs
+  src/pages/app/        authenticated/guest app pages
+  src/pages/admin/      admin-only page
+  src/components/       shared UI components
+  src/services/         API, Supabase, data isolation, code services
+  src/campaign/         quest and hint helpers
+  src/games/            interactive quest games
+  src/types/            shared frontend types
+
+tests/
+  run-testing-report.mjs
+  run-integration-tests.mjs
+
+docs/
+  SECURITY_AND_ACCESS.md
+  SUPABASE_RLS_CHECKLIST.md
+  SUPABASE_RLS_POLICY_TEMPLATE.sql
+```
+
+## Frontend Imports
+
+The frontend uses `@` as an alias for `frontend/src`.
+
+```ts
+import { supabase } from '@/services/supabase'
+import { SandboxPage } from '@/pages/app/SandboxPage'
+```
+
+Use local relative imports for sibling files when that reads better, such as `./normalizeMCQ`.
+
+## Security Notes
+
+- Do not commit `.env`, `.env.local`, private keys, service-role keys, exported user data, logs, or generated response dumps.
+- Repository viewers can see every tracked file. Do not treat folders or frontend route guards as secret storage.
+- Admin-only data must be enforced with backend checks or Supabase Row Level Security policies, not just hidden UI links.
+- Use the Supabase RLS checklist before opening the app to normal users or repository viewers.

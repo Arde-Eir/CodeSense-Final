@@ -1,4 +1,4 @@
-import type { AnalysisError } from '../types';
+import type { AnalysisError } from '@/types';
 
 export type DependencyRule = {
   header: string;
