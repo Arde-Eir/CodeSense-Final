@@ -50,6 +50,29 @@ describe('validateGraph', () => {
     expect(result.errors.some(e => e.code === 'NO_START_NODE')).toBe(true);
   });
 
+  it('allows calls-labelled reference edges without counting them as extra execution branches', () => {
+    const nodes = [
+      makeNode('s', 'terminator', 'Start'),
+      makeNode('call', 'predefined', 'Call show failed', { code: 'showFailedMessage()' }),
+      makeNode('fn', 'predefined', 'Function: showFailedMessage', { code: 'void showFailedMessage()' }),
+      makeNode('out', 'io', 'Output', { code: 'display failed' }),
+      makeNode('fnEnd', 'terminator', 'End: showFailedMessage'),
+      makeNode('e', 'terminator', 'End'),
+    ];
+    const edges = [
+      makeEdge('e1', 's', 'call'),
+      makeEdge('e2', 'call', 'e'),
+      makeEdge('e3', 'call', 'fn', 'calls'),
+      makeEdge('e4', 'fn', 'out'),
+      makeEdge('e5', 'out', 'fnEnd'),
+    ];
+
+    const result = validateGraph(nodes, edges);
+
+    expect(result.errors.some(e => e.code === 'LINEAR_NODE_MULTIPLE_OUTGOING')).toBe(false);
+    expect(result.errors.some(e => e.code === 'DEAD_END_NODES')).toBe(false);
+  });
+
   it('reports MULTIPLE_START_NODES when two Start terminators exist', () => {
     const nodes = [
       makeNode('s1', 'terminator', 'Start'),

@@ -51,6 +51,10 @@ const INCLUDE_ORDER = [
 
 const str = (v: unknown): string => String(v ?? '').trim();
 
+function isCallConnectorEdge(edge: Edge): boolean {
+  return str(edge.label).toLowerCase() === 'calls';
+}
+
 export type FlowchartInstructionKind =
   | 'process'
   | 'decision'
@@ -736,6 +740,7 @@ function emitDatabase(label: string, code: string): string {
 function buildAdjacency(edges: Edge[], nodeIds: Set<string>): Map<string, Edge[]> {
   const adj = new Map<string, Edge[]>();
   for (const e of edges) {
+    if (isCallConnectorEdge(e)) continue;
     // HARDENING: skip dangling edges — edges referencing a node that was
     // deleted but whose ref lingers in state. Without this, traverse() can
     // dereference a missing node and emit malformed code.

@@ -38,6 +38,7 @@ const str = (v: unknown): string => String(v ?? '').trim();
 const isTrueLabel  = (l: string) => l === 'true'  || l === 'yes';
 const isFalseLabel = (l: string) => l === 'false' || l === 'no';
 const isBranchLabel = (l: string) => isTrueLabel(l) || isFalseLabel(l);
+const isCallConnectorEdge = (edge: Edge): boolean => str(edge.label).toLowerCase() === 'calls';
 
 const CONDITION_PLACEHOLDERS = new Set(['condition', 'if condition', 'decision']);
 const EXECUTABLE_PLACEHOLDERS = new Set([
@@ -392,14 +393,15 @@ export function validateGraph(nodes: Node[], edges: Edge[]): ValidationResult {
 
   // Build quick-lookup maps
   const nodeMap  = new Map(nodes.map(n => [n.id, n]));
+  const executionEdges = edges.filter(e => !isCallConnectorEdge(e));
   const outEdges = new Map<string, Edge[]>(nodes.map(n => [n.id, []]));
-  for (const e of edges) {
+  for (const e of executionEdges) {
     if (!outEdges.has(e.source)) outEdges.set(e.source, []);
     outEdges.get(e.source)!.push(e);
   }
   const connectedIds = new Set([...edges.map(e => e.source), ...edges.map(e => e.target)]);
   const inEdges = new Map<string, Edge[]>(nodes.map(n => [n.id, []]));
-  for (const e of edges) {
+  for (const e of executionEdges) {
     if (!inEdges.has(e.target)) inEdges.set(e.target, []);
     inEdges.get(e.target)!.push(e);
   }

@@ -1971,8 +1971,10 @@ const FlowGraphInner: React.FC<Props> = ({
       if (alreadyExists) return eds;
 
       const sourceNode = nodes.find(n => n.id === params.source);
+      const targetNode = nodes.find(n => n.id === params.target);
       const outgoingFromSource = eds.filter(edge => edge.source === params.source);
       const isDecisionEdge = sourceNode?.type === 'decision';
+      const isFunctionCallEdge = sourceNode?.type === 'predefined' && targetNode?.type === 'predefined';
       let edgeLabel: string | undefined;
 
       if (isDecisionEdge) {
@@ -1989,6 +1991,8 @@ const FlowGraphInner: React.FC<Props> = ({
             (edgeLabel === 'false' && (labels.has('false') || labels.has('no')))) {
           edgeLabel = labels.has('true') || labels.has('yes') ? 'false' : 'true';
         }
+      } else if (isFunctionCallEdge) {
+        edgeLabel = 'calls';
       }
 
       const isTrue = edgeLabel === 'true';

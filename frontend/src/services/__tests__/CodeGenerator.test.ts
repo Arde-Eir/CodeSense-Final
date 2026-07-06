@@ -150,6 +150,29 @@ describe('generateCppFromGraph', () => {
     expect(code).toContain('calculateTotal(score);');
   });
 
+  it('ignores calls-labelled reference edges when generating main control flow', () => {
+    const nodes = [
+      makeNode('s', 'terminator', 'Start'),
+      makeNode('call', 'predefined', 'Call show failed', 'showFailedMessage()'),
+      makeNode('fn', 'predefined', 'Function: showFailedMessage', 'void showFailedMessage()'),
+      makeNode('out', 'io', 'Output', 'display failed'),
+      makeNode('fnEnd', 'terminator', 'End: showFailedMessage'),
+      makeNode('e', 'terminator', 'End'),
+    ];
+    const edges = [
+      makeEdge('e1', 's', 'call'),
+      makeEdge('e2', 'call', 'e'),
+      makeEdge('e3', 'call', 'fn', 'calls'),
+      makeEdge('e4', 'fn', 'out'),
+      makeEdge('e5', 'out', 'fnEnd'),
+    ];
+
+    const code = generateCppFromGraph(nodes, edges);
+
+    expect(code).toContain('showFailedMessage();');
+    expect(code).not.toMatch(/showFailedMessage\(\);\n\s*\/\/ Function definition emitted above main/);
+  });
+
   it('keeps includes inside the analyzer-supported header set', () => {
     const nodes = [
       makeNode('s', 'terminator', 'Start'),
