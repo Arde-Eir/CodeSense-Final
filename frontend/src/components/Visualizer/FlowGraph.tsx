@@ -527,8 +527,10 @@ const ProcessNode = ({ data, selected }: NodeProps<Node<ExtendedNodeData>>) => {
       <EditHint />
       {data.violation && <ViolationBadge />}
       <Handle type="target" position={Position.Top}    style={handleStyle(color)} />
+      <Handle type="target" id="calls-target" position={Position.Left} style={{ ...handleStyle(color), left: -6, top: '50%', transform: 'translateY(-50%)' }} />
       <NodeLabel data={data} />
       <Handle type="source" position={Position.Bottom} style={handleStyle(color)} />
+      <Handle type="source" id="calls-source" position={Position.Right} style={{ ...handleStyle(color), right: -6, top: '50%', transform: 'translateY(-50%)' }} />
     </BaseNode>
   );
 };
