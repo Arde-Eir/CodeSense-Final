@@ -4,6 +4,7 @@ import React, { useEffect, useState, useCallback, useMemo } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useAuth } from '@/components/AuthContext'
 import { supabase } from '@/services/supabase'
+import { getProfileImageUrlMap, type ProfileImageUrls } from '@/services/ProfileImages'
 import type { ExplorerProfile } from '@/types'
 import {
   computeUserStats, filterUsers, levelToPhase,
@@ -382,6 +383,16 @@ const defaultLevelAccent = (level: number): string => {
 const fmt = (iso: string) =>
   new Date(iso).toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })
 
+const settingStringValue = (value: unknown): string => {
+  if (typeof value !== 'string') return String(value ?? '')
+  try {
+    const parsed = JSON.parse(value)
+    return typeof parsed === 'string' ? parsed : value
+  } catch {
+    return value
+  }
+}
+
 async function writeAuditLog(
   adminId: string,
   action: string,
@@ -405,6 +416,7 @@ export const AdminPanel: React.FC = () => {
 
   const [tab, setTab] = useState<Tab>('dashboard')
   const [users, setUsers] = useState<AdminUser[]>([])
+  const [userImages, setUserImages] = useState<Map<string, ProfileImageUrls>>(new Map())
   const [filteredUsers, setFilteredUsers] = useState<AdminUser[]>([])
   const [userSearch, setUserSearch] = useState('')
   const [userFilter, setUserFilter] = useState<'all' | 'active' | 'banned' | 'admin'>('all')
@@ -669,6 +681,11 @@ export const AdminPanel: React.FC = () => {
     if (data) {
       setUsers(data as AdminUser[])
       setStats(computeUserStats(data as AdminUser[]))
+      try {
+        setUserImages(await getProfileImageUrlMap((data as AdminUser[]).map(row => row.id)))
+      } catch (err: unknown) {
+        console.warn('[fetchUserImages]', err instanceof Error ? err.message : err)
+      }
     }
   }, [])
 
@@ -710,9 +727,7 @@ export const AdminPanel: React.FC = () => {
     if (data) {
       for (const row of data) {
         if (row.key === 'maintenance_mode') setMaintenanceOn(row.value === true || row.value === 'true')
-        if (row.key === 'maintenance_message') setMaintenanceMsg(
-          typeof row.value === 'string' ? row.value.replace(/^"|"$/g, '') : ''
-        )
+        if (row.key === 'maintenance_message') setMaintenanceMsg(settingStringValue(row.value))
       }
     }
   }, [])
@@ -870,9 +885,7 @@ export const AdminPanel: React.FC = () => {
         { onConflict: 'key' }
       ),
       supabase.from('system_settings').upsert(
-        // The `value` column is jsonb — wrap the string so Supabase doesn't
-        // try to parse a bare string as a JSON object and throw a parse error.
-        { key: 'maintenance_message', value: JSON.stringify(maintenanceMsg || ''),   updated_by: user.id },
+        { key: 'maintenance_message', value: maintenanceMsg || '',                   updated_by: user.id },
         { onConflict: 'key' }
       ),
     ])
@@ -1469,12 +1482,16 @@ export const AdminPanel: React.FC = () => {
                         </tr>
                       </thead>
                       <tbody>
-                        {filteredUsers.map(u => (
+                        {filteredUsers.map(u => {
+                          const avatarUrl = userImages.get(u.id)?.avatarUrl ?? null
+                          return (
                           <tr key={u.id}>
                             <td>
                               <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                                <div style={{ width: '32px', height: '32px', borderRadius: '50%', background: '#206bc4', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'white', fontWeight: '700', fontSize: '14px', flexShrink: 0 }}>
-                                  {u.playername.charAt(0).toUpperCase()}
+                                <div style={{ width: '32px', height: '32px', borderRadius: '50%', background: '#206bc4', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'white', fontWeight: '700', fontSize: '14px', flexShrink: 0, overflow: 'hidden' }}>
+                                  {avatarUrl
+                                    ? <img src={avatarUrl} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                                    : u.playername.charAt(0).toUpperCase()}
                                 </div>
                                 <div>
                                   <strong>{u.playername}</strong>
@@ -1524,7 +1541,7 @@ export const AdminPanel: React.FC = () => {
                               </div>
                             </td>
                           </tr>
-                        ))}
+                        )})}
                         {filteredUsers.length === 0 && (
                           <tr><td colSpan={9} className="text-center text-muted py-4">No users found</td></tr>
                         )}

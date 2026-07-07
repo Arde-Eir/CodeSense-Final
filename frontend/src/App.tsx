@@ -29,15 +29,6 @@ const ImpersonationBanner: React.FC = () => {
   const { impersonatingUser, stopImpersonation, user } = useAuth();
   const navigate = useNavigate();
 
-  // While the banner is visible, add top padding to <body> so page content
-  // isn't hidden behind the fixed-position banner.
-  useEffect(() => {
-    if (!impersonatingUser) return;
-    const prev = document.body.style.paddingTop;
-    document.body.style.paddingTop = `${BANNER_HEIGHT}px`;
-    return () => { document.body.style.paddingTop = prev; };
-  }, [impersonatingUser]);
-
   if (!impersonatingUser) return null;
   return (
     <div style={{
@@ -62,6 +53,20 @@ const ImpersonationBanner: React.FC = () => {
       >
         Exit Preview
       </button>
+    </div>
+  );
+};
+
+const RouteFrame: React.FC<{ children: React.ReactNode }> = ({ children }) => {
+  const { impersonatingUser } = useAuth();
+
+  return (
+    <div style={{
+      minHeight: '100vh',
+      boxSizing: 'border-box',
+      paddingTop: impersonatingUser ? BANNER_HEIGHT : 0,
+    }}>
+      {children}
     </div>
   );
 };
@@ -141,39 +146,41 @@ export const App: React.FC = () => {
       <AuthProvider>
         <TourController />
         <ImpersonationBanner />
-        <Routes>
-          {/* Public Routes */}
-          <Route path="/" element={<LandingPage />} />
-          <Route path="/signup" element={<SignupPage />} />
-          <Route path="/login" element={<LoginPage />} />
-          <Route path="/welcome" element={<WelcomePage />} />
-          <Route path="/leaderboard" element={<LeaderboardPage />} />
-          <Route path="/manual" element={<UserManualPage />} />
-          <Route path="/tutorials" element={<TutorialsPage />} />
-          <Route path="/patch-notes" element={<PatchNotesPage />} />
+        <RouteFrame>
+          <Routes>
+            {/* Public Routes */}
+            <Route path="/" element={<LandingPage />} />
+            <Route path="/signup" element={<SignupPage />} />
+            <Route path="/login" element={<LoginPage />} />
+            <Route path="/welcome" element={<WelcomePage />} />
+            <Route path="/leaderboard" element={<LeaderboardPage />} />
+            <Route path="/manual" element={<UserManualPage />} />
+            <Route path="/tutorials" element={<TutorialsPage />} />
+            <Route path="/patch-notes" element={<PatchNotesPage />} />
 
-          {/* Protected Routes — guests allowed */}
-          <Route path="/home"    element={<ProtectedRoute><HomeDashboard /></ProtectedRoute>} />
-          <Route path="/sandbox" element={<ProtectedRoute><SandboxPage /></ProtectedRoute>} />
+            {/* Protected Routes — guests allowed */}
+            <Route path="/home"    element={<ProtectedRoute><HomeDashboard /></ProtectedRoute>} />
+            <Route path="/sandbox" element={<ProtectedRoute><SandboxPage /></ProtectedRoute>} />
 
-          {/* Account-only Routes — guests are redirected to sign up */}
-          <Route path="/progress" element={<AccountRoute><ProgressPage /></AccountRoute>} />
-          <Route path="/profile"  element={<AccountRoute><ProfileSettings /></AccountRoute>} />
+            {/* Account-only Routes — guests are redirected to sign up */}
+            <Route path="/progress" element={<AccountRoute><ProgressPage /></AccountRoute>} />
+            <Route path="/profile"  element={<AccountRoute><ProfileSettings /></AccountRoute>} />
 
-          {/* Campaign Routes — account required to track progress */}
-          <Route path="/campaign"               element={<AccountRoute><CampaignPage /></AccountRoute>} />
-          <Route path="/campaign/inside/:phase" element={<AccountRoute><CampaignInside /></AccountRoute>} />
-          <Route path="/lesson/:questId"        element={<AccountRoute><LessonActivity /></AccountRoute>} />
+            {/* Campaign Routes — account required to track progress */}
+            <Route path="/campaign"               element={<AccountRoute><CampaignPage /></AccountRoute>} />
+            <Route path="/campaign/inside/:phase" element={<AccountRoute><CampaignInside /></AccountRoute>} />
+            <Route path="/lesson/:questId"        element={<AccountRoute><LessonActivity /></AccountRoute>} />
 
-          {/* Admin Route — only accessible to users with is_admin = true */}
-          <Route path="/admin" element={<AdminRoute><AdminPanel /></AdminRoute>} />
+            {/* Admin Route — only accessible to users with is_admin = true */}
+            <Route path="/admin" element={<AdminRoute><AdminPanel /></AdminRoute>} />
 
-          {/* Redirects */}
-          <Route path="/settings" element={<Navigate to="/home" replace />} />
+            {/* Redirects */}
+            <Route path="/settings" element={<Navigate to="/home" replace />} />
 
-          {/* Catch-all */}
-          <Route path="*" element={<Navigate to="/" replace />} />
-        </Routes>
+            {/* Catch-all */}
+            <Route path="*" element={<Navigate to="/" replace />} />
+          </Routes>
+        </RouteFrame>
       </AuthProvider>
     </BrowserRouter>
   );

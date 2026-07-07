@@ -526,6 +526,12 @@ interface ParsedHumanCall {
   helperBody?: string;
 }
 
+interface ParsedFunctionDefinition {
+  returnType: string;
+  fnName: string;
+  params: string;
+}
+
 function parseHumanCallInstruction(code: string): ParsedHumanCall | null {
   const c = code.trim();
   const callWithBody = c.match(/^(?:call|run|use|execute)\s+(.+?)\s+to\s+(.+?)(?:\s+with\s+(.+))?$/i);
@@ -552,6 +558,30 @@ function parseHumanCallInstruction(code: string): ParsedHumanCall | null {
     fnName: normalizeVariableName(humanCall[1], 'helper'),
     args: argNames.join(', '),
     argNames,
+  };
+}
+
+function parseFunctionDefinitionInstruction(node: Node<NodeData>): ParsedFunctionDefinition | null {
+  const label = str(node.data.label);
+  const code = str(node.data.code);
+  const source = code || label;
+  const definition = source.match(/^(void|int|double|float|char|bool|string)\s+([A-Za-z_][A-Za-z0-9_]*)\s*\(([^{};]*)\)\s*;?$/);
+
+  if (definition) {
+    return {
+      returnType: definition[1],
+      fnName: definition[2],
+      params: definition[3].trim(),
+    };
+  }
+
+  const labelDefinition = label.match(/^Function:\s*([A-Za-z_][A-Za-z0-9_]*)$/i);
+  if (!labelDefinition) return null;
+
+  return {
+    returnType: 'void',
+    fnName: labelDefinition[1],
+    params: '',
   };
 }
 
@@ -817,6 +847,43 @@ function collectGeneratedHelperDeclarations(nodes: Node<NodeData>[]): string[] {
     declarations.push([
       `void ${call.fnName}(${params}) {`,
       `    ${body}`,
+      '}',
+    ].join('\n'));
+  }
+
+  return declarations;
+}
+
+function collectManualHelperDeclarations(
+  nodes: Node<NodeData>[],
+  adj: Map<string, Edge[]>,
+): string[] {
+  const seen = new Set<string>();
+  const nodeMap = new Map(nodes.map(node => [node.id, node]));
+  const declarations: string[] = [];
+
+  for (const node of nodes) {
+    if (node.type !== 'predefined') continue;
+
+    const definition = parseFunctionDefinitionInstruction(node);
+    if (!definition || definition.fnName === 'main' || seen.has(definition.fnName)) continue;
+
+    const firstBodyEdge = adj.get(node.id)?.[0];
+    const body = firstBodyEdge
+      ? traverse(
+          firstBodyEdge.target,
+          nodeMap,
+          adj,
+          new Set([node.id]),
+          '    ',
+          new Set(),
+        ).trimEnd()
+      : '';
+
+    seen.add(definition.fnName);
+    declarations.push([
+      `${definition.returnType} ${definition.fnName}(${definition.params}) {`,
+      body || '    // Empty helper function',
       '}',
     ].join('\n'));
   }
@@ -1191,9 +1258,10 @@ export const generateCppFromGraph = (nodes: Node[], edges: Edge[]): string => {
   );
   const allCode = collectAllCode(typedNodes);
   const topLevelDeclarations = collectTopLevelDeclarations(typedNodes);
+  const manualHelperDeclarations = collectManualHelperDeclarations(typedNodes, adj);
   const generatedHelperDeclarations = collectGeneratedHelperDeclarations(typedNodes);
-  const declarations = [...topLevelDeclarations, ...generatedHelperDeclarations];
-  const includes = detectIncludes([...allCode, ...generatedHelperDeclarations, bodyLines]);
+  const declarations = [...topLevelDeclarations, ...manualHelperDeclarations, ...generatedHelperDeclarations];
+  const includes = detectIncludes([...allCode, ...manualHelperDeclarations, ...generatedHelperDeclarations, bodyLines]);
   const missingInputDeclarations = buildMissingInputDeclarations(bodyLines);
   const mainBody = [
     ...missingInputDeclarations.map(line => `    ${line}`),

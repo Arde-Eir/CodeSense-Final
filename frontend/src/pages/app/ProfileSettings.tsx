@@ -2,6 +2,7 @@ import React, { useEffect, useState, useRef, useCallback } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useAuth } from '@/components/AuthContext'
 import { supabase } from '@/services/supabase'
+import { getProfileImageUrls } from '@/services/ProfileImages'
 import { getLevelProgress, getXPToNextLevel, getLevelName, XP_LEVELS, calculateLevel } from '@/types'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -320,27 +321,9 @@ export const ProfileSettings: React.FC = () => {
       if (activityError) throw new Error(`Activity log lookup failed: ${activityError.message}`)
       setActivityLog((al ?? []) as ActivityLogEntry[])
 
-      // Avatar
-      const { data: avatarFiles, error: avatarError } = await supabase.storage.from('Avatars').list(user.id, { limit: 10 })
-      if (avatarError) throw new Error(`Avatar list failed: ${avatarError.message}`)
-      const af = avatarFiles?.find(f => f.id && f.name && !f.name.includes('banner') && f.metadata?.mimetype?.startsWith('image/'))
-        ?? avatarFiles?.find(f => f.id && f.name && f.name !== 'banner')
-      if (af) {
-        const { data: ud } = supabase.storage.from('Avatars').getPublicUrl(`${user.id}/${af.name}`)
-        setAvatarUrl(ud.publicUrl)
-      } else {
-        setAvatarUrl(null)
-      }
-
-      // Banner
-      const { data: bannerFiles, error: bannerError } = await supabase.storage.from('Avatars').list(`${user.id}/banner`, { limit: 1 })
-      if (bannerError) throw new Error(`Banner list failed: ${bannerError.message}`)
-      if (bannerFiles && bannerFiles.length > 0) {
-        const { data: ud } = supabase.storage.from('Avatars').getPublicUrl(`${user.id}/banner/${bannerFiles[0].name}`)
-        setBannerUrl(ud.publicUrl)
-      } else {
-        setBannerUrl(null)
-      }
+      const profileImages = await getProfileImageUrls(user.id)
+      setAvatarUrl(profileImages.avatarUrl)
+      setBannerUrl(profileImages.bannerUrl)
     } catch (e) { console.error('Profile fetch error:', e) }
     finally { setLoading(false) }
   }, [user])

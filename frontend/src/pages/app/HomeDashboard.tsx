@@ -3,6 +3,7 @@ import React, { useEffect, useState, useRef, useCallback, useMemo } from 'react'
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '@/components/AuthContext';
 import { supabase } from '@/services/supabase';
+import { getProfileImageUrlMap, getProfileImageUrls } from '@/services/ProfileImages';
 import { getLevelProgress, getXPToNextLevel, getRank } from '@/types'
 import { PlayerDetailModal } from '@/components/PlayerDetailModal'
 
@@ -1041,6 +1042,14 @@ interface DashboardStats {
   levelProgress: number
 }
 
+interface HomeLeaderboardPlayer {
+  id: string;
+  playername: string;
+  totalxp: number;
+  currentlevel: number;
+  avatarUrl?: string | null;
+}
+
 const MAX_SEARCH_LENGTH = 100
 
 function sanitizeSearchQuery(q: string): string {
@@ -1307,7 +1316,7 @@ export const HomeDashboard: React.FC = () => {
   const [stats, setStats] = useState<DashboardStats>({ sandboxRuns: 0, questsCompleted: 0, xpToNextLevel: null, levelProgress: 0 })
   const [statsLoading, setStatsLoading] = useState(true)
   const [avatarUrl, setAvatarUrl] = useState<string | null>(null)
-  const [leaderboard, setLeaderboard] = useState<{ id: string; playername: string; totalxp: number; currentlevel: number }[]>([])
+  const [leaderboard, setLeaderboard] = useState<HomeLeaderboardPlayer[]>([])
   const [myRank, setMyRank] = useState<number | null>(null)
   const [profileMenuOpen, setProfileMenuOpen] = useState(false)
   const profileMenuRef = useRef<HTMLDivElement>(null)
@@ -1362,6 +1371,13 @@ export const HomeDashboard: React.FC = () => {
 
   const searchAbortRef = useRef<AbortController | null>(null)
 
+  useEffect(() => {
+    return () => {
+      searchAbortRef.current?.abort()
+      searchAbortRef.current = null
+    }
+  }, [])
+
   const runSearch = useCallback(async (q: string) => {
     if (searchAbortRef.current) searchAbortRef.current.abort()
     const controller = new AbortController()
@@ -1372,14 +1388,14 @@ export const HomeDashboard: React.FC = () => {
     try {
       const { data: players } = await supabase.from('users').select('id, playername, totalxp, currentlevel').ilike('playername', `%${q}%`).limit(5)
       const [t, ph, d] = await Promise.all([
-        supabase.from('quests').select('id, title, phase, difficulty, basexp').ilike('title',       `%${q}%`).eq('isactive', true).limit(5),
-        supabase.from('quests').select('id, title, phase, difficulty, basexp').ilike('phase',       `%${q}%`).eq('isactive', true).limit(5),
-        supabase.from('quests').select('id, title, phase, difficulty, basexp').ilike('description', `%${q}%`).eq('isactive', true).limit(5),
+        supabase.from('quests').select('id, title, phase, difficulty, basexp').ilike('title',       `%${q}%`).eq('isactive', true).eq('mode', 'campaign').limit(5),
+        supabase.from('quests').select('id, title, phase, difficulty, basexp').ilike('phase',       `%${q}%`).eq('isactive', true).eq('mode', 'campaign').limit(5),
+        supabase.from('quests').select('id, title, phase, difficulty, basexp').ilike('description', `%${q}%`).eq('isactive', true).eq('mode', 'campaign').limit(5),
       ])
       const questMap = new Map()
       ;[...(t.data ?? []), ...(ph.data ?? []), ...(d.data ?? [])].forEach((item: any) => questMap.set(item.id, item))
       let reportsData: any[] = []
-      if (user) {
+      if (user && !isGuest) {
         const modeMatch = ['sandbox', 'campaign'].find(m => m.includes(ql) || ql.includes(m))
         const [byMode, byCode] = await Promise.all([
           modeMatch ? supabase.from('reports').select('id, type, createdat, mode_context').eq('userid', user.id).eq('mode_context', modeMatch).order('createdat', { ascending: false }).limit(5) : Promise.resolve({ data: [] }),
@@ -1401,14 +1417,15 @@ export const HomeDashboard: React.FC = () => {
     } finally {
       if (searchAbortRef.current === controller) setSearchLoading(false)
     }
-  }, [QUICK_ACTIONS, user])
+  }, [QUICK_ACTIONS, isGuest, user])
 
   const fetchLeaderboard = useCallback(async () => {
     if (!user) return
     try {
       const { data: lb } = await supabase.from('users').select('id, playername, totalxp, currentlevel').eq('isactive', true).order('totalxp', { ascending: false }).limit(10)
       if (lb) {
-        setLeaderboard(lb)
+        const imageMap = await getProfileImageUrlMap(lb.map(player => player.id))
+        setLeaderboard(lb.map(player => ({ ...player, ...imageMap.get(player.id) })))
         const myPos = lb.findIndex(u => u.id === user.id)
         if (myPos !== -1) { setMyRank(myPos + 1) }
         else {
@@ -1422,12 +1439,10 @@ export const HomeDashboard: React.FC = () => {
   const fetchAvatar = useCallback(async (cancelled?: { current: boolean }) => {
     if (!user?.id) return
     try {
-      const { data: avatarFiles } = await supabase.storage.from('Avatars').list(user.id, { limit: 1 })
+      setAvatarUrl(null)
+      const profileImages = await getProfileImageUrls(user.id)
       if (cancelled?.current) return
-      if (avatarFiles && avatarFiles.length > 0) {
-        const { data: urlData } = supabase.storage.from('Avatars').getPublicUrl(`${user.id}/${avatarFiles[0].name}`)
-        if (!cancelled?.current) setAvatarUrl(urlData.publicUrl)
-      }
+      setAvatarUrl(profileImages.avatarUrl)
     } catch (e) { console.error('Avatar fetch error:', e) }
   }, [user?.id])
 
@@ -1447,7 +1462,7 @@ export const HomeDashboard: React.FC = () => {
         .order('createdat', { ascending: false })
         .limit(1)
         .maybeSingle()
-      if (snippet?.sourcecode) setLastSnippet({ sourcecode: snippet.sourcecode, createdat: snippet.createdat })
+      setLastSnippet(snippet?.sourcecode ? { sourcecode: snippet.sourcecode, createdat: snippet.createdat } : null)
       await fetchLeaderboard()
     } catch (error) { console.error('Failed to fetch stats:', error) }
     finally { setStatsLoading(false) }
@@ -1955,10 +1970,13 @@ export const HomeDashboard: React.FC = () => {
                                      : 'rgba(100,181,246,0.15)',
                           display: 'flex', alignItems: 'center', justifyContent: 'center',
                           border: rank === 1 ? '2px solid #ffd700' : '2px solid transparent',
+                          overflow: 'hidden',
                         }}>
-                          <span style={{ fontSize: 13, fontWeight: 800, color: isTop3 || isMe ? 'white' : '#64b5f6' }}>
-                            {player.playername.charAt(0).toUpperCase()}
-                          </span>
+                          {player.avatarUrl
+                            ? <img src={player.avatarUrl} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                            : <span style={{ fontSize: 13, fontWeight: 800, color: isTop3 || isMe ? 'white' : '#64b5f6' }}>
+                                {player.playername.charAt(0).toUpperCase()}
+                              </span>}
                         </div>
                         <div style={{ flex: 1, minWidth: 0 }}>
                           <div style={{ fontSize: 12.5, color: isMe ? '#4caf50' : '#e6edf3', fontWeight: (isMe || isTop3) ? 700 : 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>

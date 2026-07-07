@@ -71,6 +71,16 @@ export const MaintenanceGate: React.FC<{ children: ReactNode }> = ({ children })
   )
 }
 
+const settingStringValue = (value: unknown): string => {
+  if (typeof value !== 'string') return String(value ?? '')
+  try {
+    const parsed = JSON.parse(value)
+    return typeof parsed === 'string' ? parsed : value
+  } catch {
+    return value
+  }
+}
+
 export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
   const [user, setUser] = useState<ExplorerProfile | null>(null)
   const [isGuest, setIsGuest] = useState(false)
@@ -96,8 +106,7 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
           setMaintenanceMode(row.value === true || row.value === 'true')
         }
         if (row.key === 'maintenance_message') {
-          const msg = typeof row.value === 'string' ? row.value : JSON.stringify(row.value)
-          setMaintenanceMessage(msg.replace(/^"|"$/g, ''))
+          setMaintenanceMessage(settingStringValue(row.value))
         }
       }
     } catch {

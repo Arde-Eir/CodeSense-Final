@@ -13,6 +13,7 @@
  */
 import React, { useEffect, useState } from 'react'
 import { supabase } from '@/services/supabase'
+import { getProfileImageUrls } from '@/services/ProfileImages'
 import { getLevelProgress, getXPToNextLevel, getRank } from '@/types'
 
 interface PlayerRow {
@@ -63,6 +64,7 @@ interface PlayerProfileDetail {
   quests: QuestInsight[]
   activity: ActivityInsight[]
   avatarUrl: string | null
+  bannerUrl: string | null
 }
 
 const questTitle = (quest: QuestInsight): string => {
@@ -148,12 +150,12 @@ export const PlayerDetailModal: React.FC<{
         return
       }
 
-      const [reportsRes, activityRes, progressRes, rankRes, avatarRes] = await Promise.all([
+      const [reportsRes, activityRes, progressRes, rankRes, profileImages] = await Promise.all([
         supabase.from('reports').select('id, type, createdat, mode_context, cognitive_complexity').eq('userid', userId).order('createdat', { ascending: false }).limit(50),
         supabase.from('activity_log').select('id, type, title, description, xp_gained, createdat').eq('userid', userId).order('createdat', { ascending: false }).limit(8),
         supabase.from('mission_progress').select('questid, status, hintsused, completedat, first_completed_at, updatedat, completion_time_seconds, quests(title)').eq('userid', userId).order('updatedat', { ascending: false }).limit(50),
         supabase.from('users').select('*', { count: 'exact', head: true }).eq('isactive', true).gt('totalxp', data.totalxp ?? 0),
-        supabase.storage.from('Avatars').list(userId, { limit: 10 }),
+        getProfileImageUrls(userId),
       ])
 
       if (reportsRes.error) throw new Error(`Could not load report history: ${reportsRes.error.message}`)
@@ -166,12 +168,6 @@ export const PlayerDetailModal: React.FC<{
       const activity = (activityRes.data ?? []) as ActivityInsight[]
       const latestQuest = quests[0]
       const completedCount = (data as PlayerRow).quests_completed ?? countUniqueCompletedQuests(quests)
-      const avatarFile = avatarRes.data?.find(file => file.id && file.name && !file.name.includes('banner') && file.metadata?.mimetype?.startsWith('image/'))
-        ?? avatarRes.data?.find(file => file.id && file.name && file.name !== 'banner')
-      const avatarUrl = avatarFile
-        ? supabase.storage.from('Avatars').getPublicUrl(`${userId}/${avatarFile.name}`).data.publicUrl
-        : null
-
       setDetail({
         player: {
         ...data,
@@ -189,7 +185,8 @@ export const PlayerDetailModal: React.FC<{
         reports,
         quests,
         activity,
-        avatarUrl,
+        avatarUrl: profileImages.avatarUrl,
+        bannerUrl: profileImages.bannerUrl,
       })
       setLoading(false)
     }
@@ -210,6 +207,7 @@ export const PlayerDetailModal: React.FC<{
 
   const isMe = currentUserId === userId
   const player = detail?.player ?? null
+  const bannerUrl = detail?.bannerUrl ?? null
   // Rank from XP (not stale `currentlevel`) — see types/index.ts getRank().
   const rank     = player ? getRank(player.totalxp ?? 0) : null
   const progress = player ? getLevelProgress(player.totalxp) : 0
@@ -278,21 +276,39 @@ export const PlayerDetailModal: React.FC<{
           </>
         ) : player && (
           <>
-            {/* Header */}
-            <div style={{ display: 'flex', alignItems: 'center', gap: '16px', marginBottom: '22px' }}>
+            {bannerUrl && (
               <div style={{
-                width: '78px', height: '78px', borderRadius: '50%', flexShrink: 0,
+                height: 136,
+                margin: '-28px -28px 0',
+                background: `linear-gradient(rgba(0,0,0,0.25), rgba(0,0,0,0.55)), url(${bannerUrl}) center/cover no-repeat`,
+                borderBottom: '1px solid #30363d',
+              }} />
+            )}
+
+            {/* Header */}
+            <div style={{
+              display: 'flex',
+              alignItems: 'flex-start',
+              gap: '18px',
+              marginBottom: '22px',
+              marginTop: bannerUrl ? '-48px' : 0,
+              position: 'relative',
+              zIndex: 1,
+            }}>
+              <div style={{
+                width: '92px', height: '92px', borderRadius: '50%', flexShrink: 0,
                 background: isMe ? 'linear-gradient(135deg,#4caf50,#2d7a2d)' : 'linear-gradient(135deg,#64b5f6,#1976d2)',
                 display: 'flex', alignItems: 'center', justifyContent: 'center',
                 fontSize: '30px', fontWeight: '800', color: 'white',
-                border: '3px solid rgba(255,255,255,0.08)',
+                border: '4px solid #161b22',
+                boxShadow: '0 0 0 2px rgba(76,175,80,0.75)',
                 overflow: 'hidden',
               }}>
                 {detail?.avatarUrl
                   ? <img src={detail.avatarUrl} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
                   : player.playername.charAt(0).toUpperCase()}
               </div>
-              <div style={{ flex: 1, minWidth: 0 }}>
+              <div style={{ flex: 1, minWidth: 0, paddingTop: bannerUrl ? 54 : 0 }}>
                 <div style={{ color: '#e6edf3', fontSize: '20px', fontWeight: '800', overflow: 'hidden', textOverflow: 'ellipsis' }}>
                   {player.playername}
                   {isMe && <span style={{ fontSize: '11px', color: '#4caf50', marginLeft: '6px', fontWeight: '700' }}>(you)</span>}

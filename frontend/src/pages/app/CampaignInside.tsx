@@ -77,10 +77,7 @@ const activityTypesForQuest = (q: QuestRow): string[] => {
   return types;
 };
 
-const lessonPathForQuest = (quest: QuestRow): string =>
-  quest.everCompleted && quest.uiStatus === 'active'
-    ? `/lesson/${quest.id}?retake=1`
-    : `/lesson/${quest.id}`;
+const lessonPathForQuest = (quest: QuestRow): string => `/lesson/${quest.id}`;
 
 // ─── Small UI bits ─────────────────────────────────────────────────────────
 const StatBar: React.FC<{

@@ -3,6 +3,7 @@ import React, { useCallback, useEffect, useState, useRef, useMemo } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useAuth } from '@/components/AuthContext'
 import { supabase } from '@/services/supabase'
+import { getProfileImageUrlMap, getProfileImageUrls } from '@/services/ProfileImages'
 import { getRank } from '@/types'
 import { PlayerDetailModal } from '@/components/PlayerDetailModal'
 
@@ -17,6 +18,8 @@ interface Player {
   lastactive: string | null
   charactertype: string | null
   user_type: 'student' | 'professional' | null
+  avatarUrl?: string | null
+  bannerUrl?: string | null
 }
 
 interface SpeedRecord {
@@ -103,6 +106,39 @@ const isRecentlyActive = (iso: string | null | undefined): boolean => {
   return mins < 30
 }
 
+const PlayerAvatar: React.FC<{
+  player: Pick<Player, 'playername' | 'avatarUrl'> | null
+  size: number
+  background: string
+  border: string
+  color: string
+  fontSize: number
+  online?: boolean
+}> = ({ player, size, background, border, color, fontSize, online }) => (
+  <div style={{
+    position: 'relative',
+    width: size, height: size, borderRadius: '50%', flexShrink: 0,
+    background,
+    display: 'flex', alignItems: 'center', justifyContent: 'center',
+    border,
+    overflow: 'hidden',
+  }}>
+    {player?.avatarUrl
+      ? <img src={player.avatarUrl} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+      : <span style={{ fontSize, fontWeight: 800, color }}>
+          {player?.playername?.charAt(0).toUpperCase() ?? '?'}
+        </span>}
+    {online && (
+      <span style={{
+        position: 'absolute', bottom: 0, right: 0,
+        width: Math.max(10, Math.round(size * 0.28)), height: Math.max(10, Math.round(size * 0.28)),
+        borderRadius: '50%',
+        background: '#4caf50', border: '2px solid #0d1117',
+      }} title="Active now" />
+    )}
+  </div>
+)
+
 // ─── Main Leaderboard Page ───────────────────────────────────────────────────
 export const LeaderboardPage: React.FC = () => {
   const navigate = useNavigate()
@@ -142,7 +178,12 @@ export const LeaderboardPage: React.FC = () => {
         .not('completion_time_seconds', 'is', null)
         .order('completion_time_seconds', { ascending: true })
         .limit(50)
-      setSpeedRecords((data as any[]) ?? [])
+      const rows = ((data as any[]) ?? []) as SpeedRecord[]
+      const imageMap = await getProfileImageUrlMap(rows.map(row => row.userid))
+      setSpeedRecords(rows.map(row => ({
+        ...row,
+        users: row.users ? { ...row.users, ...imageMap.get(row.userid) } : row.users,
+      })))
     } catch (e) {
       console.error('Speed records fetch error:', e)
     } finally {
@@ -248,7 +289,11 @@ export const LeaderboardPage: React.FC = () => {
           hydratedPlayers = hydratedPlayers.sort((a, b) => b.quests_completed - a.quests_completed || b.totalxp - a.totalxp)
         }
       }
-      setPlayers(hydratedPlayers)
+      const imageMap = await getProfileImageUrlMap(hydratedPlayers.map(player => player.id))
+      setPlayers(hydratedPlayers.map(player => ({
+        ...player,
+        ...imageMap.get(player.id),
+      })))
       setTotal(count ?? 0)
     } catch (e) {
       console.error('Leaderboard fetch error:', e)
@@ -263,7 +308,8 @@ export const LeaderboardPage: React.FC = () => {
       .from('users').select('id, playername, totalxp, currentlevel, sandbox_runs, quests_completed, createdat, lastactive, charactertype, user_type')
       .eq('id', user.id).single()
     if (me) {
-      setMyPlayer(me as Player)
+      const profileImages = await getProfileImageUrls(me.id)
+      setMyPlayer({ ...(me as Player), ...profileImages })
       const { count } = await supabase
         .from('users').select('*', { count: 'exact', head: true })
         .eq('isactive', true).gt('totalxp', me.totalxp)
@@ -433,15 +479,14 @@ export const LeaderboardPage: React.FC = () => {
             <div style={{ fontSize: '28px', minWidth: '36px', textAlign: 'center' }}>
               {rankIcon(myRank)}
             </div>
-            <div style={{
-              width: '42px', height: '42px', borderRadius: '50%', flexShrink: 0,
-              background: 'linear-gradient(135deg, #4caf50, #2d7a2d)',
-              display: 'flex', alignItems: 'center', justifyContent: 'center'
-            }}>
-              <span style={{ fontSize: '18px', fontWeight: '700', color: 'white' }}>
-                {myPlayer.playername.charAt(0).toUpperCase()}
-              </span>
-            </div>
+            <PlayerAvatar
+              player={myPlayer}
+              size={42}
+              background="linear-gradient(135deg, #4caf50, #2d7a2d)"
+              border="2px solid rgba(76,175,80,0.5)"
+              color="white"
+              fontSize={18}
+            />
             <div style={{ flex: 1, minWidth: '180px' }}>
               <div style={{ color: '#4caf50', fontSize: '14px', fontWeight: '700' }}>
                 {myPlayer.playername} <span style={{ fontSize: '11px', opacity: 0.7 }}>(you)</span>
@@ -475,13 +520,8 @@ export const LeaderboardPage: React.FC = () => {
             {/* 2nd */}
             <div onClick={() => setDetailPlayer(players[1])} style={{ textAlign: 'center', flex: 1, cursor: 'pointer' }}>
               <div style={{ fontSize: '28px', marginBottom: '8px' }}>🥈</div>
-              <div style={{
-                width: '56px', height: '56px', borderRadius: '50%', margin: '0 auto 8px',
-                background: 'linear-gradient(135deg, #9e9e9e, #616161)',
-                display: 'flex', alignItems: 'center', justifyContent: 'center',
-                border: '3px solid #c0c0c0', fontSize: '22px', fontWeight: '800', color: 'white'
-              }}>
-                {players[1].playername.charAt(0).toUpperCase()}
+              <div style={{ margin: '0 auto 8px', width: 56 }}>
+                <PlayerAvatar player={players[1]} size={56} background="linear-gradient(135deg, #9e9e9e, #616161)" border="3px solid #c0c0c0" color="white" fontSize={22} />
               </div>
               <div style={{ color: '#e6edf3', fontSize: '13px', fontWeight: '600', marginBottom: '2px' }}>{players[1].playername}</div>
               <div style={{ color: '#ffc107', fontSize: '12px', fontWeight: '700' }}>{players[1].totalxp.toLocaleString()} XP</div>
@@ -490,14 +530,8 @@ export const LeaderboardPage: React.FC = () => {
             {/* 1st */}
             <div onClick={() => setDetailPlayer(players[0])} style={{ textAlign: 'center', flex: 1, cursor: 'pointer' }}>
               <div style={{ fontSize: '32px', marginBottom: '8px' }}>🥇</div>
-              <div style={{
-                width: '68px', height: '68px', borderRadius: '50%', margin: '0 auto 8px',
-                background: 'linear-gradient(135deg, #ffc107, #ff8f00)',
-                display: 'flex', alignItems: 'center', justifyContent: 'center',
-                border: '3px solid #ffd700', fontSize: '28px', fontWeight: '800', color: 'white',
-                boxShadow: '0 0 20px rgba(255,193,7,0.4)'
-              }}>
-                {players[0].playername.charAt(0).toUpperCase()}
+              <div style={{ margin: '0 auto 8px', width: 68, filter: 'drop-shadow(0 0 20px rgba(255,193,7,0.4))' }}>
+                <PlayerAvatar player={players[0]} size={68} background="linear-gradient(135deg, #ffc107, #ff8f00)" border="3px solid #ffd700" color="white" fontSize={28} />
               </div>
               <div style={{ color: '#e6edf3', fontSize: '14px', fontWeight: '700', marginBottom: '2px' }}>{players[0].playername}</div>
               <div style={{ color: '#ffc107', fontSize: '13px', fontWeight: '700' }}>{players[0].totalxp.toLocaleString()} XP</div>
@@ -506,13 +540,8 @@ export const LeaderboardPage: React.FC = () => {
             {/* 3rd */}
             <div onClick={() => setDetailPlayer(players[2])} style={{ textAlign: 'center', flex: 1, cursor: 'pointer' }}>
               <div style={{ fontSize: '28px', marginBottom: '8px' }}>🥉</div>
-              <div style={{
-                width: '56px', height: '56px', borderRadius: '50%', margin: '0 auto 8px',
-                background: 'linear-gradient(135deg, #a1887f, #6d4c41)',
-                display: 'flex', alignItems: 'center', justifyContent: 'center',
-                border: '3px solid #cd7f32', fontSize: '22px', fontWeight: '800', color: 'white'
-              }}>
-                {players[2].playername.charAt(0).toUpperCase()}
+              <div style={{ margin: '0 auto 8px', width: 56 }}>
+                <PlayerAvatar player={players[2]} size={56} background="linear-gradient(135deg, #a1887f, #6d4c41)" border="3px solid #cd7f32" color="white" fontSize={22} />
               </div>
               <div style={{ color: '#e6edf3', fontSize: '13px', fontWeight: '600', marginBottom: '2px' }}>{players[2].playername}</div>
               <div style={{ color: '#ffc107', fontSize: '12px', fontWeight: '700' }}>{players[2].totalxp.toLocaleString()} XP</div>
@@ -656,28 +685,19 @@ export const LeaderboardPage: React.FC = () => {
 
                   {/* Player */}
                   <div style={{ display: 'flex', alignItems: 'center', gap: '10px', minWidth: 0 }}>
-                    <div style={{
-                      position: 'relative',
-                      width: '34px', height: '34px', borderRadius: '50%', flexShrink: 0,
-                      background: isMe
+                    <PlayerAvatar
+                      player={player}
+                      size={34}
+                      background={isMe
                         ? 'linear-gradient(135deg, #4caf50, #2d7a2d)'
                         : rank && rank <= 3
                           ? ['linear-gradient(135deg,#ffc107,#ff8f00)', 'linear-gradient(135deg,#9e9e9e,#616161)', 'linear-gradient(135deg,#a1887f,#6d4c41)'][rank - 1]
-                          : 'rgba(100,181,246,0.15)',
-                      display: 'flex', alignItems: 'center', justifyContent: 'center',
-                      border: isMe ? '2px solid rgba(76,175,80,0.5)' : '2px solid transparent'
-                    }}>
-                      <span style={{ fontSize: '14px', fontWeight: '700', color: isMe ? 'white' : '#64b5f6' }}>
-                        {player.playername.charAt(0).toUpperCase()}
-                      </span>
-                      {online && (
-                        <span style={{
-                          position: 'absolute', bottom: 0, right: 0,
-                          width: '10px', height: '10px', borderRadius: '50%',
-                          background: '#4caf50', border: '2px solid #0d1117',
-                        }} title="Active now" />
-                      )}
-                    </div>
+                          : 'rgba(100,181,246,0.15)'}
+                      border={isMe ? '2px solid rgba(76,175,80,0.5)' : '2px solid transparent'}
+                      color={isMe ? 'white' : '#64b5f6'}
+                      fontSize={14}
+                      online={online}
+                    />
                     <div style={{ minWidth: 0 }}>
                       <div className="lb-row-player-name" style={{ color: isMe ? '#4caf50' : '#e6edf3', fontSize: '13px', fontWeight: isMe ? '700' : '500', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                         {player.playername}
@@ -825,15 +845,14 @@ export const LeaderboardPage: React.FC = () => {
                     </div>
 
                     {/* Avatar */}
-                    <div style={{
-                      width: 38, height: 38, borderRadius: '50%', flexShrink: 0,
-                      background: isMe ? 'linear-gradient(135deg,#4caf50,#2d7a2d)' : 'rgba(100,181,246,0.15)',
-                      border: `2px solid ${isMe ? 'rgba(76,175,80,0.5)' : 'rgba(100,181,246,0.2)'}`,
-                      display: 'flex', alignItems: 'center', justifyContent: 'center',
-                      fontSize: '15px', fontWeight: 700, color: isMe ? 'white' : '#64b5f6',
-                    }}>
-                      {p?.playername?.charAt(0).toUpperCase() ?? '?'}
-                    </div>
+                    <PlayerAvatar
+                      player={p}
+                      size={38}
+                      background={isMe ? 'linear-gradient(135deg,#4caf50,#2d7a2d)' : 'rgba(100,181,246,0.15)'}
+                      border={`2px solid ${isMe ? 'rgba(76,175,80,0.5)' : 'rgba(100,181,246,0.2)'}`}
+                      color={isMe ? 'white' : '#64b5f6'}
+                      fontSize={15}
+                    />
 
                     {/* Player + Quest info */}
                     <div style={{ flex: 1, minWidth: 0 }}>

@@ -4,7 +4,7 @@
 
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import {
-  ReactFlow, Background, Controls, MarkerType,
+  ReactFlow, Background, Controls, ConnectionMode, MarkerType,
   Handle, Position, applyNodeChanges, applyEdgeChanges, addEdge,
   useReactFlow, ReactFlowProvider,
 } from '@xyflow/react';
@@ -500,7 +500,7 @@ const TerminatorNode = ({ data, selected }: NodeProps<Node<ExtendedNodeData>>) =
         {data.violation && <ViolationBadge />}
         <Handle type="target" position={Position.Top}    style={handleStyle(color)} />
         <NodeLabel data={data} />
-        <Handle type="source" position={Position.Bottom} style={handleStyle(color)} />
+        <Handle type="source" id="bottom" position={Position.Bottom} style={handleStyle(color)} />
       </BaseNode>
     );
   }
@@ -513,7 +513,7 @@ const TerminatorNode = ({ data, selected }: NodeProps<Node<ExtendedNodeData>>) =
       <span style={{ pointerEvents: 'none', userSelect: 'none', fontSize: 12, fontWeight: 700, color: 'white', letterSpacing: '0.5px', textShadow: '0 2px 4px rgba(0,0,0,0.5)', overflowWrap: 'anywhere', textAlign: 'center', lineHeight: 1.25 }}>
         {String(data.label ?? '')}
       </span>
-      <Handle type="source" position={Position.Bottom} style={{ ...handleStyle(color), bottom: -6 }} />
+      <Handle type="source" id="bottom" position={Position.Bottom} style={{ ...handleStyle(color), bottom: -6 }} />
     </BaseNode>
   );
 };
@@ -527,10 +527,8 @@ const ProcessNode = ({ data, selected }: NodeProps<Node<ExtendedNodeData>>) => {
       <EditHint />
       {data.violation && <ViolationBadge />}
       <Handle type="target" position={Position.Top}    style={handleStyle(color)} />
-      <Handle type="target" id="calls-target" position={Position.Left} style={{ ...handleStyle(color), left: -6, top: '50%', transform: 'translateY(-50%)' }} />
       <NodeLabel data={data} />
-      <Handle type="source" position={Position.Bottom} style={handleStyle(color)} />
-      <Handle type="source" id="calls-source" position={Position.Right} style={{ ...handleStyle(color), right: -6, top: '50%', transform: 'translateY(-50%)' }} />
+      <Handle type="source" id="bottom" position={Position.Bottom} style={handleStyle(color)} />
     </BaseNode>
   );
 };
@@ -549,7 +547,7 @@ const DecisionNode = ({ data, selected }: NodeProps<Node<ExtendedNodeData>>) => 
         <polygon points={points} fill={fill} stroke={color} strokeWidth={selected ? 3 : 2.5} strokeLinejoin="round" />
       </svg>
       <Handle type="target" position={Position.Top}    style={{ ...handleStyle(color), top: 0, left: '50%', transform: 'translateX(-50%)' }} />
-      <Handle type="source" position={Position.Bottom} style={{ ...handleStyle(color), bottom: 0, left: '50%', transform: 'translateX(-50%)' }} />
+      <Handle type="source" id="bottom" position={Position.Bottom} style={{ ...handleStyle(color), bottom: 0, left: '50%', transform: 'translateX(-50%)' }} />
       <Handle type="source" id="right" position={Position.Right} style={{ ...handleStyle(color), right: 0, top: '50%', transform: 'translateY(-50%)' }} />
       <Handle type="source" id="left"  position={Position.Left}  style={{ ...handleStyle(color), left: 0,  top: '50%', transform: 'translateY(-50%)' }} />
       <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', pointerEvents: 'none' }}>
@@ -575,7 +573,7 @@ const IONode = ({ data, selected }: NodeProps<Node<ExtendedNodeData>>) => {
         <polygon points={points} fill={fill} stroke={color} strokeWidth={selected ? 3 : 2} strokeLinejoin="round" />
       </svg>
       <Handle type="target" position={Position.Top}    style={{ ...handleStyle(color), zIndex: 5, left: W - SKEW / 2 }} />
-      <Handle type="source" position={Position.Bottom} style={{ ...handleStyle(color), zIndex: 5, left: W / 2 - SKEW / 2 }} />
+      <Handle type="source" id="bottom" position={Position.Bottom} style={{ ...handleStyle(color), zIndex: 5, left: W / 2 - SKEW / 2 }} />
       <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1, padding: `10px ${SKEW + 12}px 10px ${SKEW}px`, boxSizing: 'border-box' }}>
         <NodeLabel data={data} />
       </div>
@@ -595,7 +593,7 @@ const PredefinedNode = ({ data, selected }: NodeProps<Node<ExtendedNodeData>>) =
       {data.violation && <ViolationBadge />}
       <Handle type="target" position={Position.Top}    style={handleStyle(color)} />
       <NodeLabel data={data} />
-      <Handle type="source" position={Position.Bottom} style={handleStyle(color)} />
+      <Handle type="source" id="bottom" position={Position.Bottom} style={handleStyle(color)} />
     </BaseNode>
   );
 };
@@ -612,7 +610,7 @@ const ConnectorNode = ({ data, selected }: NodeProps<Node<ExtendedNodeData>>) =>
       <span style={{ color: 'white', fontSize: 13, fontWeight: 800, pointerEvents: 'none', textAlign: 'center', overflowWrap: 'anywhere', lineHeight: 1.2 }}>
         {String(data.label ?? 'A')}
       </span>
-      <Handle type="source" position={Position.Bottom} style={handleStyle(color)} />
+      <Handle type="source" id="bottom" position={Position.Bottom} style={handleStyle(color)} />
     </BaseNode>
   );
 };
@@ -636,7 +634,7 @@ const OffPageConnectorNode = ({ data, selected }: NodeProps<Node<ExtendedNodeDat
           {String(data.label ?? '1')}
         </span>
       </div>
-      <Handle type="source" position={Position.Bottom} style={{ ...handleStyle(color), bottom: 0, zIndex: 5 }} />
+      <Handle type="source" id="bottom" position={Position.Bottom} style={{ ...handleStyle(color), bottom: 0, zIndex: 5 }} />
     </BaseNode>
   );
 };
@@ -662,7 +660,7 @@ const DocumentNode = ({ data, selected }: NodeProps<Node<ExtendedNodeData>>) => 
       <div style={{ position: 'absolute', top: '40%', left: '50%', transform: 'translate(-50%,-50%)', width: W - 46, zIndex: 1 }}>
         <NodeLabel data={data} />
       </div>
-      <Handle type="source" position={Position.Bottom} style={{ ...handleStyle(color), bottom: 10, zIndex: 5 }} />
+      <Handle type="source" id="bottom" position={Position.Bottom} style={{ ...handleStyle(color), bottom: 10, zIndex: 5 }} />
     </BaseNode>
   );
 };
@@ -684,7 +682,7 @@ const ManualInputNode = ({ data, selected }: NodeProps<Node<ExtendedNodeData>>) 
       <div style={{ position: 'absolute', top: '55%', left: '50%', transform: 'translate(-50%,-50%)', width: W - 46, zIndex: 1 }}>
         <NodeLabel data={data} />
       </div>
-      <Handle type="source" position={Position.Bottom} style={{ ...handleStyle(color), zIndex: 5 }} />
+      <Handle type="source" id="bottom" position={Position.Bottom} style={{ ...handleStyle(color), zIndex: 5 }} />
     </BaseNode>
   );
 };
@@ -707,7 +705,7 @@ const DelayNode = ({ data, selected }: NodeProps<Node<ExtendedNodeData>>) => {
       <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1, padding: `10px ${R}px 10px 16px`, boxSizing: 'border-box' }}>
         <NodeLabel data={data} />
       </div>
-      <Handle type="source" position={Position.Bottom} style={{ ...handleStyle(color), zIndex: 5 }} />
+      <Handle type="source" id="bottom" position={Position.Bottom} style={{ ...handleStyle(color), zIndex: 5 }} />
     </BaseNode>
   );
 };
@@ -733,7 +731,7 @@ const DatabaseNode = ({ data, selected }: NodeProps<Node<ExtendedNodeData>>) => 
       <div style={{ position: 'absolute', top: '55%', left: '50%', transform: 'translate(-50%,-50%)', width: W-20, zIndex: 1 }}>
         <NodeLabel data={data} />
       </div>
-      <Handle type="source" position={Position.Bottom} style={{ ...handleStyle(color), zIndex: 5 }} />
+      <Handle type="source" id="bottom" position={Position.Bottom} style={{ ...handleStyle(color), zIndex: 5 }} />
     </BaseNode>
   );
 };
@@ -2002,6 +2000,7 @@ const FlowGraphInner: React.FC<Props> = ({
       const edgeColor = isTrue ? '#4caf50' : isFalse ? '#ff4444' : '#64b5f6';
       const next = addEdge({
         ...params,
+        targetHandle:   isFunctionCallEdge ? 'bottom' : params.targetHandle,
         label:          edgeLabel,
         type:           'default',
         markerEnd:      { type: MarkerType.ArrowClosed, color: edgeColor },
@@ -2122,12 +2121,16 @@ const FlowGraphInner: React.FC<Props> = ({
     }));
 
     const validCfgEdges = cfg.edges.filter(e => nodeIdSet.has(e.from) && nodeIdSet.has(e.to));
+    const nodeTypeById = new Map(initialNodes.map(node => [node.id, node.type]));
     const initialEdges: Edge[] = validCfgEdges.map((edge, i) => {
       const target       = capped.find(n => n.id === edge.to);
       const hasViolation = target && stableSafetyChecks.some(c => c.line === target.line && c.status === 'UNSAFE');
       const label = String(edge.label ?? '').trim().toLowerCase();
       const isTrueEdge = label === 'true' || label === 'yes';
       const isFalseEdge = label === 'false' || label === 'no';
+      const isCallsEdge = label === 'calls'
+        && nodeTypeById.get(edge.from) === 'predefined'
+        && nodeTypeById.get(edge.to) === 'predefined';
       const color = hasViolation
         ? '#ff4444'
         : isTrueEdge
@@ -2142,6 +2145,8 @@ const FlowGraphInner: React.FC<Props> = ({
         : '#ffffff';
       return {
         id: `e-${i}`, source: edge.from, target: edge.to,
+        sourceHandle: isCallsEdge ? 'bottom' : undefined,
+        targetHandle: isCallsEdge ? 'bottom' : undefined,
         label: edge.label, type: 'default',
         animated:       !!hasViolation,
         style:          { stroke: color, strokeWidth: hasViolation ? 3 : 2 },
@@ -2301,6 +2306,7 @@ const FlowGraphInner: React.FC<Props> = ({
 
       <ReactFlow
         nodes={nodes} edges={edges} nodeTypes={nodeTypes}
+        connectionMode={ConnectionMode.Loose}
         onNodesChange={onNodesChangeHandler}
         onEdgesChange={onEdgesChangeHandler}
         onConnect={isBuildMode && !isLocked ? onConnectHandler : undefined}

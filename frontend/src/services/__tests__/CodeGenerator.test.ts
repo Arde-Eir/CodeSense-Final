@@ -150,7 +150,7 @@ describe('generateCppFromGraph', () => {
     expect(code).toContain('calculateTotal(score);');
   });
 
-  it('ignores calls-labelled reference edges when generating main control flow', () => {
+  it('generates a manual helper function section connected by a calls edge', () => {
     const nodes = [
       makeNode('s', 'terminator', 'Start'),
       makeNode('call', 'predefined', 'Call show failed', 'showFailedMessage()'),
@@ -169,6 +169,7 @@ describe('generateCppFromGraph', () => {
 
     const code = generateCppFromGraph(nodes, edges);
 
+    expect(code).toMatch(/void showFailedMessage\(\) \{\n {4}cout << "failed" << endl;\n\}/);
     expect(code).toContain('showFailedMessage();');
     expect(code).not.toMatch(/showFailedMessage\(\);\n\s*\/\/ Function definition emitted above main/);
   });

@@ -630,7 +630,8 @@ export const LessonActivity: React.FC = () => {
         hintsUsedRef.current = ex.hintsused ?? 0;
 
         let done = (Array.isArray(ex.completed_activities) ? ex.completed_activities : []) as ActivityTab[];
-        if (shouldStartFreshRetake && ex.first_completed_at && ex.status !== 'completed') {
+        let loadedStatus = ex.status;
+        if (shouldStartFreshRetake && ex.first_completed_at) {
           const { error: retakeResetErr } = await supabase
             .from('mission_progress')
             .update({
@@ -644,6 +645,7 @@ export const LessonActivity: React.FC = () => {
             .eq('questid', questId);
           if (retakeResetErr) throw new Error(`Failed to start retake for quest ${questId}: ${retakeResetErr.message}`);
           done = [];
+          loadedStatus = 'active';
           hintsUsedRef.current = 0;
           setSearchParams({}, { replace: true });
         }
@@ -658,7 +660,7 @@ export const LessonActivity: React.FC = () => {
         // first_completed_at is the durable "ever finished" stamp. If it's
         // set, this is a retake run — suppress the celebration on completion.
         hasEverFullyCompletedRef.current = !!ex.first_completed_at;
-        if (ex.status === 'completed') {
+        if (loadedStatus === 'completed') {
           setIsCompleted(true);
           setEarnedXP(ex.xp_gained ?? quest.basexp ?? 0);
           setAppPhase('game');  // show LockedBanner inside the game area
