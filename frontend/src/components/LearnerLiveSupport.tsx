@@ -140,7 +140,14 @@ export const LearnerLiveSupport: React.FC = () => {
       if (!navigator.mediaDevices?.getDisplayMedia) {
         throw new Error('This browser does not support tab sharing. Open CodeSense over HTTPS in a current browser.')
       }
-      stream = await navigator.mediaDevices.getDisplayMedia({ video: { displaySurface: 'browser', width: { ideal: 1280, max: 1920 }, frameRate: { ideal: 24, max: 24 } }, audio: false })
+      const captureOptions: DisplayMediaStreamOptions & { preferCurrentTab: boolean; selfBrowserSurface: 'include' } = {
+        video: { displaySurface: 'browser', width: { ideal: 1280, max: 1920 }, frameRate: { ideal: 24, max: 24 } },
+        audio: false,
+        // Chrome can omit the requesting tab unless it is explicitly included.
+        preferCurrentTab: true,
+        selfBrowserSurface: 'include',
+      }
+      stream = await navigator.mediaDevices.getDisplayMedia(captureOptions)
       const track = stream.getVideoTracks()[0]
       if (!track || track.getSettings().displaySurface !== 'browser') {
         throw new Error('Select the CodeSense browser tab, not a window or your entire screen.')
