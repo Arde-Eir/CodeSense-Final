@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import Editor from '@monaco-editor/react';
 import type { OnMount } from '@monaco-editor/react';
 
@@ -11,6 +11,17 @@ interface CodeEditorProps {
 
 export const CodeEditor: React.FC<CodeEditorProps> = ({ code, onChange, onEditorMount }) => {
   const [theme, setTheme] = useState<'vs-dark' | 'light'>('vs-dark');
+  const containerRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const handleSupportText = (event: Event) => {
+      if (!(event instanceof CustomEvent) || typeof event.detail !== 'string') return;
+      if (!containerRef.current?.contains(document.activeElement)) return;
+      onChange(event.detail);
+    };
+    window.addEventListener('codesense:support-editor-text', handleSupportText);
+    return () => window.removeEventListener('codesense:support-editor-text', handleSupportText);
+  }, [onChange]);
 
   const handleEditorChange = (value: string | undefined) => {
     onChange(value || '');
@@ -31,7 +42,7 @@ export const CodeEditor: React.FC<CodeEditorProps> = ({ code, onChange, onEditor
   };
 
   return (
-    <div style={{ height: '100%', width: '100%', display: 'flex', flexDirection: 'column' }}>
+    <div ref={containerRef} style={{ height: '100%', width: '100%', display: 'flex', flexDirection: 'column' }}>
       {/* Mini-toolbar for the toggle */}
       <div style={{ 
         padding: '5px 10px', 

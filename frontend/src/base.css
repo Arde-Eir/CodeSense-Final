@@ -1,0 +1,51 @@
+/* Shared theme and typography must load before any lazy route. */
+@import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;600;700&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap');
+
+/* ── Design tokens ──────────────────────────────────────── */
+:root {
+  --bg-void:      #080b10;   /* deepest background */
+  --bg-base:      #0d1117;   /* panel base */
+  --bg-elevated:  #161b22;   /* raised panels */
+  --bg-overlay:   #1c2128;   /* hover states, inputs */
+
+  --border-faint:  #1e242c;
+  --border-muted:  #2d333b;
+  --border-strong: #444c56;
+
+  --text-primary:   #e6edf3;
+  --text-secondary: #8b949e;
+  --text-muted:     #484f58;
+
+  --yellow:  #e3b341;  /* analyze accent */
+  --green:   #3fb950;  /* success / safe */
+  --blue:    #58a6ff;  /* info / links */
+  --orange:  #f0883e;  /* warnings */
+  --red:     #f85149;  /* errors / danger */
+  --purple:  #a371f7;  /* build mode accent */
+  --cyan:    #39d5d3;  /* CFG highlight */
+
+  --radius-sm: 6px;
+  --radius-md: 10px;
+  --radius-lg: 14px;
+
+  --header-h: 58px;
+  --panel-gap: 14px;
+}
+
+/* ── Reset ──────────────────────────────────────────────── */
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+/* Guard against oversize pixel/retro fonts clipping baselines.
+   Without this, fonts with tall ascenders (IBM Plex Mono bold, or any fallback
+   pixel font) can cut off descenders or push strokes outside their container. */
+html { text-size-adjust: 100%; -webkit-text-size-adjust: 100%; }
+button, input, textarea, select { font-family: inherit; line-height: 1.3; }
+
+html, body, #root {
+  height: 100%;
+  background: var(--bg-void);
+  font-family: 'IBM Plex Sans', 'Segoe UI', system-ui, sans-serif;
+  color: var(--text-primary);
+  overflow: auto;
+  -webkit-font-smoothing: antialiased;
+}

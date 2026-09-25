@@ -10,6 +10,11 @@ import {
     TutorialHint 
 } from '../types';
 
+type RewardAnalysis = Pick<
+    AnalysisResult,
+    'cognitiveComplexity' | 'cyclomaticComplexity' | 'errors' | 'safetyChecks'
+>;
+
 // Level Thresholds — must stay in sync with frontend/src/types/index.ts XP_LEVELS
 const LEVEL_THRESHOLDS: Record<number, number> = {
     1: 0,       // Squire
@@ -24,7 +29,7 @@ export class GameEngine {
     /**
      * Calculate XP reward for a code submission
      */
-    calculateReward(analysis: AnalysisResult, hintsUsed: number): { xp: number; bonus: number } {
+    calculateReward(analysis: RewardAnalysis, hintsUsed: number): { xp: number; bonus: number } {
   let xp = 10;
 
   const cogComplexity = analysis.cognitiveComplexity ?? 0;
@@ -33,14 +38,14 @@ export class GameEngine {
     : -((cogComplexity - 3) * 5);
   xp += cogRaw;
 
-  const cycloScore: number = (analysis as any).cyclomaticComplexity?.score ?? 1;
+  const cycloScore = analysis.cyclomaticComplexity?.score ?? 1;
   const cycloAdj = cycloScore <= 5 ? 3
     : cycloScore > 10 ? -Math.floor((cycloScore - 10) * 2)
     : 0;
   xp += cycloAdj;
 
   const errorCount = analysis.errors?.length ?? 0;
-  const unsafeCount = (analysis.safetyChecks ?? []).filter((s: any) => s.status === 'UNSAFE').length;
+  const unsafeCount = analysis.safetyChecks.filter(safetyCheck => safetyCheck.status === 'UNSAFE').length;
 
   let qualityBonus = 0;
   if (errorCount === 0) {

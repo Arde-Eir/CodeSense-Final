@@ -85,18 +85,29 @@ export const CampaignPage: React.FC = () => {
   const [visible,   setVisible]   = useState(false);
   const [progress,  setProgress]  = useState<Record<string, PhaseProgress>>(emptyProgress);
   const [progressLoaded, setProgressLoaded] = useState(false);
+  const [progressError, setProgressError] = useState<string | null>(null);
   const [levelInfo, setLevelInfo] = useState<Record<string, LevelInfoRow>>({});
+  const [levelInfoError, setLevelInfoError] = useState<string | null>(null);
 
   useEffect(() => {
-    supabase
-      .from('level_info')
-      .select('phase, title, subtitle, description, accent_color, banner_url')
-      .then(({ data }) => {
-        if (!data) return;
+    let cancelled = false;
+    const fetchLevelInfo = async () => {
+      try {
+        const { data, error } = await supabase
+          .from('level_info')
+          .select('phase, title, subtitle, description, accent_color, banner_url');
+        if (cancelled) return;
+        if (error) throw error;
+        if (!data) throw new Error('The level details query returned no data.');
         const map: Record<string, LevelInfoRow> = {};
         for (const row of data) map[row.phase] = row as LevelInfoRow;
         setLevelInfo(map);
-      });
+      } catch (error) {
+        if (!cancelled) setLevelInfoError(`Campaign level details could not be loaded: ${error instanceof Error ? error.message : String(error)}`);
+      }
+    };
+    fetchLevelInfo();
+    return () => { cancelled = true; };
   }, []);
 
   const userXP = user?.totalXP ?? 0;
@@ -160,55 +171,59 @@ export const CampaignPage: React.FC = () => {
 
     const fetchProgress = async () => {
       setProgressLoaded(false);
-      const { data: quests } = await supabase
-        .from('quests')
-        .select('id, phase')
-        .eq('isactive', true)
-        .eq('mode', 'campaign');
-      if (cancelled) return;
-      if (!quests) {
-        setProgress(emptyProgress());
-        setProgressLoaded(true);
-        return;
-      }
+      setProgressError(null);
+      try {
+        const { data: quests, error: questError } = await supabase
+          .from('quests')
+          .select('id, phase')
+          .eq('isactive', true)
+          .eq('mode', 'campaign');
+        if (cancelled) return;
+        if (questError) throw questError;
+        if (!quests) throw new Error('The quest query returned no data.');
 
-      const idsByPhase: Record<string, string[]> = {
-        beginner: [],
-        intermediate: [],
-        advanced: [],
-      };
-      for (const q of quests) {
-        const phase = isCampaignPhase(q.phase) ? q.phase : null;
-        if (!phase) continue;
-        if (!idsByPhase[phase]) idsByPhase[phase] = [];
-        idsByPhase[phase].push(q.id);
-      }
-
-      const allIds = quests.map(q => q.id);
-      const { data: mp } = allIds.length
-        ? await supabase
-            .from('mission_progress')
-            .select('questid, first_completed_at')
-            .eq('userid', user.id)
-            .in('questid', allIds)
-        : { data: [] as { questid: string; first_completed_at: string | null }[] };
-      if (cancelled) return;
-
-      const finishedIds = new Set(
-        (mp ?? []).filter(r => r.first_completed_at != null).map(r => r.questid)
-      );
-
-      const next: Record<string, PhaseProgress> = emptyProgress();
-      Object.keys(idsByPhase).forEach(phase => {
-        const ids = idsByPhase[phase];
-        next[phase] = {
-          total:    ids.length,
-          finished: ids.filter(id => finishedIds.has(id)).length,
+        const idsByPhase: Record<string, string[]> = {
+          beginner: [],
+          intermediate: [],
+          advanced: [],
         };
-      });
+        for (const q of quests) {
+          const phase = isCampaignPhase(q.phase) ? q.phase : null;
+          if (!phase) continue;
+          if (!idsByPhase[phase]) idsByPhase[phase] = [];
+          idsByPhase[phase].push(q.id);
+        }
 
-      setProgress(next);
-      setProgressLoaded(true);
+        const allIds = quests.map(q => q.id);
+        const { data: mp, error: progressQueryError } = allIds.length
+          ? await supabase
+              .from('mission_progress')
+              .select('questid, first_completed_at')
+              .eq('userid', user.id)
+              .in('questid', allIds)
+          : { data: [] as { questid: string; first_completed_at: string | null }[], error: null };
+        if (cancelled) return;
+        if (progressQueryError) throw progressQueryError;
+        if (!mp) throw new Error('The progress query returned no data.');
+
+        const finishedIds = new Set(
+          mp.filter(r => r.first_completed_at != null).map(r => r.questid)
+        );
+
+        const next: Record<string, PhaseProgress> = emptyProgress();
+        Object.keys(idsByPhase).forEach(phase => {
+          const ids = idsByPhase[phase];
+          next[phase] = {
+            total:    ids.length,
+            finished: ids.filter(id => finishedIds.has(id)).length,
+          };
+        });
+
+        setProgress(next);
+        setProgressLoaded(true);
+      } catch (error) {
+        if (!cancelled) setProgressError(`Campaign progress could not be loaded: ${error instanceof Error ? error.message : String(error)}`);
+      }
     };
 
     fetchProgress();
@@ -218,12 +233,12 @@ export const CampaignPage: React.FC = () => {
   // ── Status derivation ───────────────────────────────────────────────────
   const isLevelComplete = useCallback((phase: Phase): boolean => {
     const p = progress[phase] ?? { total: 0, finished: 0 };
-    return progressLoaded && p.finished >= p.total;
+    return progressLoaded && p.total > 0 && p.finished >= p.total;
   }, [progress, progressLoaded]);
   const isLevelUnlocked = useCallback((id: number): boolean => {
     if (id === 1) return true;
     const previous = dynamicLevels.find(level => level.id === id - 1);
-    return previous ? isLevelComplete(previous.phase) : true;
+    return previous ? isLevelComplete(previous.phase) : false;
   }, [dynamicLevels, isLevelComplete]);
 
   // The "next up" level is the first unlocked-but-not-complete level. It gets
@@ -273,6 +288,12 @@ export const CampaignPage: React.FC = () => {
 
         <main className="campaign-main">
           <HeroBanner />
+
+          {(progressError || levelInfoError) && (
+            <div role="alert" style={{ color: '#f85149', marginBottom: 20 }}>
+              {progressError ?? levelInfoError} Refresh the page to retry.
+            </div>
+          )}
 
           <div className="level-grid">
             {dynamicLevels.map((level, i) => {

@@ -119,6 +119,14 @@ export const BalloonPopGame: React.FC<Props> = ({ questions, onComplete, resetSi
   const rafRef       = useRef<number>(0);
   const t0Ref        = useRef<number>(0);
   const completedRef = useRef(false);
+  const completionTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const cancelCompletion = useCallback(() => {
+    if (completionTimer.current !== null) clearTimeout(completionTimer.current);
+    completionTimer.current = null;
+  }, []);
+
+  useEffect(() => cancelCompletion, [cancelCompletion]);
 
   const gs = useRef({
     balloons:     [] as FloatingBalloon[],
@@ -247,6 +255,7 @@ export const BalloonPopGame: React.FC<Props> = ({ questions, onComplete, resetSi
 
   useEffect(() => {
     if (!resetSignal) return;
+    cancelCompletion();
     completedRef.current = false;
     Object.assign(gs.current, {
       lives: TOTAL_LIVES, qIdx: 0, score: 0,
@@ -255,7 +264,7 @@ export const BalloonPopGame: React.FC<Props> = ({ questions, onComplete, resetSi
     gs.current.correctPopped.clear();
     loadQuestion(0);
     syncUi();
-  }, [resetSignal, loadQuestion, syncUi]);
+  }, [resetSignal, loadQuestion, syncUi, cancelCompletion]);
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -279,7 +288,7 @@ export const BalloonPopGame: React.FC<Props> = ({ questions, onComplete, resetSi
       }
     };
 
-    requestAnimationFrame(() => {
+    const initialFrame = requestAnimationFrame(() => {
       updateSize();
       loadQuestion(0);
       syncUi();
@@ -328,7 +337,11 @@ export const BalloonPopGame: React.FC<Props> = ({ questions, onComplete, resetSi
             syncUi();
             if (!completedRef.current) {
               completedRef.current = true;
-              setTimeout(() => onComplete(g.score, playableQuestions.length), 400);
+              const score = g.score;
+              completionTimer.current = setTimeout(() => {
+                completionTimer.current = null;
+                onComplete(score, playableQuestions.length);
+              }, 400);
             }
           } else {
             g.qIdx = next;
@@ -454,6 +467,7 @@ export const BalloonPopGame: React.FC<Props> = ({ questions, onComplete, resetSi
     rafRef.current = requestAnimationFrame(draw);
 
     return () => {
+      cancelAnimationFrame(initialFrame);
       cancelAnimationFrame(rafRef.current);
       ro.disconnect();
     };
@@ -461,6 +475,7 @@ export const BalloonPopGame: React.FC<Props> = ({ questions, onComplete, resetSi
   }, []);
 
   const restart = useCallback(() => {
+    cancelCompletion();
     completedRef.current = false;
     Object.assign(gs.current, {
       lives: TOTAL_LIVES, qIdx: 0, score: 0,
@@ -469,7 +484,7 @@ export const BalloonPopGame: React.FC<Props> = ({ questions, onComplete, resetSi
     gs.current.correctPopped.clear();
     loadQuestion(0);
     syncUi();
-  }, [loadQuestion, syncUi]);
+  }, [loadQuestion, syncUi, cancelCompletion]);
 
   if (!playableQuestions.length) return (
     <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#484f58', fontSize: 13, fontFamily: "'JetBrains Mono',monospace" }}>

@@ -53,13 +53,21 @@ const OrderingGameInner: React.FC<{ rawItems: OrderItem[]; onComplete: (score: n
   const [checked,   setChecked]   = React.useState(false);
   const [correct,   setCorrect]   = React.useState(false);
   const [submitted, setSubmitted] = React.useState(false);
+  const completionTimer = React.useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  React.useEffect(() => () => {
+    if (completionTimer.current !== null) clearTimeout(completionTimer.current);
+  }, []);
 
   const doCheck = () => {
     const isCorrect = order.every((item, i) => item.correct_order === i + 1);
     setChecked(true); setCorrect(isCorrect);
     if (isCorrect) {
       setSubmitted(true);
-      setTimeout(() => onComplete(1, 1), 700);
+      completionTimer.current = setTimeout(() => {
+        completionTimer.current = null;
+        onComplete(1, 1);
+      }, 700);
     }
   };
 
@@ -113,7 +121,7 @@ const OrderingGameInner: React.FC<{ rawItems: OrderItem[]; onComplete: (score: n
           });
           setChecked(false);
         }} style={{ padding: '11px 20px', borderRadius: 8, border: '2px solid #da3633', background: 'rgba(218,54,51,0.12)', color: '#f85149', fontWeight: 700, fontSize: 13, cursor: 'pointer', fontFamily: 'Inter,sans-serif' }}>Shuffle</button>}
-        {!submitted && <button onClick={doCheck} style={{ flex: 1, padding: '11px', borderRadius: 8, border: 'none', background: 'linear-gradient(135deg,#a371f7,#8350d4)', color: '#fff', fontWeight: 700, fontSize: 13, cursor: 'pointer', fontFamily: 'Inter,sans-serif' }}>Check Order</button>}
+        {!submitted && <button data-testid="ordering-check" onClick={doCheck} style={{ flex: 1, padding: '11px', borderRadius: 8, border: 'none', background: 'linear-gradient(135deg,#a371f7,#8350d4)', color: '#fff', fontWeight: 700, fontSize: 13, cursor: 'pointer', fontFamily: 'Inter,sans-serif' }}>Check Order</button>}
       </div>
     </div>
   );

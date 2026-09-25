@@ -8,6 +8,10 @@ const parser = require('../src/analysis/parser.js');
 const { CFGGenerator } = require('../src/analysis/cfgGenerator.ts');
 const { GameEngine } = require('../src/gamification/GameEngine.ts');
 const { SymbolicExecutor } = require('../src/analysis/symbolicexe.ts');
+const {
+  isAnalysisPhaseError,
+  runAnalysisPhase,
+} = require('../src/analysis/phaseErrors.ts');
 
 describe('Backend unit tests', () => {
   const valuesByType = (tokens, type) => tokens.filter((token) => token.type === type).map((token) => token.value);
@@ -26,6 +30,26 @@ describe('Backend unit tests', () => {
     assert.equal(errors.length, 0);
     assert.ok(extractIdentifiers(tokens).has('main'));
     assert.ok(extractIdentifiers(tokens).has('score'));
+  });
+
+  it('analysis phases preserve successful results', () => {
+    const result = runAnalysisPhase('Test phase', () => ({ completed: true }));
+    assert.deepEqual(result, { completed: true });
+  });
+
+  it('analysis phases raise a typed error with the failed phase and cause', () => {
+    const cause = new TypeError('invalid AST shape');
+
+    assert.throws(
+      () => runAnalysisPhase('Type checker', () => { throw cause; }),
+      error => {
+        assert.equal(isAnalysisPhaseError(error), true);
+        assert.equal(error.phase, 'Type checker');
+        assert.equal(error.cause, cause);
+        assert.match(error.message, /Type checker failed: invalid AST shape/);
+        return true;
+      },
+    );
   });
 
   it('Tokenizer recognizes multi-character C++ operators before single-character fallbacks', () => {
@@ -150,7 +174,7 @@ describe('Backend unit tests', () => {
         return 0;
       }
     `);
-    const safetyChecks = new SymbolicExecutor().execute(ast);
+    const safetyChecks = new SymbolicExecutor({}).execute(ast);
     const loopWarnings = safetyChecks.filter((check) => (
       check.type === 'loop'
       && /Infinite loop: condition variables \[choice\] never change in the while body/.test(check.message)

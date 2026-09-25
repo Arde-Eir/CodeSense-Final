@@ -195,7 +195,7 @@ const QuestCard: React.FC<{
 };
 
 // ─── Sidebar panels ───────────────────────────────────────────────────────
-const ProgressPanel: React.FC<{ stats: LevelStats; phase: string }> = ({ stats, phase }) => {
+const ProgressPanel: React.FC<{ stats: LevelStats; hasNextLevel: boolean }> = ({ stats, hasNextLevel }) => {
   const xpMaxed = stats.xpTotal > 0 && stats.xpEarned >= stats.xpTotal;
   return (
     <div style={{ background: 'rgba(255,255,255,.02)', border: '1.5px solid rgba(255,255,255,.06)', borderRadius: 13, padding: '18px 16px', animation: 'questIn .5s ease .15s both' }}>
@@ -210,7 +210,7 @@ const ProgressPanel: React.FC<{ stats: LevelStats; phase: string }> = ({ stats, 
       <StatBar icon="🔥" label="Streak"       current={stats.streak}   total={stats.total}   color="#f0883e" />
       {xpMaxed && (
         <div style={{ marginTop: 12, padding: '8px 12px', borderRadius: 8, background: 'rgba(227,179,65,0.08)', border: '1px solid rgba(227,179,65,0.3)', fontSize: 11, color: '#e3b341', fontFamily: "'Syne',sans-serif", textAlign: 'center', lineHeight: 1.5 }}>
-          ⚡ Level XP maxed!{phase !== 'advanced' ? ' Advance to the next level to earn more.' : ' You\'ve mastered all levels!'}
+          ⚡ Level XP maxed!{hasNextLevel ? ' Advance to the next level to earn more.' : ' You\'ve earned all available XP in this level.'}
         </div>
       )}
     </div>
@@ -294,28 +294,70 @@ export const CampaignInside: React.FC = () => {
   const [loading,   setLoading]   = useState(true);
   const [error,     setError]     = useState<string | null>(null);
   const [userXP,    setUserXP]    = useState(0);
+  const [hasNextLevel, setHasNextLevel] = useState(false);
 
-  const questIdsRef = useRef<string[]>([]);
+  const fetchIdRef = useRef(0);
 
   // ── Fetch everything ────────────────────────────────────────────────────
   const fetchAll = useCallback(async () => {
     if (!user?.id) return;
+    const fetchId = ++fetchIdRef.current;
     setLoading(true); setError(null);
+    setQuests([]);
+    setStats({ finished: 0, total: 0, xpEarned: 0, xpTotal: 0, streak: 0 });
+    setHasNextLevel(false);
+    setLevelInfo(defaultLevelInfoForPhase(phase));
     try {
+      const levelNumber = levelForPhase(phase);
+      if (levelNumber > 1) {
+        const previousPhase = phaseForLevel(levelNumber - 1);
+        const { data: previousQuests, error: previousQuestError } = await supabase
+          .from('quests')
+          .select('id')
+          .eq('phase', previousPhase)
+          .eq('mode', 'campaign')
+          .eq('isactive', true);
+        if (fetchId !== fetchIdRef.current) return;
+        if (previousQuestError) throw previousQuestError;
+        if (!previousQuests) throw new Error('The previous level quest query returned no data.');
+        if (previousQuests.length === 0) {
+          setError(`Level ${levelNumber} is locked because Level ${levelNumber - 1} has no active quests.`);
+          return;
+        }
+
+        const { data: previousProgress, error: previousProgressError } = await supabase
+          .from('mission_progress')
+          .select('questid, first_completed_at')
+          .eq('userid', user.id)
+          .in('questid', previousQuests.map(quest => quest.id));
+        if (fetchId !== fetchIdRef.current) return;
+        if (previousProgressError) throw previousProgressError;
+        if (!previousProgress) throw new Error('The previous level progress query returned no data.');
+        const completedIds = new Set(previousProgress.filter(row => row.first_completed_at != null).map(row => row.questid));
+        if (previousQuests.some(quest => !completedIds.has(quest.id))) {
+          setError(`Level ${levelNumber} is locked. Finish every active quest in Level ${levelNumber - 1} first.`);
+          return;
+        }
+      }
+
       // 1. User XP (header)
-      const { data: ud } = await supabase
+      const { data: ud, error: userError } = await supabase
         .from('users')
         .select('totalxp')
         .eq('id', user.id)
         .single();
+      if (fetchId !== fetchIdRef.current) return;
+      if (userError) throw userError;
       if (ud?.totalxp !== undefined) setUserXP(ud.totalxp ?? 0);
 
       // 2. Phase banner copy
-      const { data: lm } = await supabase
+      const { data: lm, error: levelInfoError } = await supabase
         .from('level_info')
         .select('*')
         .eq('phase', phase)
         .maybeSingle();
+      if (fetchId !== fetchIdRef.current) return;
+      if (levelInfoError) throw levelInfoError;
       if (lm) {
         const fallback = defaultLevelInfoForPhase(phase);
         setLevelInfo({
@@ -329,6 +371,18 @@ export const CampaignInside: React.FC = () => {
         setLevelInfo(defaultLevelInfoForPhase(phase));
       }
 
+      const nextPhase = phaseForLevel(levelNumber + 1);
+      const { data: nextQuests, error: nextQuestError } = await supabase
+        .from('quests')
+        .select('id')
+        .eq('phase', nextPhase)
+        .eq('mode', 'campaign')
+        .eq('isactive', true)
+        .limit(1);
+      if (fetchId !== fetchIdRef.current) return;
+      if (nextQuestError) throw nextQuestError;
+      if (!nextQuests) throw new Error('The next level quest query returned no data.');
+
       // 3. Quests for this phase
       const { data: qData, error: qErr } = await supabase
         .from('quests')
@@ -336,10 +390,12 @@ export const CampaignInside: React.FC = () => {
         .eq('phase', phase)
         .eq('mode', 'campaign')
         .eq('isactive', true)
-        .order('sortorder', { ascending: true });
+        .order('sortorder', { ascending: true })
+        .order('id', { ascending: true });
+      if (fetchId !== fetchIdRef.current) return;
       if (qErr) throw qErr;
-      const qList = (qData ?? []) as unknown as Quest[];
-      questIdsRef.current = qList.map(q => q.id);
+      if (!qData) throw new Error('The current level quest query returned no data.');
+      const qList = qData as unknown as Quest[];
 
       // 4. This user's mission_progress for those quests
       let mp: MissionProgress[] = [];
@@ -348,19 +404,24 @@ export const CampaignInside: React.FC = () => {
           .from('mission_progress')
           .select('id,userid,questid,status,attempts,hintsused,startedat,completedat,first_completed_at,updatedat,xp_gained,completed_activities')
           .eq('userid', user.id)
-          .in('questid', questIdsRef.current);
+          .in('questid', qList.map(quest => quest.id));
+        if (fetchId !== fetchIdRef.current) return;
         if (pErr) throw pErr;
-        mp = (pData ?? []) as MissionProgress[];
+        if (!pData) throw new Error('The current level progress query returned no data.');
+        mp = pData as MissionProgress[];
       }
 
       const built = buildQuests(qList, mp);
       setQuests(built.rows);
       setStats(built.stats);
+      setHasNextLevel(nextQuests.length > 0);
     } catch (err) {
-      console.error('CampaignInside fetch error:', err);
-      setError(err instanceof Error ? err.message : 'Failed to load level data');
+      if (fetchId === fetchIdRef.current) {
+        console.error('CampaignInside fetch error:', err);
+        setError(err instanceof Error ? err.message : String(err));
+      }
     } finally {
-      setLoading(false);
+      if (fetchId === fetchIdRef.current) setLoading(false);
     }
   }, [user?.id, phase]);
 
@@ -397,13 +458,12 @@ export const CampaignInside: React.FC = () => {
     [quests]
   );
 
-  // Level fully complete = every quest has been finished at least once.
-  // Also treat a phase with zero active quests as "done" so the next-level
-  // button still appears and the user isn't stuck.
-  const allDone = stats.total === 0 ? !loading : stats.finished >= stats.total;
+  // Only a successfully loaded, nonempty level can be complete.
+  const allDone = !loading && !error && stats.total > 0 && stats.finished >= stats.total;
+  const completionCta = hasNextLevel ? 'Next Level →' : '🏠 Back to Home';
 
   const goToNextLevel = () => {
-    navigate(`/campaign/inside/${phaseForLevel(levelNumber + 1)}`);
+    navigate(hasNextLevel ? `/campaign/inside/${phaseForLevel(levelNumber + 1)}` : '/home');
   };
 
   return (
@@ -492,7 +552,7 @@ export const CampaignInside: React.FC = () => {
     }}
     onMouseEnter={e => { e.currentTarget.style.background = `${accent}30`; e.currentTarget.style.boxShadow = `0 0 24px ${accent}55`; }}
     onMouseLeave={e => { e.currentTarget.style.background = `${accent}18`; e.currentTarget.style.boxShadow = `0 0 18px ${accent}33`; }}>
-    {phase === 'advanced' ? '🏠 Back to Home' : 'Next Level →'}
+    {completionCta}
   </button>
 </div>
               <div style={{ fontSize: 10, color: 'rgba(240,246,252,.45)', fontFamily: "'JetBrains Mono',monospace", background: 'rgba(8,12,17,.6)', padding: '3px 10px', borderRadius: 5, backdropFilter: 'blur(6px)' }}>
@@ -517,6 +577,8 @@ export const CampaignInside: React.FC = () => {
                 ? Array.from({ length: 5 }).map((_, i) => (
                     <div key={i} style={{ height: 64, borderRadius: 10, background: 'rgba(255,255,255,.025)', border: '1.5px solid rgba(255,255,255,.04)', animation: 'shimPulse 1.2s ease-in-out infinite', animationDelay: `${i * .08}s` }} />
                   ))
+                : error
+                ? null
                 : quests.length === 0
                 ? <div style={{ height: 200, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 10 }}>
                     <span style={{ fontSize: 34, opacity: 0.13 }}>📭</span>
@@ -532,12 +594,12 @@ export const CampaignInside: React.FC = () => {
 
             {/* Sidebar */}
             <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
-              <ProgressPanel      stats={stats} phase={phase} />
+              <ProgressPanel      stats={stats} hasNextLevel={hasNextLevel} />
               <ActivityTypesPanel quests={quests} />
               <QuestMixPanel      quests={quests} />
 
               {/* Continue CTA */}
-              {!loading && nextQuest && (
+              {!loading && !error && nextQuest && (
                 <button onClick={() => navigate(lessonPathForQuest(nextQuest))} style={{ width: '100%', padding: 12, borderRadius: 10, border: 'none', background: `linear-gradient(135deg,${accent},${accent}cc)`, color: '#080c11', fontSize: 12, fontWeight: 900, cursor: 'pointer', letterSpacing: '.3px', fontFamily: "'Syne',sans-serif", boxShadow: `0 4px 18px ${accent}40`, transition: 'all .2s', animation: 'questIn .5s ease .38s both', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6 }}
                   onMouseEnter={e => { e.currentTarget.style.transform = 'translateY(-2px)'; e.currentTarget.style.boxShadow = `0 8px 26px ${accent}55`; }}
                   onMouseLeave={e => { e.currentTarget.style.transform = 'none'; e.currentTarget.style.boxShadow = `0 4px 18px ${accent}40`; }}>
@@ -553,7 +615,7 @@ export const CampaignInside: React.FC = () => {
                   <div style={{ fontSize: 12, fontWeight: 700, color: '#3fb950', fontFamily: "'Syne',sans-serif" }}>Level {levelNumber} Complete!</div>
                   <div style={{ fontSize: 10, color: '#484f58', marginTop: 4, fontFamily: "'JetBrains Mono',monospace" }}>Total XP earned: {stats.xpEarned}</div>
                   <div style={{ fontSize: 10, color: '#8b949e', marginTop: 8, fontFamily: "'Syne',sans-serif" }}>
-                    Use <span style={{ color: accent, fontWeight: 700 }}>{phase === 'advanced' ? 'Back to Home' : 'Next Level →'}</span> above.
+                    Use <span style={{ color: accent, fontWeight: 700 }}>{completionCta}</span> above.
                   </div>
                 </div>
               )}

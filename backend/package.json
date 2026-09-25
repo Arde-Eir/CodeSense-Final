@@ -27,13 +27,15 @@
     "body-parser": "^2.3.0",
     "cors": "^2.8.6",
     "express": "^5.2.1",
-    "peggy": "^3.0.2"
+    "peggy": "^3.0.2",
+    "standardwebhooks": "^1.1.1"
   },
   "overrides": {
     "form-data": "^4.0.6",
     "path-to-regexp": "^8.4.2"
   },
   "devDependencies": {
+    "@electric-sql/pglite": "0.5.8",
     "@types/cors": "^2.8.19",
     "@types/express": "^5.0.6",
     "@types/node": "^20.11.0",

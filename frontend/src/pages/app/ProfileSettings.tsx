@@ -198,7 +198,6 @@ export const ProfileSettings: React.FC = () => {
   const [activeTab, setActiveTab] = useState<'overview' | 'achievements' | 'activity' | 'settings' | 'learn'>('overview')
   const [isEditing, setIsEditing] = useState(false)
   const [editName, setEditName] = useState('')
-  const [editEmail, setEditEmail] = useState('')
   const [saving, setSaving] = useState(false)
   const [uploadingAvatar, setUploadingAvatar] = useState(false)
   const [uploadingBanner, setUploadingBanner] = useState(false)
@@ -252,7 +251,6 @@ export const ProfileSettings: React.FC = () => {
       if (prof) {
         setProfile(prof)
         setEditName(prof.playername)
-        setEditEmail(prof.email ?? '')
         setEditCharType(isCharacterType(prof.charactertype) ? prof.charactertype : 'squire')
         setEditUserType(isUserType(prof.user_type) ? prof.user_type : 'student')
       }
@@ -260,7 +258,7 @@ export const ProfileSettings: React.FC = () => {
       // Leaderboard
       const { data: lb, error: leaderboardError } = await supabase
         .from('users').select('id, playername, totalxp')
-        .eq('isactive', true).order('totalxp', { ascending: false }).limit(10)
+        .eq('isactive', true).eq('is_banned', false).order('totalxp', { ascending: false }).limit(10)
       if (leaderboardError) throw new Error(`Leaderboard lookup failed: ${leaderboardError.message}`)
       if (lb) {
         setLeaderboard(lb.map((u, i) => ({ rank: i + 1, userid: u.id, totalxp: u.totalxp ?? 0, playername: u.playername ?? 'Unknown Player' })))
@@ -268,7 +266,7 @@ export const ProfileSettings: React.FC = () => {
         if (myPos !== -1) { setMyRank(myPos + 1) }
         else {
           const { count, error: rankError } = await supabase.from('users').select('*', { count: 'exact', head: true })
-            .eq('isactive', true).gt('totalxp', prof?.totalxp ?? 0)
+            .eq('isactive', true).eq('is_banned', false).gt('totalxp', prof?.totalxp ?? 0)
           if (rankError) throw new Error(`Rank lookup failed: ${rankError.message}`)
           setMyRank((count ?? 0) + 1)
         }
@@ -399,11 +397,10 @@ export const ProfileSettings: React.FC = () => {
     if (!user) return; setSaving(true)
     try {
       const trimmedName = editName.trim()
-      const trimmedEmail = editEmail.trim()
       if (!trimmedName) throw new Error('Player name is required.')
-      const { error } = await supabase.from('users').update({ playername: trimmedName, email: trimmedEmail }).eq('id', user.id)
+      const { error } = await supabase.from('users').update({ playername: trimmedName }).eq('id', user.id)
       if (error) throw new Error(`Profile update failed: ${error.message}`)
-      setProfile(prev => prev ? { ...prev, playername: trimmedName, email: trimmedEmail } : prev)
+      setProfile(prev => prev ? { ...prev, playername: trimmedName } : prev)
       setIsEditing(false); flashSave('Profile updated!')
     } catch (e) {
       console.error(e)
@@ -431,14 +428,17 @@ export const ProfileSettings: React.FC = () => {
 
   const handleChangePassword = async () => {
     setPwMsg(null)
-    if (!profile?.email) { setPwMsg({ text: 'Profile email is missing. Save an email before changing your password.', ok: false }); return }
     if (!pwCurrent) { setPwMsg({ text: 'Enter your current password', ok: false }); return }
     if (!pwNew || pwNew.length < 8) { setPwMsg({ text: 'New password must be at least 8 characters', ok: false }); return }
     if (pwNew !== pwConfirm) { setPwMsg({ text: 'Passwords do not match', ok: false }); return }
     setSaving(true)
     try {
+      const { data: authData, error: authError } = await supabase.auth.getUser()
+      if (authError || !authData.user?.email) {
+        throw new Error(`Could not verify the account email: ${authError?.message ?? 'authenticated email is missing'}`)
+      }
       const { error: reAuthErr } = await supabase.auth.signInWithPassword({
-        email: profile.email, password: pwCurrent,
+        email: authData.user.email, password: pwCurrent,
       })
       if (reAuthErr) { setPwMsg({ text: 'Current password is incorrect', ok: false }); return }
       const { error } = await supabase.auth.updateUser({ password: pwNew })

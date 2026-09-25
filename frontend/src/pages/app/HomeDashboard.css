@@ -1,0 +1,234 @@
+* { box-sizing: border-box; }
+
+@keyframes fadeSlideDown {
+  from { opacity: 0; transform: translateY(-8px) scale(0.97); }
+  to   { opacity: 1; transform: translateY(0)   scale(1);    }
+}
+@keyframes fadeSlideUp {
+  from { opacity: 0; transform: translateY(6px); }
+  to   { opacity: 1; transform: translateY(0);   }
+}
+@keyframes modalFadeIn {
+  from { opacity: 0; transform: scale(0.95) translateY(12px); }
+  to   { opacity: 1; transform: scale(1) translateY(0); }
+}
+@keyframes overlayFadeIn {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50%       { opacity: 0.5; }
+}
+
+.cs-btn {
+  position: relative; overflow: hidden;
+  transition: transform 0.15s ease, box-shadow 0.15s ease, background 0.2s ease, filter 0.15s ease;
+  cursor: pointer;
+}
+.cs-btn:hover  { transform: translateY(-1px); }
+.cs-btn:active { transform: scale(0.97) translateY(0); }
+
+.cs-card {
+  transition: transform 0.2s ease, box-shadow 0.2s ease, border-color 0.2s ease;
+  cursor: pointer;
+}
+.cs-card:hover {
+  transform: translateY(-4px);
+  box-shadow: 0 16px 40px rgba(0,0,0,0.45);
+}
+.cs-card:active { transform: translateY(-1px) scale(0.99); }
+
+.cs-icon-btn {
+  transition: color 0.15s ease, transform 0.15s ease, background 0.15s ease;
+  border-radius: 8px;
+}
+.cs-icon-btn:hover  { color: #e6edf3 !important; transform: scale(1.12); background: rgba(255,255,255,0.07) !important; }
+.cs-icon-btn:active { transform: scale(0.92); }
+
+.cs-avatar-btn {
+  transition: transform 0.15s ease, border-color 0.15s ease, box-shadow 0.2s ease;
+}
+.cs-avatar-btn:hover  { transform: scale(1.08); box-shadow: 0 0 0 3px rgba(76,175,80,0.35) !important; }
+.cs-avatar-btn:active { transform: scale(0.94); }
+
+.cs-menu-item {
+  transition: background 0.12s ease, padding-left 0.15s ease;
+}
+.cs-menu-item:hover { background: rgba(255,255,255,0.08) !important; padding-left: 22px !important; }
+.cs-menu-item:active { background: rgba(255,255,255,0.14) !important; }
+
+.cs-menu-danger {
+  transition: background 0.12s ease, padding-left 0.15s ease;
+}
+.cs-menu-danger:hover { background: rgba(248,81,73,0.1) !important; padding-left: 22px !important; }
+.cs-menu-danger:active { background: rgba(248,81,73,0.18) !important; }
+
+.cs-leaderboard-row {
+  transition: background 0.15s ease, transform 0.15s ease;
+  border-radius: 8px;
+  cursor: default;
+}
+.cs-leaderboard-row:hover {
+  background: rgba(255,255,255,0.05) !important;
+  transform: translateX(4px);
+}
+
+.cs-search-result-btn {
+  transition: background 0.12s ease, padding-left 0.15s ease;
+}
+.cs-search-result-btn:hover { background: rgba(76,175,80,0.08) !important; padding-left: 22px !important; }
+.cs-search-result-btn:active { background: rgba(76,175,80,0.15) !important; }
+
+.cs-outline-btn {
+  transition: background 0.18s ease, box-shadow 0.18s ease, transform 0.15s ease;
+}
+.cs-outline-btn:hover {
+  background: rgba(100,181,246,0.1) !important;
+  box-shadow: 0 0 0 3px rgba(100,181,246,0.15) !important;
+  transform: translateY(-2px) !important;
+}
+.cs-outline-btn:active { transform: scale(0.98) !important; }
+
+.cs-gold-btn {
+  transition: background 0.18s ease, box-shadow 0.18s ease, transform 0.15s ease;
+}
+.cs-gold-btn:hover {
+  background: rgba(255,193,7,0.1) !important;
+  box-shadow: 0 0 0 3px rgba(255,193,7,0.18) !important;
+  transform: translateY(-2px) !important;
+}
+.cs-gold-btn:active { transform: scale(0.98) !important; }
+
+.cs-progress-btn {
+  transition: background 0.18s ease, box-shadow 0.18s ease, transform 0.15s ease;
+}
+.cs-progress-btn:hover {
+  background: rgba(76,175,80,0.1) !important;
+  box-shadow: 0 0 0 3px rgba(76,175,80,0.18) !important;
+  transform: translateY(-2px) !important;
+}
+.cs-progress-btn:active { transform: scale(0.98) !important; }
+
+.cs-signup-btn {
+  transition: background 0.18s ease, transform 0.15s ease, box-shadow 0.18s ease;
+}
+.cs-signup-btn:hover {
+  background: #43a047 !important;
+  transform: translateY(-2px) !important;
+  box-shadow: 0 8px 24px rgba(76,175,80,0.4) !important;
+}
+.cs-signup-btn:active { transform: scale(0.96) !important; }
+
+.cs-explore-btn:hover {
+  filter: brightness(1.18) !important;
+  box-shadow: 0 8px 24px rgba(76,175,80,0.45) !important;
+}
+
+.cs-learn-btn:hover {
+  filter: brightness(1.18) !important;
+  box-shadow: 0 8px 24px rgba(255,167,38,0.45) !important;
+}
+
+.cs-dropdown {
+  animation: fadeSlideDown 0.2s cubic-bezier(0.16,1,0.3,1) forwards;
+}
+
+.cs-search-bar {
+  transition: border-color 0.2s ease, box-shadow 0.2s ease;
+}
+.cs-search-bar:focus-within {
+  border-color: rgba(76,175,80,0.55) !important;
+  box-shadow: 0 0 0 3px rgba(76,175,80,0.1) !important;
+}
+
+.cs-stat-box {
+  transition: background 0.2s ease, transform 0.2s ease, box-shadow 0.2s ease;
+}
+.cs-stat-box:hover {
+  background: rgba(255,255,255,0.07) !important;
+  transform: translateY(-3px) !important;
+  box-shadow: 0 8px 20px rgba(0,0,0,0.3) !important;
+}
+
+.cs-announcement-card {
+  transition: background 0.15s ease, border-color 0.15s ease, transform 0.15s ease;
+}
+.cs-announcement-card:hover {
+  background: rgba(255,255,255,0.04) !important;
+  transform: translateX(3px);
+}
+
+.cs-modal-close:hover {
+  background: rgba(255,255,255,0.12) !important;
+  transform: scale(1.1);
+}
+.cs-modal-close { transition: background 0.15s ease, transform 0.15s ease; }
+
+/* ── Mobile responsive ── */
+@media (max-width: 768px) {
+  .cs-home-header {
+    padding: 12px 16px !important;
+    margin: 10px 0 16px !important;
+    gap: 10px !important;
+    flex-wrap: wrap !important;
+  }
+  .cs-home-search {
+    width: 100% !important;
+    order: 3;
+  }
+  .cs-home-grid {
+    grid-template-columns: 1fr !important;
+    gap: 16px !important;
+    width: 100% !important;
+    padding: 0 14px !important;
+    box-sizing: border-box !important;
+  }
+  .cs-home-qa-grid {
+    grid-template-columns: 1fr !important;
+    gap: 16px !important;
+  }
+  .cs-home-hero {
+    min-height: 0 !important;
+    padding: 22px 18px !important;
+  }
+  .hero-name {
+    font-size: 26px !important;
+  }
+  .hero-quote {
+    font-size: 14px !important;
+    margin: 14px auto 16px !important;
+    max-width: 100% !important;
+  }
+  .hero-stat-chip {
+    font-size: 13px !important;
+    padding: 8px 14px !important;
+  }
+  .hero-rank-badge {
+    font-size: 13px !important;
+    padding: 5px 14px !important;
+  }
+  .mc-card {
+    padding: 20px 18px !important;
+  }
+  .mc-cta {
+    width: 100% !important;
+    justify-content: center !important;
+    font-size: 14px !important;
+    padding: 14px 20px !important;
+    min-height: 44px !important;
+    margin-top: 4px !important;
+  }
+  .mc-chip {
+    font-size: 12px !important;
+    padding: 5px 10px !important;
+  }
+  .cs-home-modal {
+    width: 95vw !important;
+    max-width: 95vw !important;
+    margin: 10px !important;
+    max-height: 85vh !important;
+    overflow-y: auto !important;
+  }
+}
+

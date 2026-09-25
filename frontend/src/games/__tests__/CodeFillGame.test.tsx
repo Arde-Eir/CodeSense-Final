@@ -149,6 +149,33 @@ describe('CodeFillGame', () => {
     expect(onComplete).toHaveBeenCalledWith(1, 1);
   });
 
+  it('does not complete twice when Finish is clicked before automatic completion', async () => {
+    const onComplete = vi.fn();
+    render(<CodeFillGame items={[ITEM_ONE_BLANK]} onComplete={onComplete} resetSignal={0} />);
+    fireEvent.change(screen.getByTestId('code-fill-input-0'), { target: { value: '5' } });
+    fireEvent.click(screen.getByTestId('code-fill-check'));
+    fireEvent.click(screen.getByTestId('code-fill-finish'));
+    await act(async () => { vi.advanceTimersByTime(700); });
+    expect(onComplete).toHaveBeenCalledOnce();
+    expect(onComplete).toHaveBeenCalledWith(1, 1);
+  });
+
+  it('cancels automatic completion on reset and unmount', async () => {
+    const onComplete = vi.fn();
+    const { rerender, unmount } = render(<CodeFillGame items={[ITEM_ONE_BLANK]} onComplete={onComplete} resetSignal={0} />);
+    fireEvent.change(screen.getByTestId('code-fill-input-0'), { target: { value: '5' } });
+    fireEvent.click(screen.getByTestId('code-fill-check'));
+    rerender(<CodeFillGame items={[ITEM_ONE_BLANK]} onComplete={onComplete} resetSignal={1} />);
+    await act(async () => { vi.advanceTimersByTime(700); });
+    expect(onComplete).not.toHaveBeenCalled();
+
+    fireEvent.change(screen.getByTestId('code-fill-input-0'), { target: { value: '5' } });
+    fireEvent.click(screen.getByTestId('code-fill-check'));
+    unmount();
+    await act(async () => { vi.advanceTimersByTime(700); });
+    expect(onComplete).not.toHaveBeenCalled();
+  });
+
   it('advances to next item when Next is clicked', () => {
     render(<CodeFillGame items={[ITEM_ONE_BLANK, ITEM_TWO_BLANKS]} onComplete={vi.fn()} resetSignal={0} />);
     fireEvent.change(screen.getByPlaceholderText('???'), { target: { value: '5' } });

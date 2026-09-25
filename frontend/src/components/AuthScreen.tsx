@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useCallback } from 'react'
 import type { ReactNode } from 'react'
+import { Link, useLocation } from 'react-router-dom'
 import { AuthContext, useAuth } from '@/components/AuthContext'
 import { DataIsolationService } from '@/services/DataIsolationService'
 import { DatabaseService } from '@/services/DatabaseService'
@@ -12,9 +13,12 @@ import type { ExplorerProfile } from '@/types'
 // CANNOT navigate anywhere else. Admins pass through untouched.
 export const MaintenanceGate: React.FC<{ children: ReactNode }> = ({ children }) => {
   const { maintenanceMode, maintenanceMessage, isAdmin, isAuthenticated, logout } = useAuth()
+  const location = useLocation()
 
-  // Admins always bypass maintenance mode
-  if (!maintenanceMode || isAdmin) return <>{children}</>
+  // Keep the sign-in page available so an administrator can regain access.
+  if (!maintenanceMode || isAdmin || (!isAuthenticated && location.pathname === '/login')) {
+    return <>{children}</>
+  }
 
   // Everyone else (guests, students, professionals, unauthenticated) is blocked
   return (
@@ -66,6 +70,18 @@ export const MaintenanceGate: React.FC<{ children: ReactNode }> = ({ children })
             ← Sign out
           </button>
         )}
+        {!isAuthenticated && (
+          <Link
+            to="/login"
+            style={{
+              display: 'inline-block', border: '1px solid #ffa726', borderRadius: 8,
+              color: '#ffa726', fontSize: 13, padding: '10px 24px',
+              textDecoration: 'none', fontWeight: 700,
+            }}
+          >
+            Administrator sign in
+          </Link>
+        )}
       </div>
     </div>
   )
@@ -86,13 +102,12 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   const [isGuest, setIsGuest] = useState(false)
   const [isAuthenticated, setIsAuthenticated] = useState(false)
   const [isLoading, setIsLoading] = useState(true)
-  const [impersonatingUser, setImpersonatingUser] = useState<ExplorerProfile | null>(null)
   const [maintenanceMode, setMaintenanceMode] = useState(false)
   const [maintenanceMessage, setMaintenanceMessage] = useState(
     'System is temporarily offline for scheduled maintenance. We\'ll be back soon!'
   )
 
-  const isAdmin = (impersonatingUser ? false : user?.isAdmin) ?? false
+  const isAdmin = user?.isAdmin ?? false
 
   const refreshMaintenanceMode = useCallback(async () => {
     try {
@@ -144,7 +159,7 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   }, [refreshMaintenanceMode])
 
   useEffect(() => {
-    if (!user?.id || isGuest || impersonatingUser) return
+    if (!user?.id || isGuest) return
 
     let lastTouch = 0
     const touch = () => {
@@ -166,7 +181,7 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       document.removeEventListener('visibilitychange', onVisible)
       window.removeEventListener('focus', onFocus)
     }
-  }, [user?.id, isGuest, impersonatingUser])
+  }, [user?.id, isGuest])
 
   const login = async (playerName: string, secretCode: string) => {
     const profile = await DatabaseService.login(playerName, secretCode)
@@ -180,9 +195,10 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     playerName: string,
     secretCode: string,
     email: string,
-    userType: 'student' | 'professional' = 'student'
-  ) => {
-    const profile = await DatabaseService.signUp(playerName, secretCode, email, userType)
+    userType: 'student' | 'professional',
+    recaptchaToken: string
+  ): Promise<void> => {
+    const profile = await DatabaseService.signUp(playerName, secretCode, email, userType, recaptchaToken)
     sessionStorage.removeItem('guestMode')
     DataIsolationService.migrateGuestToUser(profile.id)
     setUser(profile)
@@ -196,7 +212,6 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     setUser(null)
     setIsAuthenticated(false)
     setIsGuest(false)
-    setImpersonatingUser(null)
   }
 
   const continueAsGuest = () => {
@@ -207,26 +222,6 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   }
 
   const goBack = () => { window.history.back() }
-
-  // Admin impersonation — stores original admin user, sets view to target.
-  // The target's isAdmin is forced to false so the preview never gets
-  // admin capabilities (e.g. accessing /admin while inside a preview).
-  const startImpersonation = (targetUser: ExplorerProfile) => {
-    if (!user?.isAdmin) return
-    setImpersonatingUser(user)                          // remember real admin
-    setUser({ ...targetUser, isAdmin: false })          // preview as non-admin
-  }
-
-  const stopImpersonation = () => {
-    if (!impersonatingUser) return
-    setUser(impersonatingUser)        // restore real admin profile
-    setImpersonatingUser(null)        // clear impersonation flag
-    // isAdmin derives from (impersonatingUser ? false : user?.isAdmin).
-    // Once impersonatingUser is null, isAdmin will re-evaluate correctly
-    // on the next render — no extra setter needed. But isAuthenticated
-    // must be confirmed true so AdminRoute doesn't redirect to /home.
-    setIsAuthenticated(true)
-  }
 
   if (isLoading) {
     return (
@@ -244,9 +239,8 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     <AuthContext.Provider value={{
       user, setUser, isGuest, isAuthenticated,
       isAdmin, maintenanceMode, maintenanceMessage,
-      impersonatingUser,
       login, signup, logout, continueAsGuest, goBack,
-      startImpersonation, stopImpersonation, refreshMaintenanceMode,
+      refreshMaintenanceMode,
     }}>
       <MaintenanceGate>
         {children}

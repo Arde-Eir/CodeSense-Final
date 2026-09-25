@@ -68,7 +68,7 @@ const ROLES_MATRIX: { feature: string; tiers: Record<string, boolean> }[] = [
   { feature: 'Progress report',                 tiers: { Guest: false, Student: true,  Professional: true,  Admin: true  } },
   { feature: 'Leaderboard',                     tiers: { Guest: false, Student: true,  Professional: true,  Admin: true  } },
   { feature: 'Profile settings',                tiers: { Guest: false, Student: true,  Professional: true,  Admin: true  } },
-  { feature: 'Admin Panel (ban / impersonate)', tiers: { Guest: false, Student: false, Professional: false, Admin: true  } },
+  { feature: 'Admin Panel (management / live help)', tiers: { Guest: false, Student: false, Professional: false, Admin: true  } },
   { feature: 'System metrics',                  tiers: { Guest: false, Student: false, Professional: false, Admin: true  } },
   { feature: 'Global user data',                tiers: { Guest: false, Student: false, Professional: false, Admin: true  } },
 ]
@@ -165,7 +165,7 @@ const SECTIONS: ManualSection[] = [
         <p>
           On top of the analyzer sit: a <b>flowchart-to-C++ Build Mode</b>, a{' '}
           <b>Campaign</b> of XP-earning quests, a <b>Leaderboard</b>, an{' '}
-          <b>Admin Panel</b> (ban / impersonate / maintenance), a{' '}
+          <b>Admin Panel</b> (ban / preview / maintenance), a{' '}
           <b>Notification bell</b> for system announcements, and tier-based{' '}
           <b>Roles &amp; Access</b> control.
         </p>
@@ -648,19 +648,19 @@ const SECTIONS: ManualSection[] = [
         <DataTable
           headers={['TAB', 'DOES']}
           rows={[
-            [<b>Dashboard</b>,     '4 KPI cards (Total / Active / Banned / Admins) + last 10 audit entries.'],
-            [<b>Users</b>,         'Full user list with search + filter (All / Active / Banned / Admins). Per-row actions: Ban (with reason) · Unban · Make/Revoke Admin · Preview.'],
-            [<b>Audit Logs</b>,   'Every admin action ever taken, with admin name, target, details, timestamp. FK-joined when possible, plain-select fallback otherwise.'],
-            [<b>Maintenance</b>,  'Toggle maintenance banner site-wide + edit the message. Live preview card beside it.'],
+            [<b>Dashboard</b>,     '4 KPI cards (Total / Not Banned / Banned / Admins) + last 10 audit entries.'],
+            [<b>Users</b>,         'Paged user list with server-side search + filter. Per-row actions: View Progress · Request Live Help · Ban/Unban · Make/Revoke Admin.'],
+            [<b>Audit Logs</b>,   'The latest 100 admin audit entries, with admin name, target, details, and timestamp.'],
+            [<b>Maintenance</b>,  'Block non-admin use site-wide while keeping admin sign-in available, and edit the message.'],
             [<b>Announcements</b>,'Create / delete announcements with priority + pin. Appears instantly in the notification bell.'],
           ]}
         />
-        <h4 style={{ color: '#e6edf3', fontSize: 14, marginTop: 16, marginBottom: 6 }}>Preview (Impersonation)</h4>
+        <h4 style={{ color: '#e6edf3', fontSize: 14, marginTop: 16, marginBottom: 6 }}>Progress preview and live help</h4>
         <ul style={{ paddingLeft: 20, lineHeight: 1.9 }}>
-          <li>Click <b>Preview</b> on any user → loads their profile and routes you to <code>/home</code>.</li>
-          <li>A persistent orange banner pins to the top: "👁️ Admin preview — viewing as X (impersonating real admin: Y)". Body gets 40px top padding so no page content is hidden.</li>
-          <li>While impersonating, <b>isAdmin evaluates to false</b> — you have no admin powers as the target, which prevents accidental destructive actions "as them".</li>
-          <li>Click <b>Exit Preview</b> to restore your admin session.</li>
+          <li><b>View Progress</b> opens a read-only profile and learning-progress snapshot; it never swaps your login identity.</li>
+          <li><b>Request Live Help</b> sends a request to the learner. They must approve sharing the CodeSense browser tab.</li>
+          <li>Once approved, the admin sees the learner's real tab and can point, click, scroll, and replace the focused text field. The learner sees the cursor and can stop at any time.</li>
+          <li>Passwords, secret codes, file inputs, and external links are not remotely controlled. Live help requires the support migration and configured network servers.</li>
         </ul>
         <Callout color="#f85149" icon="🔐" title="Schema health:">
           If a table or column is missing in your Supabase DB, a red banner at
@@ -739,12 +739,10 @@ const SECTIONS: ManualSection[] = [
           <li>The login page parses that error and opens a <b>formal suspension modal</b> with icon, reason, and appeal instructions — no generic "invalid credentials" leak.</li>
         </ul>
         <Callout color="#a371f7" icon="🛡" title="Row Level Security (RLS):">
-          The <code>users</code> table needs three policies for admin actions to
-          work: <code>authenticated_can_read_all</code> (SELECT),{' '}
-          <code>users_update_own</code> (UPDATE where auth.uid()=id), and{' '}
-          <code>admins_update_any</code> (UPDATE where is_admin=true). Without
-          these, Ban / Make Admin / Preview silently fail (the frontend now
-          detects and reports this).
+          The <code>users</code> table needs read and update policies that allow
+          authenticated administrators to manage accounts. The live-help
+          session tables and private Realtime policies must also be installed.
+          If a policy blocks an action, the Admin Panel reports the failure.
         </Callout>
       </>
     ),

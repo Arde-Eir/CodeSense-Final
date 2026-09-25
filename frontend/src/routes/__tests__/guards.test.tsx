@@ -3,20 +3,17 @@ import { describe, expect, it, vi } from 'vitest'
 import { render, screen } from '@testing-library/react'
 import { MemoryRouter, Route, Routes } from 'react-router-dom'
 import { AccountRoute, AdminRoute, ProtectedRoute } from '@/routes/guards'
-import type { ExplorerProfile } from '@/types'
 
 type MockAuth = {
   isAuthenticated: boolean
   isGuest: boolean
   isAdmin: boolean
-  impersonatingUser: ExplorerProfile | null
 }
 
 let authState: MockAuth = {
   isAuthenticated: false,
   isGuest: false,
   isAdmin: false,
-  impersonatingUser: null,
 }
 
 vi.mock('@/components/AuthContext', () => ({
@@ -28,7 +25,6 @@ function setAuth(next: Partial<MockAuth>) {
     isAuthenticated: false,
     isGuest: false,
     isAdmin: false,
-    impersonatingUser: null,
     ...next,
   }
 }
@@ -106,22 +102,5 @@ describe('route guards', () => {
       expect(screen.getByText('admin content')).toBeInTheDocument()
     })
 
-    it('redirects impersonating sessions without active admin privileges to home', () => {
-      const adminPreviewUser = {
-        id: 'admin-1',
-        playerName: 'Admin',
-        secretCode: '',
-        totalXP: 0,
-        currentLevel: 1,
-        lastActive: new Date(0),
-        createdAt: new Date(0),
-        characterType: 'squire',
-        isAdmin: true,
-      } satisfies ExplorerProfile
-
-      setAuth({ isAuthenticated: true, impersonatingUser: adminPreviewUser })
-      renderGuard(<AdminRoute><div>admin content</div></AdminRoute>)
-      expect(screen.getByText('home page')).toBeInTheDocument()
-    })
   })
 })

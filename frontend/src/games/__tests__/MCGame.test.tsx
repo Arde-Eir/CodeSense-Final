@@ -143,8 +143,8 @@ describe('MCGame', () => {
 
   it('shows "Better luck next time" when score is 0', async () => {
     render(<MCGame questions={[Q1]} onComplete={vi.fn()} resetSignal={0} />);
-    fireEvent.click(screen.getByText('3'));  // wrong
-    fireEvent.click(screen.getByRole('button', { name: /finish/i }));
+    fireEvent.click(screen.getByTestId('mc-option-0'));  // wrong
+    fireEvent.click(screen.getByTestId('mc-finish'));
     expect(screen.getByText(/0\/1 correct/i)).toBeInTheDocument();
     expect(screen.getByText(/better luck next time/i)).toBeInTheDocument();
   });
@@ -172,13 +172,35 @@ describe('MCGame', () => {
     expect(onComplete).toHaveBeenCalledWith(1, 1);
   });
 
-  it('calls onComplete with score 0 when no question was answered correctly', async () => {
+  it('requires a perfect score and lets the learner retry missed questions', async () => {
     const onComplete = vi.fn();
     render(<MCGame questions={[Q1]} onComplete={onComplete} resetSignal={0} />);
-    fireEvent.click(screen.getByText('3'));  // wrong
-    fireEvent.click(screen.getByRole('button', { name: /finish/i }));
+    fireEvent.click(screen.getByTestId('mc-option-0'));  // wrong
+    fireEvent.click(screen.getByTestId('mc-finish'));
     await act(async () => { vi.advanceTimersByTime(400); });
-    expect(onComplete).toHaveBeenCalledWith(0, 1);
+    expect(onComplete).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByTestId('mc-retry'));
+    fireEvent.click(screen.getByTestId('mc-option-1'));
+    fireEvent.click(screen.getByTestId('mc-finish'));
+    await act(async () => { vi.advanceTimersByTime(400); });
+    expect(onComplete).toHaveBeenCalledOnce();
+    expect(onComplete).toHaveBeenCalledWith(1, 1);
+  });
+
+  it('cancels a pending completion when reset or unmounted', async () => {
+    const onComplete = vi.fn();
+    const { rerender, unmount } = render(<MCGame questions={[Q1]} onComplete={onComplete} resetSignal={0} />);
+    fireEvent.click(screen.getByTestId('mc-option-1'));
+    fireEvent.click(screen.getByTestId('mc-finish'));
+    rerender(<MCGame questions={[Q1]} onComplete={onComplete} resetSignal={1} />);
+    await act(async () => { vi.advanceTimersByTime(400); });
+    expect(onComplete).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByTestId('mc-option-1'));
+    fireEvent.click(screen.getByTestId('mc-finish'));
+    unmount();
+    await act(async () => { vi.advanceTimersByTime(400); });
+    expect(onComplete).not.toHaveBeenCalled();
   });
 
   it('resets state when resetSignal changes', () => {

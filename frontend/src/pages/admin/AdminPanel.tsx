@@ -1,425 +1,113 @@
 // AdminPanel.tsx — Tabler-based admin dashboard
 // Loads Tabler CSS from CDN on mount, removes it on unmount to avoid style bleed.
-import React, { useEffect, useState, useCallback, useMemo } from 'react'
+import React, { useEffect, useState, useCallback, useMemo, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useAuth } from '@/components/AuthContext'
 import { supabase } from '@/services/supabase'
-import { getProfileImageUrlMap, type ProfileImageUrls } from '@/services/ProfileImages'
-import type { ExplorerProfile } from '@/types'
+import { endSupportSession, requestSupportSession, type SupportSession } from '@/services/liveSupport'
+import { assertSupportVideoPlayback } from '@/services/supportVideo'
+import { getAvatarUrlMap, type ProfileImageUrls } from '@/services/ProfileImages'
 import {
-  computeUserStats, filterUsers, levelToPhase,
+  levelToPhase,
   patchMCQuestions, parseCodeFillAnswers,
-  normalizeMCQuestionOptions, normalizeMCQuestions,
+  normalizeMCQuestions,
   loadHintsForEdit, serializeHints, HINT_ACTIVITY_OPTIONS,
   validateQuestBuilderForm,
+  type HintActivityScope,
   type HintFormRow,
 } from '@/admin/adminHelpers'
 import { extractTextFromPdf, generateQuestDraftFromText } from '@/admin/questAutoGenerator'
 import { generateAutoHints } from '@/campaign/generateAutoHints'
-import type { ActivityTab, Quest } from '@/types/campaign'
 import { isCampaignPhase, levelForPhase, phaseForLevel } from '@/types/campaign'
+import {
+  AdminAnnouncementsTab,
+  AdminAuditTab,
+  AdminDashboardTab,
+  AdminMaintenanceTab,
+  AdminUsersTab,
+} from './AdminCoreTabs'
+import { AdminLiveSupport } from './AdminLiveSupport'
 
-// ─── Types ────────────────────────────────────────────────────────────────────
-
-/** Subset of the quests table returned by fetchExistingQuests */
-interface ExistingQuest {
-  id: string
-  title: string
-  level: number | null
-  difficulty: string | null
-  basexp: number
-  requiredxp?: number
-  sortorder: number
-  isactive: boolean
-  phase: string | null
-  question_type: string | null
-  description: string | null
-  tutorial_title: string | null
-  tutorial_body: string | null
-  theory_sections: unknown[] | null
-  objectives: string[] | null
-  hints: unknown[] | null
-  mc_questions: unknown[] | null
-  game_items: unknown[] | null
-  drop_zones: unknown[] | null
-  ordering_items: unknown[] | null
-  code_fill_items: unknown[] | null
-}
-
-interface AdminUser {
-  id: string
-  playername: string
-  email: string
-  totalxp: number
-  currentlevel: number
-  charactertype: string
-  user_type: string | null
-  is_admin: boolean
-  is_banned: boolean
-  ban_reason: string | null
-  createdat: string
-  lastactive: string
-  sandbox_runs: number
-}
-
-interface AuditEntry {
-  id: string
-  admin_id: string
-  target_user_id: string | null
-  action: string
-  details: any
-  created_at: string
-  admin?: { playername: string }
-  target?: { playername: string }
-}
-
-interface Announcement {
-  id: string
-  title: string
-  body: string
-  priority: 'info' | 'warning' | 'success' | 'critical'
-  author: string
-  ispinned: boolean
-  createdat: string
-}
-
-type Tab = 'dashboard' | 'users' | 'audit' | 'maintenance' | 'announcements' | 'quests'
-
-// ─── Quest form types ─────────────────────────────────────────────────────────
-
-interface QFormTheory    { id: string; type: string; heading: string; body: string; code: string; language: string; table_headers: string[]; table_rows: string[][] }
-interface QFormMCQ       { id: string; question: string; options: [string,string,string,string]; correct: number; correctAnswers?: number[]; explanation: string; hint: string }
-interface QFormDragItem  { id: string; label: string; color: string }
-interface QFormDropZone  { id: string; label: string; accepted: string }
-interface QFormCodeFill  { id: string; code_lines: string; language: string; answers: string; hint: string; caption: string }
-
-// Multi-problem types
-interface QFormDragProblem  { id: string; question: string; items: QFormDragItem[]; drop_zones: QFormDropZone[] }
-interface QFormOrderItem    { id: string; label: string; description: string }
-interface QFormOrderProblem { id: string; question: string; items: QFormOrderItem[] }
-
-interface QuestFormState {
-  title: string; description: string
-  difficulty: 'beginner' | 'intermediate' | 'advanced' | 'expert'; level: number
-  basexp: number; requiredxp: number; sortorder: number; isactive: boolean
-  tutorial_title: string; tutorial_body: string
-  theory_sections: QFormTheory[]; objectives: string[]
-  act_mc: boolean; act_drag: boolean; act_balloon: boolean; act_ordering: boolean; act_codefill: boolean
-  mc_questions: QFormMCQ[]
-  balloon_questions: QFormMCQ[]
-  drag_problems: QFormDragProblem[]
-  ordering_problems: QFormOrderProblem[]
-  code_fill_items: QFormCodeFill[]
-  // Dynamic hints — round-tripped from quests.hints JSONB. Preserves
-  // SQL-authored extras (e.g. `image: true`) via each row's `_extra`.
-  hints: HintFormRow[]
-  // legacy flat fields kept for DB compat — built from problems on save
-  game_items: QFormDragItem[]; drop_zones: QFormDropZone[]
-}
-
-const newDragProblem = (): QFormDragProblem => ({
-  id: `dp_${Date.now()}`, question: '', items: [], drop_zones: [],
-})
-const newOrderProblem = (): QFormOrderProblem => ({
-  id: `op_${Date.now()}`, question: '', items: [],
-})
-
-const newTheorySection = (type = 'default', patch: Partial<QFormTheory> = {}): QFormTheory => ({
-  id: `th_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
-  type,
-  heading: '',
-  body: '',
-  code: '',
-  language: 'c',
-  table_headers: [],
-  table_rows: [[]],
-  ...patch,
-})
-
-const parseLineList = (text: string): string[] =>
-  text
-    .split(/\r?\n/)
-    .map(line => line.replace(/^\s*(?:[-*•]|\d+[.)])\s*/, '').trim())
-    .filter(Boolean)
-
-const lessonTextToSections = (text: string): QFormTheory[] =>
-  text
-    .split(/\n\s*\n/)
-    .map(block => block.trim())
-    .filter(Boolean)
-    .map(block => {
-      const lines = block.split(/\r?\n/).map(line => line.trim()).filter(Boolean)
-      const first = lines[0] ?? ''
-      const markdownHeading = first.match(/^#{1,3}\s+(.+)$/)
-      const colonHeading = lines.length > 1 && first.length <= 72 && first.endsWith(':')
-      if (markdownHeading || colonHeading) {
-        return newTheorySection('default', {
-          heading: markdownHeading?.[1] ?? first.replace(/:$/, ''),
-          body: lines.slice(1).join('\n'),
-        })
-      }
-      return newTheorySection('default', { body: lines.join('\n') })
-    })
-
-const parseHintLines = (text: string): HintFormRow[] =>
-  parseLineList(text).map((line, i) => {
-    const match = line.match(/^(.{1,48}?)(?:\s+-\s+|\s+:\s+)(.+)$/)
-    return {
-      id: `h_${Date.now()}_${i}_${Math.random().toString(36).slice(2, 6)}`,
-      title: match ? match[1].trim() : 'Helpful hint',
-      body: match ? match[2].trim() : line,
-      icon: '',
-      activity: 'all',
-      _extra: {},
-    }
-  })
-
-const hasText = (value: unknown): boolean =>
-  String(value ?? '').trim().length > 0
-
-const selectedTabsForForm = (form: QuestFormState): ActivityTab[] => {
-  const tabs: ActivityTab[] = []
-  if (form.act_drag) tabs.push('drag')
-  if (form.act_codefill) tabs.push('code_fill')
-  if (form.act_ordering) tabs.push('ordering')
-  if (form.act_balloon) tabs.push('balloon')
-  if (form.act_mc) tabs.push('mc')
-  return tabs
-}
-
-const tabHasContent = (form: QuestFormState, tab: ActivityTab): boolean => {
-  if (tab === 'mc') {
-    return form.mc_questions.some(q =>
-      hasText(q.question) || q.options.some(hasText) || hasText(q.explanation)
-    )
-  }
-
-  if (tab === 'balloon') {
-    return form.balloon_questions.some(q =>
-      hasText(q.question) || q.options.some(hasText) || hasText(q.explanation)
-    )
-  }
-
-  if (tab === 'code_fill') {
-    return form.code_fill_items.some(item =>
-      hasText(item.caption) || hasText(item.code_lines) || hasText(item.answers)
-    )
-  }
-
-  if (tab === 'ordering') {
-    return form.ordering_problems.some(problem =>
-      hasText(problem.question) ||
-      problem.items.some(item => hasText(item.label) || hasText(item.description))
-    )
-  }
-
-  if (tab === 'drag') {
-    return form.drag_problems.some(problem =>
-      hasText(problem.question) ||
-      problem.items.some(item => hasText(item.label)) ||
-      problem.drop_zones.some(zone => hasText(zone.label) || hasText(zone.accepted))
-    )
-  }
-
-  return false
-}
-
-const tabLabel = (tab: ActivityTab): string => {
-  if (tab === 'code_fill') return 'Code Fill'
-  if (tab === 'mc') return 'Quiz'
-  if (tab === 'drag') return 'Drag & Drop'
-  if (tab === 'balloon') return 'Balloon Pop'
-  return 'Ordering'
-}
-
-const campaignDifficultyFromForm = (
-  difficulty: QuestFormState['difficulty']
-): Quest['difficulty'] => {
-  if (difficulty === 'beginner') return 'easy'
-  if (difficulty === 'intermediate') return 'medium'
-  return 'hard'
-}
-
-const campaignDifficultyToForm = (
-  difficulty: string | null | undefined
-): QuestFormState['difficulty'] => {
-  if (difficulty === 'easy' || difficulty === 'beginner') return 'beginner'
-  if (difficulty === 'medium' || difficulty === 'intermediate') return 'intermediate'
-  if (difficulty === 'hard' || difficulty === 'advanced') return 'advanced'
-  return 'beginner'
-}
-
-const questPreviewFromForm = (form: QuestFormState): Quest => {
-  const dragItems = form.drag_problems.flatMap(p => p.items)
-  const dropZones = form.drag_problems.flatMap(p => p.drop_zones)
-  const orderingItems = form.ordering_problems.flatMap(p =>
-    p.items.map((item, index) => ({
-      id: item.id,
-      label: item.label,
-      description: item.description,
-      correct_order: index,
-    }))
-  )
-
-  return {
-    id: 'quest-builder-preview',
-    title: form.title,
-    description: form.description || null,
-    difficulty: campaignDifficultyFromForm(form.difficulty),
-    level: form.level,
-    phase: levelToPhase(form.level),
-    mode: 'campaign',
-    basexp: form.basexp,
-    requiredxp: form.requiredxp,
-    sortorder: form.sortorder,
-    isactive: form.isactive,
-    question_type: form.act_balloon ? 'pop_balloon'
-      : form.act_mc ? 'multiple_choice'
-      : form.act_codefill ? 'code_fill'
-      : form.act_ordering ? 'ordering'
-      : form.act_drag ? 'drag_drop'
-      : null,
-    objectives: form.objectives.filter(Boolean),
-    hints: null,
-    game_items: form.act_drag ? dragItems : null,
-    drop_zones: form.act_drag ? dropZones : null,
-    ordering_items: form.act_ordering ? orderingItems : null,
-    mc_questions: [
-      ...(form.act_mc ? form.mc_questions.map(q => ({
-        id: q.id,
-        question: q.question,
-        options: q.options,
-        correct: q.correct,
-        explanation: q.explanation,
-        hint: q.hint,
-        mode: 'mc' as const,
-      })) : []),
-      ...(form.act_balloon ? form.balloon_questions.map(q => ({
-        id: q.id,
-        question: q.question,
-        options: q.options,
-        correct: q.correct,
-        correctAnswers: q.correctAnswers,
-        explanation: q.explanation,
-        hint: q.hint,
-        mode: 'balloon' as const,
-      })) : []),
-    ],
-    code_fill_items: form.act_codefill ? form.code_fill_items.map(item => ({
-      id: item.id,
-      code_lines: item.code_lines.split(/\r?\n/),
-      language: item.language,
-      answers: parseCodeFillAnswers(item.answers),
-      hint: item.hint,
-      caption: item.caption,
-    })) : null,
-    tutorial_title: form.tutorial_title || null,
-    tutorial_body: form.tutorial_body || null,
-    tutorial_image: null,
-    theory_sections: null,
-  }
-}
-
-const questActivityLabels = (q: ExistingQuest): string[] => {
-  const labels: string[] = []
-  const mc = Array.isArray(q.mc_questions) ? q.mc_questions : []
-  const hasMode = mc.some((item: any) => item?.mode === 'balloon' || item?.mode === 'mc')
-  const mcCount = hasMode
-    ? mc.filter((item: any) => item?.mode !== 'balloon').length
-    : q.question_type === 'pop_balloon' ? 0 : mc.length
-  const balloonCount = hasMode
-    ? mc.filter((item: any) => item?.mode === 'balloon').length
-    : q.question_type === 'pop_balloon' ? mc.length : 0
-
-  if (mcCount) labels.push(`MC ${mcCount}`)
-  if (balloonCount) labels.push(`Balloon ${balloonCount}`)
-  if (Array.isArray(q.game_items) && q.game_items.length) labels.push('Drag')
-  if (Array.isArray(q.ordering_items) && q.ordering_items.length) labels.push('Ordering')
-  if (Array.isArray(q.code_fill_items) && q.code_fill_items.length) labels.push(`Code ${q.code_fill_items.length}`)
-  return labels
-}
-
-const coreLevelNames: Record<number, string> = {
-  1: 'Beginner',
-  2: 'Intermediate',
-  3: 'Advanced',
-}
-
-const levelName = (level: number): string =>
-  coreLevelNames[level] ?? `Custom Level ${level}`
-
-const levelOptionLabel = (level: number): string =>
-  `${level} - ${levelName(level)}`
-
-const levelBadgeColor = (level: number): string => {
-  if (level === 1) return 'green'
-  if (level === 2) return 'yellow'
-  if (level === 3) return 'red'
-  return 'purple'
-}
-
-const defaultQF = (): QuestFormState => ({
-  title: '', description: '', difficulty: 'beginner',
-  level: 1, basexp: 100, requiredxp: 0, sortorder: 99, isactive: true,
-  tutorial_title: '', tutorial_body: '',
-  theory_sections: [], objectives: [''],
-  act_mc: true, act_drag: false, act_balloon: false, act_ordering: false, act_codefill: false,
-  mc_questions: [{ id: '1', question: '', options: ['', '', '', ''], correct: 0, explanation: '', hint: '' }],
-  balloon_questions: [{ id: 'b1', question: '', options: ['', '', '', ''], correct: 0, correctAnswers: [0], explanation: '', hint: '' }],
-  drag_problems: [newDragProblem()],
-  ordering_problems: [newOrderProblem()],
-  code_fill_items: [],
-  hints: [],
-  game_items: [], drop_zones: [],
-})
-
-const defaultLevelAccent = (level: number): string => {
-  const colors = ['#3fb950', '#e3b341', '#f85149', '#a371f7', '#58a6ff', '#ff7b72'];
-  return colors[Math.max(0, level - 1) % colors.length];
-}
-
-// ─── Helpers ──────────────────────────────────────────────────────────────────
-
-const fmt = (iso: string) =>
-  new Date(iso).toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })
-
-const settingStringValue = (value: unknown): string => {
-  if (typeof value !== 'string') return String(value ?? '')
-  try {
-    const parsed = JSON.parse(value)
-    return typeof parsed === 'string' ? parsed : value
-  } catch {
-    return value
-  }
-}
-
-async function writeAuditLog(
-  adminId: string,
-  action: string,
-  targetUserId?: string,
-  details?: object
-) {
-  const { error } = await supabase.from('admin_audit_log').insert({
-    admin_id: adminId,
-    target_user_id: targetUserId ?? null,
-    action,
-    details: details ?? null,
-  })
-  if (error) console.warn('[audit log]', action, error.message)
-}
+import {
+  campaignDifficultyFromForm,
+  campaignDifficultyToForm,
+  defaultLevelAccent,
+  defaultQF,
+  errorMessage,
+  lessonTextToSections,
+  levelBadgeColor,
+  levelName,
+  levelOptionLabel,
+  newDragProblem,
+  newOrderProblem,
+  newTheorySection,
+  parseHintLines,
+  parseLineList,
+  questActivityLabels,
+  questPreviewFromForm,
+  selectedTabsForForm,
+  settingStringValue,
+  storedChoiceQuestionToForm,
+  tabHasContent,
+  tabLabel,
+  writeAuditLog,
+  type AdminUserChanges,
+  type AdminUser,
+  type Announcement,
+  type AuditEntry,
+  type ExistingQuest,
+  type QuestFormState,
+  type QuestActivityFlag,
+  type QuestDifficulty,
+  type QFormDragProblem,
+  type QFormOrderProblem,
+  type Tab,
+} from '@/admin/adminPanelModel'
 
 // ─── Main component ───────────────────────────────────────────────────────────
 
+const loadAdminQuestDraft = (userId: string): { form: QuestFormState; replaceTarget: string | null; error: string | null } => {
+  try {
+    const stored = localStorage.getItem(`codesense-admin-quest-draft:${userId}`)
+    if (!stored) return { form: defaultQF(), replaceTarget: '', error: null }
+    const parsed: unknown = JSON.parse(stored)
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed) ||
+      typeof (parsed as QuestFormState).title !== 'string' ||
+      !Array.isArray((parsed as QuestFormState).mc_questions) ||
+      !Array.isArray((parsed as QuestFormState).theory_sections)) {
+      throw new TypeError('The saved quest draft is malformed.')
+    }
+    const form = parsed as QuestFormState
+    if (!('replaceTarget' in parsed)) {
+      // Legacy drafts contain the form but cannot identify the original quest.
+      // Null requires an explicit editing target or confirmation to create one.
+      return { form, replaceTarget: null, error: null }
+    }
+    if (parsed.replaceTarget !== null && typeof parsed.replaceTarget !== 'string') {
+      throw new TypeError('The saved quest draft has an invalid editing target.')
+    }
+    return { form, replaceTarget: parsed.replaceTarget, error: null }
+  } catch (caught: unknown) {
+    return { form: defaultQF(), replaceTarget: '', error: `Could not restore your local quest draft: ${errorMessage(caught)}. The saved data has not been deleted.` }
+  }
+}
+
 export const AdminPanel: React.FC = () => {
   const navigate = useNavigate()
-  const { user, startImpersonation, refreshMaintenanceMode } = useAuth()
+  const { user, refreshMaintenanceMode } = useAuth()
 
   const [tab, setTab] = useState<Tab>('dashboard')
+  const [navOpen, setNavOpen] = useState(false)
   const [users, setUsers] = useState<AdminUser[]>([])
   const [userImages, setUserImages] = useState<Map<string, ProfileImageUrls>>(new Map())
-  const [filteredUsers, setFilteredUsers] = useState<AdminUser[]>([])
+  const [avatarError, setAvatarError] = useState<string | null>(null)
   const [userSearch, setUserSearch] = useState('')
+  const [debouncedUserSearch, setDebouncedUserSearch] = useState('')
   const [userFilter, setUserFilter] = useState<'all' | 'active' | 'banned' | 'admin'>('all')
+  const [userPage, setUserPage] = useState(0)
+  const [userResultCount, setUserResultCount] = useState(0)
+  const [usersLoading, setUsersLoading] = useState(false)
+  const userFetchSequence = useRef(0)
   const [auditLogs, setAuditLogs] = useState<AuditEntry[]>([])
   const [announcements, setAnnouncements] = useState<Announcement[]>([])
   const [maintenanceOn, setMaintenanceOn] = useState(false)
@@ -428,15 +116,29 @@ export const AdminPanel: React.FC = () => {
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
   const [toast, setToast] = useState<{ msg: string; type: 'success' | 'error' } | null>(null)
+  const toastTimer = useRef<number | null>(null)
+  const [liveHelp, setLiveHelp] = useState<{ session: SupportSession; learnerName: string } | null>(null)
+  const liveHelpRef = useRef<SupportSession | null>(null)
+  useEffect(() => { liveHelpRef.current = liveHelp?.session ?? null }, [liveHelp])
+  useEffect(() => () => {
+    const activeSession = liveHelpRef.current
+    if (activeSession) void endSupportSession(activeSession.id).catch(caught => {
+      console.error('Could not end help session on admin panel exit', { sessionId: activeSession.id, error: errorMessage(caught) })
+    })
+  }, [])
 
   // New announcement form
   const [newAnn, setNewAnn] = useState({ title: '', body: '', priority: 'info' as Announcement['priority'], ispinned: false })
 
   // Quest generator
-  const [questForm,      setQuestForm]      = useState<QuestFormState>(defaultQF)
+  const savedQuestDraft = useMemo(() => loadAdminQuestDraft(user?.id ?? ''), [user?.id])
+  const [questForm,      setQuestForm]      = useState<QuestFormState>(savedQuestDraft.form)
+  const [questDraftError, setQuestDraftError] = useState<string | null>(savedQuestDraft.error)
+  const invalidSavedDraft = useRef(Boolean(savedQuestDraft.error))
+  const questDraftReady = useRef(false)
   const [existingQuests, setExistingQuests] = useState<ExistingQuest[]>([])
   const [questLevelInfoPhases, setQuestLevelInfoPhases] = useState<string[]>([])
-  const [replaceTarget,  setReplaceTarget]  = useState('')
+  const [replaceTarget,  setReplaceTarget]  = useState(savedQuestDraft.replaceTarget)
   const [questSaving,    setQuestSaving]    = useState(false)
   const [questSubTab,    setQuestSubTab]    = useState<'create' | 'manage'>('create')
   const [objectiveDraft, setObjectiveDraft] = useState('')
@@ -453,6 +155,44 @@ export const AdminPanel: React.FC = () => {
   const [autoQuestLoading, setAutoQuestLoading] = useState(false)
   const [autoQuestResult, setAutoQuestResult] = useState<string | null>(null)
   const qSet = (patch: Partial<QuestFormState>) => setQuestForm(p => ({ ...p, ...patch }))
+  const setQuestActivity = (activity: QuestActivityFlag, checked: boolean) => {
+    setQuestForm(previous => ({ ...previous, [activity]: checked }))
+  }
+
+  const hasQuestContent = (form: QuestFormState): boolean => Boolean(
+    form.title.trim() || form.description.trim() || form.tutorial_title.trim() ||
+    form.tutorial_body.trim() || form.theory_sections.length ||
+    form.level !== 1 || form.difficulty !== 'beginner' || form.basexp !== 100 ||
+    form.requiredxp !== 0 || form.sortorder !== 99 || !form.isactive ||
+    !form.act_mc || form.act_drag || form.act_balloon || form.act_ordering || form.act_codefill ||
+    form.objectives.some(value => value.trim()) ||
+    form.mc_questions.some(question => question.question.trim()) ||
+    form.balloon_questions.some(question => question.question.trim()) ||
+    form.code_fill_items.length || form.hints.length ||
+    form.drag_problems.some(problem => problem.question.trim()) ||
+    form.ordering_problems.some(problem => problem.question.trim())
+  )
+
+  useEffect(() => {
+    if (!user?.id) return
+    if (invalidSavedDraft.current) return
+    if (!questDraftReady.current) { questDraftReady.current = true; return }
+    try {
+      const key = `codesense-admin-quest-draft:${user.id}`
+      if (hasQuestContent(questForm) || replaceTarget) localStorage.setItem(key, JSON.stringify({ ...questForm, replaceTarget }))
+      else localStorage.removeItem(key)
+      setQuestDraftError(null)
+    } catch (caught: unknown) {
+      setQuestDraftError(`Could not save the local quest draft: ${errorMessage(caught)}`)
+    }
+  }, [questForm, replaceTarget, user?.id])
+
+  useEffect(() => {
+    if (!hasQuestContent(questForm)) return
+    const warn = (event: BeforeUnloadEvent) => { event.preventDefault(); event.returnValue = '' }
+    window.addEventListener('beforeunload', warn)
+    return () => window.removeEventListener('beforeunload', warn)
+  }, [questForm])
 
   const questLevelOptions = useMemo(() => {
     const levels = new Set<number>([1, 2, 3, questForm.level])
@@ -522,8 +262,8 @@ export const AdminPanel: React.FC = () => {
       if (questForm.level === level) qSet({ level: 1, difficulty: 'beginner' })
       if (questLevelFilter === String(level)) setQuestLevelFilter('all')
       showToast(`Level ${level} removed`)
-    } catch (err: any) {
-      showToast(`Failed to remove level: ${err.message}`, 'error')
+    } catch (error: unknown) {
+      showToast(`Failed to remove level: ${errorMessage(error)}`, 'error')
     }
   }
 
@@ -587,6 +327,7 @@ export const AdminPanel: React.FC = () => {
       showToast('Please upload a PDF file', 'error')
       return
     }
+    if (hasQuestContent(questForm) && !window.confirm('Replace the current unsaved quest draft with the PDF-generated draft?')) return
 
     setAutoQuestLoading(true)
     setAutoQuestResult(null)
@@ -614,8 +355,8 @@ export const AdminPanel: React.FC = () => {
         `Generated ${draft.theory_sections.length} theory section(s), ${draft.objectives.length} objective(s), ${draft.mc_questions.length} quiz question(s), ${draft.drag_problems[0]?.items.length ?? 0} drag match(es), ${draft.ordering_problems[0]?.items.length ?? 0} ordering item(s), and ${draft.code_fill_items.length} code-fill item(s).`
       )
       showToast('PDF quest draft generated. Review it, then save.', 'success')
-    } catch (err: any) {
-      const message = err?.message ?? 'PDF quest generation failed'
+    } catch (error: unknown) {
+      const message = errorMessage(error)
       setAutoQuestResult(message)
       showToast(message, 'error')
     } finally {
@@ -658,9 +399,17 @@ export const AdminPanel: React.FC = () => {
   }, [])
 
   const showToast = (msg: string, type: 'success' | 'error' = 'success') => {
+    if (toastTimer.current) window.clearTimeout(toastTimer.current)
     setToast({ msg, type })
-    setTimeout(() => setToast(null), 3500)
+    toastTimer.current = window.setTimeout(() => setToast(null), type === 'error' ? 8000 : 4000)
   }
+
+  useEffect(() => () => { if (toastTimer.current) window.clearTimeout(toastTimer.current) }, [])
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => setDebouncedUserSearch(userSearch), 300)
+    return () => window.clearTimeout(timer)
+  }, [userSearch])
 
   // Schema health — lets the UI tell the user which tables/columns are missing
   const [schemaIssues, setSchemaIssues] = useState<string[]>([])
@@ -668,26 +417,50 @@ export const AdminPanel: React.FC = () => {
     setSchemaIssues(prev => prev.includes(msg) ? prev : [...prev, msg])
 
   // ── Data fetchers ──────────────────────────────────────────────────────────
+  const fetchUserStats = useCallback(async () => {
+    const [total, notBanned, banned, admins] = await Promise.all([
+      supabase.from('users').select('id', { count: 'exact', head: true }),
+      supabase.from('users').select('id', { count: 'exact', head: true }).or('is_banned.eq.false,is_banned.is.null'),
+      supabase.from('users').select('id', { count: 'exact', head: true }).eq('is_banned', true),
+      supabase.from('users').select('id', { count: 'exact', head: true }).eq('is_admin', true),
+    ])
+    for (const result of [total, notBanned, banned, admins]) {
+      if (result.error) { addIssue(`users count: ${result.error.message}`); return }
+    }
+    setStats({ total: total.count ?? 0, active: notBanned.count ?? 0, banned: banned.count ?? 0, admins: admins.count ?? 0 })
+  }, [])
+
   const fetchUsers = useCallback(async () => {
-    const { data, error } = await supabase
+    const sequence = ++userFetchSequence.current
+    setUsersLoading(true)
+    let query = supabase
       .from('users')
-      .select('id, playername, email, totalxp, currentlevel, charactertype, user_type, is_admin, is_banned, ban_reason, createdat, lastactive, sandbox_runs')
+      .select('id, playername, email, totalxp, currentlevel, charactertype, user_type, is_admin, is_banned, ban_reason, createdat, lastactive, sandbox_runs', { count: 'exact' })
+    if (userFilter === 'active') query = query.or('is_banned.eq.false,is_banned.is.null')
+    if (userFilter === 'banned') query = query.eq('is_banned', true)
+    if (userFilter === 'admin') query = query.eq('is_admin', true)
+    const search = debouncedUserSearch.trim().replace(/[^a-zA-Z0-9@._ -]/g, '')
+    if (search) query = query.or(`playername.ilike.%${search}%,email.ilike.%${search}%`)
+    const { data, error, count } = await query
       .order('createdat', { ascending: false })
+      .range(userPage * 25, userPage * 25 + 24)
+    if (sequence !== userFetchSequence.current) return
+    setUsersLoading(false)
     if (error) {
-      console.warn('[fetchUsers]', error.message)
       addIssue(`users table: ${error.message}`)
       return
     }
     if (data) {
       setUsers(data as AdminUser[])
-      setStats(computeUserStats(data as AdminUser[]))
+      setUserResultCount(count ?? 0)
       try {
-        setUserImages(await getProfileImageUrlMap((data as AdminUser[]).map(row => row.id)))
+        const images = await getAvatarUrlMap((data as AdminUser[]).map(row => row.id))
+        if (sequence === userFetchSequence.current) { setUserImages(images); setAvatarError(null) }
       } catch (err: unknown) {
-        console.warn('[fetchUserImages]', err instanceof Error ? err.message : err)
+        if (sequence === userFetchSequence.current) setAvatarError(`User avatars could not be loaded: ${errorMessage(err)}`)
       }
     }
-  }, [])
+  }, [debouncedUserSearch, userFilter, userPage])
 
   const fetchAuditLogs = useCallback(async () => {
     // Try with FK joins first; fall back to plain select if the joins aren't set up.
@@ -750,7 +523,7 @@ export const AdminPanel: React.FC = () => {
     try {
       const { data, error } = await supabase
         .from('quests')
-        .select('id, title, level, difficulty, basexp, sortorder, isactive, phase, question_type, description, tutorial_title, tutorial_body, theory_sections, objectives, hints, mc_questions, game_items, drop_zones, ordering_items, code_fill_items')
+        .select('id, title, level, difficulty, basexp, sortorder, isactive, phase, question_type, description')
         .eq('mode', 'campaign')
         .order('level', { ascending: true })
         .order('sortorder', { ascending: true })
@@ -777,24 +550,21 @@ export const AdminPanel: React.FC = () => {
   useEffect(() => {
     const load = async () => {
       setLoading(true)
-      await Promise.all([fetchUsers(), fetchAuditLogs(), fetchMaintenance(), fetchAnnouncements()])
+      await Promise.all([fetchUserStats(), fetchAuditLogs(), fetchMaintenance(), fetchAnnouncements()])
       setLoading(false)
     }
     load()
-  }, [fetchUsers, fetchAuditLogs, fetchMaintenance, fetchAnnouncements])
+  }, [fetchUserStats, fetchAuditLogs, fetchMaintenance, fetchAnnouncements])
+
+  useEffect(() => { void fetchUsers() }, [fetchUsers])
 
   useEffect(() => {
     if (tab === 'quests') fetchExistingQuests()
   }, [tab, fetchExistingQuests])
 
-  // ── User filtering ─────────────────────────────────────────────────────────
-  useEffect(() => {
-    setFilteredUsers(filterUsers(users, userFilter, userSearch))
-  }, [users, userFilter, userSearch])
-
   // ── Actions ────────────────────────────────────────────────────────────────
   // Helper: returns count of rows actually changed — detects silent RLS denial.
-  const adminUpdate = async (targetId: string, changes: Record<string, any>): Promise<{ ok: boolean; msg: string }> => {
+  const adminUpdate = async (targetId: string, changes: AdminUserChanges): Promise<{ ok: boolean; msg: string }> => {
     const { data, error } = await supabase
       .from('users').update(changes).eq('id', targetId).select('id')
     if (error) return { ok: false, msg: error.message }
@@ -807,130 +577,170 @@ export const AdminPanel: React.FC = () => {
   const banUser = async (target: AdminUser, reason: string) => {
     if (!user) return
     setSaving(true)
-    const res = await adminUpdate(target.id, { is_banned: true, ban_reason: reason, banned_at: new Date().toISOString() })
-    if (!res.ok) {
-      console.warn('[banUser]', res.msg)
-      showToast(`Ban failed: ${res.msg}`, 'error')
-    } else {
-      await writeAuditLog(user.id, 'ban', target.id, { reason, playername: target.playername })
-      showToast(`${target.playername} has been banned`)
+    try {
+      const res = await adminUpdate(target.id, { is_banned: true, ban_reason: reason, banned_at: new Date().toISOString() })
+      if (!res.ok) {
+        showToast(`Ban failed: ${res.msg}`, 'error')
+        return
+      }
       await fetchUsers()
-      await fetchAuditLogs()
+      await fetchUserStats()
+      try {
+        await writeAuditLog(user.id, 'ban', target.id, { reason, playername: target.playername })
+        await fetchAuditLogs()
+        showToast(`${target.playername} has been banned`)
+      } catch (auditError: unknown) {
+        showToast(`${target.playername} was banned, but the audit entry failed: ${errorMessage(auditError)}`, 'error')
+      }
+    } catch (error: unknown) {
+      showToast(`Ban may have succeeded, but confirmation failed: ${errorMessage(error)}`, 'error')
+    } finally {
+      setSaving(false)
     }
-    setSaving(false)
   }
 
   const unbanUser = async (target: AdminUser) => {
     if (!user) return
     setSaving(true)
-    const res = await adminUpdate(target.id, { is_banned: false, ban_reason: null, banned_at: null })
-    if (!res.ok) {
-      console.warn('[unbanUser]', res.msg)
-      showToast(`Unban failed: ${res.msg}`, 'error')
-    } else {
-      await writeAuditLog(user.id, 'unban', target.id, { playername: target.playername })
-      showToast(`${target.playername} has been unbanned`)
+    try {
+      const res = await adminUpdate(target.id, { is_banned: false, ban_reason: null, banned_at: null })
+      if (!res.ok) {
+        showToast(`Unban failed: ${res.msg}`, 'error')
+        return
+      }
       await fetchUsers()
-      await fetchAuditLogs()
+      await fetchUserStats()
+      try {
+        await writeAuditLog(user.id, 'unban', target.id, { playername: target.playername })
+        await fetchAuditLogs()
+        showToast(`${target.playername} has been unbanned`)
+      } catch (auditError: unknown) {
+        showToast(`${target.playername} was unbanned, but the audit entry failed: ${errorMessage(auditError)}`, 'error')
+      }
+    } catch (error: unknown) {
+      showToast(`Unban may have succeeded, but confirmation failed: ${errorMessage(error)}`, 'error')
+    } finally {
+      setSaving(false)
     }
-    setSaving(false)
   }
 
   const toggleAdmin = async (target: AdminUser) => {
     if (!user || target.id === user.id) return
     setSaving(true)
-    const next = !target.is_admin
-    const res = await adminUpdate(target.id, { is_admin: next })
-    if (!res.ok) {
-      console.warn('[toggleAdmin]', res.msg)
-      showToast(`Failed: ${res.msg}`, 'error')
-    } else {
-      await writeAuditLog(user.id, next ? 'grant_admin' : 'revoke_admin', target.id, { playername: target.playername })
-      showToast(`${target.playername} admin status ${next ? 'granted' : 'revoked'}`)
+    try {
+      const next = !target.is_admin
+      const res = await adminUpdate(target.id, { is_admin: next })
+      if (!res.ok) {
+        showToast(`Failed to change admin status: ${res.msg}`, 'error')
+        return
+      }
       await fetchUsers()
+      await fetchUserStats()
+      try {
+        await writeAuditLog(user.id, next ? 'grant_admin' : 'revoke_admin', target.id, { playername: target.playername })
+        await fetchAuditLogs()
+        showToast(`${target.playername} admin status ${next ? 'granted' : 'revoked'}`)
+      } catch (auditError: unknown) {
+        showToast(`${target.playername} admin status changed, but the audit entry failed: ${errorMessage(auditError)}`, 'error')
+      }
+    } catch (error: unknown) {
+      showToast(`Admin status may have changed, but confirmation failed: ${errorMessage(error)}`, 'error')
+    } finally {
+      setSaving(false)
     }
-    setSaving(false)
   }
 
-  const handleImpersonate = async (target: AdminUser) => {
-    if (!user) return
-    const { data: profileRow, error } = await supabase.from('users').select('*').eq('id', target.id).maybeSingle()
-    if (error) {
-      console.warn('[handleImpersonate]', error.message)
-      showToast(`Preview failed: ${error.message}`, 'error'); return
+  const requestLiveHelp = async (target: AdminUser): Promise<void> => {
+    if (import.meta.env.VITE_SUPPORT_ENABLED !== 'true') {
+      showToast('Live help is not enabled. Apply the support migration, set VITE_SUPPORT_ENABLED=true in Netlify, and redeploy the frontend.', 'error')
+      return
     }
-    if (!profileRow) {
-      showToast('Preview failed: target profile not returned — likely blocked by RLS SELECT policy.', 'error'); return
+    try {
+      assertSupportVideoPlayback()
+      const session = await requestSupportSession(target.id)
+      setLiveHelp({ session, learnerName: target.playername })
+    } catch (caught: unknown) {
+      showToast(`Could not request live help: ${errorMessage(caught)}`, 'error')
     }
-    const targetProfile: ExplorerProfile = {
-      id: profileRow.id, playerName: profileRow.playername, secretCode: '***',
-      email: profileRow.email, totalXP: profileRow.totalxp,
-      currentLevel: (profileRow.currentlevel ?? 1) as 1 | 2 | 3 | 4 | 5,
-      characterType: (profileRow.charactertype ?? 'squire') as ExplorerProfile['characterType'],
-      userType: (profileRow.user_type ?? 'student') as 'student' | 'professional',
-      isAdmin: false, isBanned: profileRow.is_banned ?? false,
-      createdAt: new Date(profileRow.createdat), lastActive: new Date(profileRow.lastactive),
-    }
-    await writeAuditLog(user.id, 'impersonate', target.id, { playername: target.playername })
-    startImpersonation(targetProfile)
-    navigate('/home')
   }
 
   const saveMaintenance = async () => {
     if (!user) return
     setSaving(true)
-    const [r1, r2] = await Promise.all([
-      supabase.from('system_settings').upsert(
-        { key: 'maintenance_mode',    value: maintenanceOn,                          updated_by: user.id },
-        { onConflict: 'key' }
-      ),
-      supabase.from('system_settings').upsert(
-        { key: 'maintenance_message', value: maintenanceMsg || '',                   updated_by: user.id },
-        { onConflict: 'key' }
-      ),
-    ])
-    if (r1.error || r2.error) {
-      const msg = r1.error?.message ?? r2.error?.message ?? 'unknown'
-      console.warn('[saveMaintenance]', msg)
-      showToast(`Failed to save maintenance: ${msg}`, 'error')
-    } else {
-      await writeAuditLog(user.id, maintenanceOn ? 'maintenance_on' : 'maintenance_off', undefined, { message: maintenanceMsg })
+    try {
+      const [modeResult, messageResult] = await Promise.all([
+        supabase.from('system_settings').upsert(
+          { key: 'maintenance_mode', value: maintenanceOn, updated_by: user.id },
+          { onConflict: 'key' }
+        ),
+        supabase.from('system_settings').upsert(
+          { key: 'maintenance_message', value: maintenanceMsg || '', updated_by: user.id },
+          { onConflict: 'key' }
+        ),
+      ])
+      if (modeResult.error) throw modeResult.error
+      if (messageResult.error) throw messageResult.error
       await refreshMaintenanceMode()
-      showToast(`Maintenance mode ${maintenanceOn ? 'enabled' : 'disabled'}`)
+      try {
+        await writeAuditLog(user.id, maintenanceOn ? 'maintenance_on' : 'maintenance_off', undefined, { message: maintenanceMsg })
+        showToast(`Maintenance mode ${maintenanceOn ? 'enabled' : 'disabled'}`)
+      } catch (auditError: unknown) {
+        showToast(`Maintenance settings saved, but the audit entry failed: ${errorMessage(auditError)}`, 'error')
+      }
+    } catch (error: unknown) {
+      showToast(`Maintenance settings may have changed; verify them before retrying: ${errorMessage(error)}`, 'error')
+    } finally {
+      setSaving(false)
     }
-    setSaving(false)
   }
 
   const createAnnouncement = async () => {
     if (!user || !newAnn.title.trim() || !newAnn.body.trim()) {
       showToast('Title and body are required', 'error'); return
     }
-    const { error } = await supabase.from('announcements').insert({
-      title: newAnn.title.trim(), body: newAnn.body.trim(),
-      priority: newAnn.priority, ispinned: newAnn.ispinned,
-      author: user.playerName,
-    })
-    if (error) { showToast(`Failed: ${error.message}`, 'error') }
-    else {
-      await writeAuditLog(user.id, 'announcement_create', undefined, { title: newAnn.title })
-      setNewAnn({ title: '', body: '', priority: 'info', ispinned: false })
-      showToast('Announcement published')
+    try {
+      const { data, error } = await supabase.from('announcements').insert({
+        title: newAnn.title.trim(), body: newAnn.body.trim(),
+        priority: newAnn.priority, ispinned: newAnn.ispinned,
+        author: user.playerName,
+      }).select('id')
+      if (error) throw error
+      if (data?.length !== 1) throw new Error('Announcement insert returned no row. Check admin INSERT and SELECT policies.')
       await fetchAnnouncements()
+      setNewAnn({ title: '', body: '', priority: 'info', ispinned: false })
+      try {
+        await writeAuditLog(user.id, 'announcement_create', undefined, { title: newAnn.title })
+        showToast('Announcement published')
+      } catch (auditError: unknown) {
+        showToast(`Announcement published, but the audit entry failed: ${errorMessage(auditError)}`, 'error')
+      }
+    } catch (error: unknown) {
+      showToast(`Announcement may have been published; verify before retrying: ${errorMessage(error)}`, 'error')
     }
   }
 
   const deleteAnnouncement = async (id: string, title: string) => {
     if (!user) return
     if (!window.confirm(`Delete "${title}"?`)) return
-    const { error } = await supabase.from('announcements').delete().eq('id', id)
-    if (error) { showToast(`Delete failed: ${error.message}`, 'error'); return }
-    await writeAuditLog(user.id, 'announcement_delete', undefined, { title })
-    showToast('Announcement deleted')
-    await fetchAnnouncements()
+    try {
+      const { data, error } = await supabase.from('announcements').delete().eq('id', id).select('id')
+      if (error) throw error
+      if (data?.length !== 1) throw new Error(`Announcement ${id} was not deleted. Check that it still exists and admin DELETE policy allows this action.`)
+      await fetchAnnouncements()
+      try {
+        await writeAuditLog(user.id, 'announcement_delete', undefined, { title })
+        showToast('Announcement deleted')
+      } catch (auditError: unknown) {
+        showToast(`Announcement deleted, but the audit entry failed: ${errorMessage(auditError)}`, 'error')
+      }
+    } catch (error: unknown) {
+      showToast(`Announcement may have been deleted; verify before retrying: ${errorMessage(error)}`, 'error')
+    }
   }
 
   // ── Quest actions ──────────────────────────────────────────────────────────
   const resetQuestForm = () => {
+    if (hasQuestContent(questForm) && !window.confirm('Discard this unsaved quest draft?')) return
     setQuestForm(defaultQF())
     setReplaceTarget('')
     setObjectiveDraft('')
@@ -980,8 +790,8 @@ export const AdminPanel: React.FC = () => {
         await writeAuditLog(user.id, 'quest_bulk_fix', undefined, { action: 'fix_pop_language', fixedQuests, fixedQs })
         await fetchExistingQuests()
       }
-    } catch (err: any) {
-      setFixPopResult(`Error: ${err.message}`)
+    } catch (error: unknown) {
+      setFixPopResult(`Error: ${errorMessage(error)}`)
     }
     setFixingPop(false)
   }
@@ -1018,12 +828,12 @@ export const AdminPanel: React.FC = () => {
     // Per-question hint is dropped from the payload when blank so JSONB stays
     // clean. Empty-string `hint` would otherwise pollute every MC row.
     const mc_questions_arr = [
-      ...(questForm.act_mc ? (normalizeMCQuestions(questForm.mc_questions as any[]) as QFormMCQ[]).map((q, i) => ({
+      ...(questForm.act_mc ? normalizeMCQuestions(questForm.mc_questions).map((q, i) => ({
           id: `mc_${i + 1}`, question: q.question.trim(), options: q.options,
           correct: q.correct, explanation: q.explanation, mode: 'mc' as const,
           ...(q.hint.trim() ? { hint: q.hint.trim() } : {}),
         })) : []),
-      ...(questForm.act_balloon ? (normalizeMCQuestions(questForm.balloon_questions as any[]) as QFormMCQ[]).map((q, i) => ({
+      ...(questForm.act_balloon ? normalizeMCQuestions(questForm.balloon_questions).map((q, i) => ({
           id: `bp_${i + 1}`, question: q.question.trim(), options: q.options,
           correct: q.correct,
           correctAnswers: (q.correctAnswers?.length ? q.correctAnswers : [q.correct])
@@ -1037,7 +847,13 @@ export const AdminPanel: React.FC = () => {
     // Drag & Drop only (balloon no longer uses game_items)
     const game_items = (() => {
       if (questForm.act_drag && questForm.drag_problems.length > 0) {
-        const all: any[] = []
+        const all: Array<{
+          id: string
+          label: string
+          color: string
+          problem_id: string
+          question: string
+        }> = []
         questForm.drag_problems.forEach(p => {
           const validIds = new Set(p.items.filter(g => g.label.trim()).map(g => g.id))
           const hasValidZone = p.drop_zones.some(z => z.label.trim() && validIds.has(z.accepted))
@@ -1053,7 +869,12 @@ export const AdminPanel: React.FC = () => {
 
     const drop_zones_final = questForm.act_drag && questForm.drag_problems.length > 0
         ? (() => {
-          const all: any[] = []
+          const all: Array<{
+            id: string
+            label: string
+            accepted: string
+            problem_id: string
+          }> = []
           questForm.drag_problems.forEach(p => {
             const validIds = new Set(p.items.filter(g => g.label.trim()).map(g => g.id))
             p.drop_zones
@@ -1066,7 +887,14 @@ export const AdminPanel: React.FC = () => {
 
     const ordering_items = questForm.act_ordering && questForm.ordering_problems.length > 0
         ? (() => {
-          const all: any[] = []
+          const all: Array<{
+            id: string
+            label: string
+            description: string | undefined
+            correct_order: number
+            problem_id: string
+            question: string
+          }> = []
           questForm.ordering_problems.forEach(p =>
             p.items
             .filter(o => o.label.trim())
@@ -1100,7 +928,6 @@ export const AdminPanel: React.FC = () => {
       hints: serializeHints(questForm.hints),
       tutorial_title: questForm.tutorial_title.trim() || null,
       tutorial_body: questForm.tutorial_body.trim() || null,
-      tutorial_image: null,
       theory_sections: theory_sections.length > 0 ? theory_sections : null,
       mc_questions, game_items, drop_zones: drop_zones_final, ordering_items, code_fill_items,
     }
@@ -1109,32 +936,61 @@ export const AdminPanel: React.FC = () => {
     try {
       await ensureLevelInfoForLevel(questForm.level)
       if (replaceId) {
-        const { error } = await supabase.from('quests').update(questData).eq('id', replaceId)
+        const { data, error } = await supabase.from('quests').update(questData).eq('id', replaceId).select('id')
         if (error) throw error
-        await writeAuditLog(user.id, 'quest_update', undefined, { title: questForm.title, id: replaceId })
-        showToast('Quest updated successfully')
+        if (data?.length !== 1) throw new Error(`Quest ${replaceId} was not updated. Check that it still exists and that admin UPDATE policy allows this action.`)
       } else {
-        const { error } = await supabase.from('quests').insert(questData)
+        const { data, error } = await supabase.from('quests').insert(questData).select('id')
         if (error) throw error
-        await writeAuditLog(user.id, 'quest_create', undefined, { title: questForm.title, level: questForm.level })
-        showToast('Quest created successfully')
+        if (data?.length !== 1) throw new Error('Quest insert returned no row. Check admin INSERT and SELECT policies before retrying.')
       }
       await fetchExistingQuests()
-      resetQuestForm()
-    } catch (err: any) {
-      showToast(`Failed: ${err.message}`, 'error')
+      try {
+        localStorage.removeItem(`codesense-admin-quest-draft:${user.id}`)
+      } catch (storageError: unknown) {
+        setQuestDraftError(`Quest saved, but the local draft could not be cleared: ${errorMessage(storageError)}`)
+      }
+      setQuestForm(defaultQF())
+      setReplaceTarget('')
+      setObjectiveDraft('')
+      setLessonDraft('')
+      setHintDraft('')
+      try {
+        await writeAuditLog(user.id, replaceId ? 'quest_update' : 'quest_create', undefined, {
+          title: questForm.title, level: questForm.level, id: replaceId ?? null,
+        })
+        showToast(`Quest ${replaceId ? 'updated' : 'created'} successfully`)
+      } catch (auditError: unknown) {
+        showToast(`Quest ${replaceId ? 'updated' : 'created'}, but the audit entry failed: ${errorMessage(auditError)}`, 'error')
+      }
+    } catch (error: unknown) {
+      showToast(`Failed: ${errorMessage(error)}`, 'error')
     }
     setQuestSaving(false)
   }
 
-  // q is typed as any because the function body uses internal casts against
-  // the DB shape, which diverges from the ExistingQuest interface in places.
-  const loadQuestForEdit = (q: any) => {
+  const loadQuestForEdit = async (summary: ExistingQuest): Promise<void> => {
+    if (hasQuestContent(questForm) && !window.confirm('Replace your current unsaved quest draft with this quest?')) return
+    setQuestActionId(summary.id)
+    try {
+      const { data, error } = await supabase.from('quests')
+        .select('id, title, level, difficulty, basexp, requiredxp, sortorder, isactive, phase, question_type, description, tutorial_title, tutorial_body, theory_sections, objectives, hints, mc_questions, game_items, drop_zones, ordering_items, code_fill_items')
+        .eq('id', summary.id).maybeSingle()
+      if (error || !data) throw new Error(`Quest ${summary.id} could not be loaded: ${error?.message ?? 'row not found'}`)
+      applyQuestForEdit(data as ExistingQuest)
+    } catch (caught: unknown) {
+      showToast(`Could not load quest for editing: ${errorMessage(caught)}`, 'error')
+    } finally {
+      setQuestActionId(null)
+    }
+  }
+
+  const applyQuestForEdit = (q: ExistingQuest) => {
     const isDrag = q.question_type === 'drag_drop' || !!(q.game_items?.length && q.drop_zones?.length)
 
     // Split mc_questions into balloon and MC buckets.
     // New rows have a `mode` field; legacy rows without mode use question_type.
-    const allMCQs: any[] = q.mc_questions ?? []
+    const allMCQs = q.mc_questions ?? []
     const hasMode = allMCQs.some(m => m.mode === 'balloon' || m.mode === 'mc')
     const balloonQsDB = hasMode
       ? allMCQs.filter(m => m.mode === 'balloon')
@@ -1147,12 +1003,12 @@ export const AdminPanel: React.FC = () => {
     const dragProblems: QFormDragProblem[] = (() => {
       if (!isDrag || !q.game_items?.length || !q.drop_zones?.length) return [newDragProblem()]
       const problemMap = new Map<string, QFormDragProblem>()
-      ;(q.game_items as any[]).forEach(g => {
+      q.game_items.forEach(g => {
         const pid = g.problem_id ?? 'default'
         if (!problemMap.has(pid)) problemMap.set(pid, { id: pid, question: g.question ?? '', items: [], drop_zones: [] })
         problemMap.get(pid)!.items.push({ id: g.id ?? String(Math.random()), label: g.label ?? '', color: g.color ?? '#58a6ff' })
       })
-      ;(q.drop_zones as any[]).forEach(z => {
+      q.drop_zones.forEach(z => {
         const pid = z.problem_id ?? 'default'
         if (!problemMap.has(pid)) problemMap.set(pid, { id: pid, question: z.question ?? '', items: [], drop_zones: [] })
         problemMap.get(pid)!.drop_zones.push({ id: z.id ?? String(Math.random()), label: z.label ?? '', accepted: z.accepted ?? '' })
@@ -1164,9 +1020,9 @@ export const AdminPanel: React.FC = () => {
     const orderingProblems: QFormOrderProblem[] = (() => {
       if (!q.ordering_items?.length) return [newOrderProblem()]
       const problemMap = new Map<string, QFormOrderProblem>()
-      ;(q.ordering_items as any[])
-        .slice().sort((a: any, b: any) => (a.correct_order ?? 0) - (b.correct_order ?? 0))
-        .forEach((o: any) => {
+      q.ordering_items
+        .slice().sort((a, b) => (a.correct_order ?? 0) - (b.correct_order ?? 0))
+        .forEach(o => {
           const pid = o.problem_id ?? 'default'
           if (!problemMap.has(pid)) problemMap.set(pid, { id: pid, question: o.question ?? '', items: [] })
           problemMap.get(pid)!.items.push({ id: o.id ?? String(Math.random()), label: o.label ?? '', description: o.description ?? '' })
@@ -1180,7 +1036,7 @@ export const AdminPanel: React.FC = () => {
       basexp: q.basexp ?? 100, requiredxp: q.requiredxp ?? 0,
       sortorder: q.sortorder ?? 99, isactive: q.isactive ?? true,
       tutorial_title: q.tutorial_title ?? '', tutorial_body: q.tutorial_body ?? '',
-      theory_sections: (q.theory_sections ?? []).map((s: any, i: number) => ({
+      theory_sections: (q.theory_sections ?? []).map((s, i) => ({
         id: String(i), type: s.type ?? 'default', heading: s.heading ?? '',
         body: s.body ?? '', code: s.code ?? '', language: s.language ?? 'c',
         table_headers: s.table_headers ?? [], table_rows: s.table_rows ?? [[]],
@@ -1191,27 +1047,15 @@ export const AdminPanel: React.FC = () => {
       act_balloon:  balloonQsDB.length > 0,
       act_ordering: !!q.ordering_items?.length,
       act_codefill: !!q.code_fill_items?.length,
-      mc_questions: mcQsDB.length > 0 ? mcQsDB.map((m: any) => {
-        const normalized = normalizeMCQuestionOptions(m)
-        return ({
-        id: m.id ?? String(Math.random()), question: m.question ?? '',
-        options: [...(normalized.options as string[]), '', '', '', ''].slice(0, 4) as [string, string, string, string],
-        correct: normalized.correct as number, explanation: m.explanation ?? '',
-        hint: m.hint ?? '',
-      })}) : [{ id: '1', question: '', options: ['', '', '', ''], correct: 0, explanation: '', hint: '' }],
-      balloon_questions: balloonQsDB.length > 0 ? balloonQsDB.map((m: any) => {
-        const normalized = normalizeMCQuestionOptions(m)
-        return ({
-        id: m.id ?? String(Math.random()), question: m.question ?? '',
-        options: [...(normalized.options as string[]), '', '', '', ''].slice(0, 4) as [string, string, string, string],
-        correct: normalized.correct as number,
-        correctAnswers: Array.isArray((normalized as any).correctAnswers) ? (normalized as any).correctAnswers : [normalized.correct as number],
-        explanation: m.explanation ?? '',
-        hint: m.hint ?? '',
-      })}) : [{ id: 'b1', question: '', options: ['', '', '', ''], correct: 0, correctAnswers: [0], explanation: '', hint: '' }],
+      mc_questions: mcQsDB.length > 0
+        ? mcQsDB.map((question, index) => storedChoiceQuestionToForm(question, `mc_${index + 1}`))
+        : [{ id: '1', question: '', options: ['', '', '', ''], correct: 0, explanation: '', hint: '' }],
+      balloon_questions: balloonQsDB.length > 0
+        ? balloonQsDB.map((question, index) => storedChoiceQuestionToForm(question, `bp_${index + 1}`))
+        : [{ id: 'b1', question: '', options: ['', '', '', ''], correct: 0, correctAnswers: [0], explanation: '', hint: '' }],
       drag_problems: dragProblems,
       ordering_problems: orderingProblems,
-      code_fill_items: (q.code_fill_items ?? []).map((c: any) => ({
+      code_fill_items: (q.code_fill_items ?? []).map(c => ({
         id: c.id ?? String(Math.random()),
         code_lines: Array.isArray(c.code_lines) ? c.code_lines.join('\n') : (c.code_lines ?? ''),
         language: c.language ?? 'c',
@@ -1226,7 +1070,7 @@ export const AdminPanel: React.FC = () => {
     showToast(`Loaded "${q.title}" for editing`)
   }
 
-  const toggleQuestActive = async (q: any) => {
+  const toggleQuestActive = async (q: ExistingQuest) => {
     if (!user) return
     setQuestActionId(q.id)
     try {
@@ -1237,21 +1081,33 @@ export const AdminPanel: React.FC = () => {
         .select('id')
       if (error) throw error
       if (!data?.length) throw new Error('No quest row was updated. Check quest update permissions.')
-      await writeAuditLog(user.id, q.isactive ? 'quest_deactivate' : 'quest_activate', undefined, { title: q.title })
-      showToast(`Quest ${q.isactive ? 'deactivated' : 'activated'}`)
       await fetchExistingQuests()
-    } catch (err: any) {
-      showToast(`Failed: ${err.message}`, 'error')
+      try {
+        await writeAuditLog(user.id, q.isactive ? 'quest_deactivate' : 'quest_activate', undefined, { title: q.title })
+        showToast(`Quest ${q.isactive ? 'deactivated' : 'activated'}`)
+      } catch (auditError: unknown) {
+        showToast(`Quest ${q.isactive ? 'deactivated' : 'activated'}, but the audit entry failed: ${errorMessage(auditError)}`, 'error')
+      }
+    } catch (error: unknown) {
+      showToast(`Failed: ${errorMessage(error)}`, 'error')
     } finally {
       setQuestActionId(null)
     }
   }
 
-  const deleteQuest = async (q: any) => {
+  const deleteQuest = async (q: ExistingQuest) => {
     if (!user) return
-    if (!window.confirm(`Delete quest "${q.title}"? This cannot be undone.`)) return
     setQuestActionId(q.id)
     try {
+      const { count, error: progressError } = await supabase.from('mission_progress')
+        .select('id', { count: 'exact', head: true }).eq('questid', q.id)
+      if (progressError || count === null) {
+        throw new Error(`Could not check learner progress for quest ${q.id}: ${progressError?.message ?? 'no count returned'}`)
+      }
+      if (count > 0) {
+        throw new Error(`This quest has ${count} learner progress record(s). Deactivate it instead of deleting it so that progress is preserved.`)
+      }
+      if (!window.confirm(`Delete quest "${q.title}"? This cannot be undone.`)) return
       const { data, error } = await supabase
         .from('quests')
         .delete()
@@ -1259,12 +1115,16 @@ export const AdminPanel: React.FC = () => {
         .select('id')
       if (error) throw error
       if (!data?.length) throw new Error('No quest row was deleted. Check quest delete permissions.')
-      await writeAuditLog(user.id, 'quest_delete', undefined, { title: q.title, id: q.id })
-      showToast('Quest deleted')
       if (replaceTarget === q.id) setReplaceTarget('')
       await fetchExistingQuests()
-    } catch (err: any) {
-      showToast(`Failed: ${err.message}`, 'error')
+      try {
+        await writeAuditLog(user.id, 'quest_delete', undefined, { title: q.title, id: q.id })
+        showToast('Quest deleted')
+      } catch (auditError: unknown) {
+        showToast(`Quest deleted, but the audit entry failed: ${errorMessage(auditError)}`, 'error')
+      }
+    } catch (error: unknown) {
+      showToast(`Failed: ${errorMessage(error)}`, 'error')
     } finally {
       setQuestActionId(null)
     }
@@ -1277,10 +1137,6 @@ export const AdminPanel: React.FC = () => {
         Loading admin panel...
       </div>
     )
-  }
-
-  const PRIORITY_COLOR: Record<string, string> = {
-    info: 'blue', warning: 'yellow', success: 'green', critical: 'red',
   }
 
   const tabItems: { id: Tab; icon: string; label: string }[] = [
@@ -1297,7 +1153,7 @@ export const AdminPanel: React.FC = () => {
 
       {/* ── Toast ── */}
       {toast && (
-        <div style={{
+        <div role={toast.type === 'error' ? 'alert' : 'status'} style={{
           position: 'fixed', top: 20, right: 20, zIndex: 9999,
           background: toast.type === 'success' ? '#2fb344' : '#d63939',
           color: 'white', padding: '12px 20px', borderRadius: '8px',
@@ -1312,7 +1168,7 @@ export const AdminPanel: React.FC = () => {
         {/* ── Sidebar ── */}
         <aside className="navbar navbar-vertical navbar-expand-lg navbar-dark" style={{ background: '#1a2233' }}>
           <div className="container-fluid">
-            <button className="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbar-menu">
+            <button className="navbar-toggler" type="button" aria-label="Toggle admin navigation" aria-controls="admin-nav" aria-expanded={navOpen} onClick={() => setNavOpen(open => !open)}>
               <span className="navbar-toggler-icon" />
             </button>
 
@@ -1321,12 +1177,13 @@ export const AdminPanel: React.FC = () => {
               <span style={{ color: 'white', fontWeight: '700', fontSize: '16px' }}>CodeSense Admin</span>
             </div>
 
+            <div id="admin-nav" className={`collapse navbar-collapse${navOpen ? ' show' : ''}`} style={{ flexDirection: 'column', alignItems: 'stretch' }}>
             <div style={{ borderTop: '1px solid rgba(255,255,255,0.1)', margin: '8px 0', padding: '12px 0' }}>
               <div style={{ color: 'rgba(255,255,255,0.5)', fontSize: '11px', padding: '0 8px 6px', textTransform: 'uppercase', letterSpacing: '1px' }}>
                 Navigation
               </div>
               {tabItems.map(t => (
-                <button key={t.id} onClick={() => setTab(t.id)}
+                <button key={t.id} onClick={() => { setTab(t.id); setNavOpen(false) }} aria-current={tab === t.id ? 'page' : undefined}
                   style={{
                     width: '100%', display: 'flex', alignItems: 'center', gap: '10px',
                     padding: '10px 12px', background: tab === t.id ? 'rgba(255,255,255,0.12)' : 'transparent',
@@ -1347,6 +1204,7 @@ export const AdminPanel: React.FC = () => {
                 style={{ width: '100%', background: 'transparent', border: 'none', color: 'rgba(255,255,255,0.5)', fontSize: '12px', cursor: 'pointer', textAlign: 'left', padding: '8px 12px' }}>
                 ← Back to App
               </button>
+            </div>
             </div>
           </div>
         </aside>
@@ -1379,374 +1237,79 @@ export const AdminPanel: React.FC = () => {
                   borderRadius: '8px', padding: '12px 16px', marginBottom: '16px',
                 }}>
                   <div style={{ fontWeight: '700', color: '#d63939', fontSize: '13px', marginBottom: '6px' }}>
-                    ⚠️ Database schema issues detected — some features won't work until you run the migration SQL:
+                    ⚠️ Admin data could not be loaded. Check database access, policies, and connectivity:
                   </div>
                   <ul style={{ margin: '4px 0 0 0', paddingLeft: '20px', fontSize: '12px', color: '#6b7280' }}>
                     {schemaIssues.map((i, idx) => <li key={idx}>{i}</li>)}
                   </ul>
                 </div>
               )}
+              {questDraftError && <div className="alert alert-danger d-flex justify-content-between align-items-center" role="alert">
+                <span>{questDraftError}</span>
+                {invalidSavedDraft.current && <button type="button" className="btn btn-sm btn-outline-danger" onClick={() => {
+                  try {
+                    localStorage.removeItem(`codesense-admin-quest-draft:${user?.id}`)
+                    invalidSavedDraft.current = false
+                    questDraftReady.current = true
+                    setQuestDraftError(null)
+                    setQuestForm(previous => ({ ...previous }))
+                  } catch (caught: unknown) {
+                    setQuestDraftError(`Could not discard the saved quest draft: ${errorMessage(caught)}`)
+                  }
+                }}>Discard damaged draft</button>}
+              </div>}
+              {avatarError && tab === 'users' && <div className="alert alert-warning" role="alert">{avatarError}</div>}
 
-              {/* ── DASHBOARD ── */}
-              {tab === 'dashboard' && (
-                <>
-                  <div className="row row-cards">
-                    {[
-                      { label: 'Total Users',  value: stats.total,  icon: 'ti ti-users',         color: 'blue'   },
-                      { label: 'Active Users', value: stats.active, icon: 'ti ti-user-check',    color: 'green'  },
-                      { label: 'Banned Users', value: stats.banned, icon: 'ti ti-user-off',      color: 'red'    },
-                      { label: 'Admins',       value: stats.admins, icon: 'ti ti-shield-check',  color: 'purple' },
-                    ].map(s => (
-                      <div key={s.label} className="col-sm-6 col-lg-3">
-                        <div className="card">
-                          <div className="card-body">
-                            <div className="d-flex align-items-center">
-                              <div className={`me-3 text-${s.color}`}>
-                                <i className={s.icon} style={{ fontSize: '32px' }} />
-                              </div>
-                              <div>
-                                <div style={{ fontSize: '28px', fontWeight: '700', color: '#1a2233' }}>{s.value}</div>
-                                <div className="text-muted" style={{ fontSize: '12px' }}>{s.label}</div>
-                              </div>
-                            </div>
-                          </div>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
+{/* ── DASHBOARD ── */}
+              {tab === 'dashboard' && <AdminDashboardTab stats={stats} auditLogs={auditLogs} />}
 
-                  <div className="row mt-3">
-                    <div className="col-12">
-                      <div className="card">
-                        <div className="card-header"><h3 className="card-title">Recent Activity</h3></div>
-                        <div className="table-responsive">
-                          <table className="table table-vcenter card-table">
-                            <thead>
-                              <tr>
-                                <th>Action</th><th>Admin</th><th>Target</th><th>Time</th>
-                              </tr>
-                            </thead>
-                            <tbody>
-                              {auditLogs.slice(0, 10).map(log => (
-                                <tr key={log.id}>
-                                  <td><span className={`badge bg-${
-                                    log.action.includes('ban')         ? 'red'    :
-                                    log.action.includes('admin')       ? 'purple' :
-                                    log.action.includes('maintenance') ? 'orange' :
-                                    log.action.includes('impersonat')  ? 'yellow' : 'blue'
-                                  }-lt`}>{log.action}</span></td>
-                                  <td>{(log.admin as any)?.playername ?? log.admin_id?.slice(0, 8)}</td>
-                                  <td>{(log.target as any)?.playername ?? (log.target_user_id ? log.target_user_id.slice(0, 8) : '—')}</td>
-                                  <td className="text-muted">{fmt(log.created_at)}</td>
-                                </tr>
-                              ))}
-                              {auditLogs.length === 0 && (
-                                <tr><td colSpan={4} className="text-center text-muted py-3">No audit entries yet</td></tr>
-                              )}
-                            </tbody>
-                          </table>
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-                </>
-              )}
-
-              {/* ── USERS ── */}
+{/* ── USERS ── */}
               {tab === 'users' && (
-                <div className="card">
-                  <div className="card-header">
-                    <h3 className="card-title">User Management</h3>
-                    <div className="card-options" style={{ gap: '8px', display: 'flex', alignItems: 'center' }}>
-                      <input
-                        type="text" className="form-control form-control-sm"
-                        placeholder="Search users..." value={userSearch}
-                        onChange={e => setUserSearch(e.target.value)}
-                        style={{ width: '200px' }}
-                      />
-                      <select className="form-select form-select-sm" value={userFilter}
-                        onChange={e => setUserFilter(e.target.value as any)} style={{ width: '130px' }}>
-                        <option value="all">All Users</option>
-                        <option value="active">Active</option>
-                        <option value="banned">Banned</option>
-                        <option value="admin">Admins</option>
-                      </select>
-                    </div>
-                  </div>
-                  <div className="table-responsive">
-                    <table className="table table-vcenter card-table table-striped">
-                      <thead>
-                        <tr>
-                          <th>Player</th><th>Email</th><th>Type</th><th>Level</th><th>XP</th>
-                          <th>Status</th><th>Joined</th><th>Last Active</th><th>Actions</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {filteredUsers.map(u => {
-                          const avatarUrl = userImages.get(u.id)?.avatarUrl ?? null
-                          return (
-                          <tr key={u.id}>
-                            <td>
-                              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                                <div style={{ width: '32px', height: '32px', borderRadius: '50%', background: '#206bc4', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'white', fontWeight: '700', fontSize: '14px', flexShrink: 0, overflow: 'hidden' }}>
-                                  {avatarUrl
-                                    ? <img src={avatarUrl} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
-                                    : u.playername.charAt(0).toUpperCase()}
-                                </div>
-                                <div>
-                                  <strong>{u.playername}</strong>
-                                  {u.is_admin && <span className="badge bg-purple-lt ms-1" style={{ fontSize: '10px' }}>admin</span>}
-                                </div>
-                              </div>
-                            </td>
-                            <td className="text-muted" style={{ fontSize: '12px' }}>{u.email}</td>
-                            <td>
-                              <span className={`badge bg-${u.user_type === 'professional' ? 'azure' : 'teal'}-lt`} style={{ textTransform: 'capitalize' }}>
-                                {u.user_type ?? 'student'}
-                              </span>
-                            </td>
-                            <td>{u.currentlevel}</td>
-                            <td>{u.totalxp}</td>
-                            <td>
-                              {u.is_banned
-                                ? <span className="badge bg-red">Banned</span>
-                                : <span className="badge bg-green">Active</span>
-                              }
-                            </td>
-                            <td className="text-muted" style={{ fontSize: '11px' }}>{fmt(u.createdat)}</td>
-                            <td className="text-muted" style={{ fontSize: '11px' }}>{u.lastactive ? fmt(u.lastactive) : '—'}</td>
-                            <td>
-                              <div style={{ display: 'flex', gap: '4px', flexWrap: 'wrap' }}>
-                                {u.is_banned ? (
-                                  <button className="btn btn-sm btn-success" disabled={saving}
-                                    onClick={() => unbanUser(u)}>Unban</button>
-                                ) : (
-                                  <button className="btn btn-sm btn-danger" disabled={saving || u.id === user?.id}
-                                    onClick={() => {
-                                      const reason = window.prompt(`Ban reason for ${u.playername}:`)
-                                      if (reason !== null && reason.trim() !== '') banUser(u, reason.trim())
-                                      else if (reason !== null) alert('A ban reason is required.')
-                                    }}>Ban</button>
-                                )}
-                                {u.id !== user?.id && (
-                                  <button className="btn btn-sm btn-warning" disabled={saving}
-                                    onClick={() => toggleAdmin(u)}>
-                                    {u.is_admin ? 'Revoke Admin' : 'Make Admin'}
-                                  </button>
-                                )}
-                                <button className="btn btn-sm btn-secondary" disabled={saving || u.id === user?.id}
-                                  onClick={() => handleImpersonate(u)}>
-                                  Preview
-                                </button>
-                              </div>
-                            </td>
-                          </tr>
-                        )})}
-                        {filteredUsers.length === 0 && (
-                          <tr><td colSpan={9} className="text-center text-muted py-4">No users found</td></tr>
-                        )}
-                      </tbody>
-                    </table>
-                  </div>
-                  <div className="card-footer text-muted" style={{ fontSize: '12px' }}>
-                    {filteredUsers.length} of {users.length} users
-                  </div>
-                </div>
+                <AdminUsersTab
+                  userSearch={userSearch}
+                  setUserSearch={value => { setUserSearch(value); setUserPage(0) }}
+                  userFilter={userFilter}
+                  setUserFilter={value => { setUserFilter(value); setUserPage(0) }}
+                  filteredUsers={users}
+                  userImages={userImages}
+                  loading={usersLoading}
+                  page={userPage}
+                  resultCount={userResultCount}
+                  setPage={setUserPage}
+                  saving={saving}
+                  currentUserId={user?.id}
+                  userCount={stats.total}
+                  banUser={banUser}
+                  unbanUser={unbanUser}
+                  toggleAdmin={toggleAdmin}
+                  requestLiveHelp={requestLiveHelp}
+                />
               )}
 
-              {/* ── AUDIT LOGS ── */}
-              {tab === 'audit' && (
-                <div className="card">
-                  <div className="card-header">
-                    <h3 className="card-title">Admin Audit Log</h3>
-                    <div className="card-options">
-                      <button className="btn btn-sm btn-outline-primary" onClick={fetchAuditLogs}>
-                        <i className="ti ti-refresh me-1" />Refresh
-                      </button>
-                    </div>
-                  </div>
-                  <div className="table-responsive">
-                    <table className="table table-vcenter card-table">
-                      <thead>
-                        <tr>
-                          <th>Action</th><th>Admin</th><th>Target User</th><th>Details</th><th>Timestamp</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {auditLogs.map(log => (
-                          <tr key={log.id}>
-                            <td>
-                              <span className={`badge bg-${
-                                log.action.includes('ban') ? 'red' :
-                                log.action.includes('admin') ? 'purple' :
-                                log.action.includes('maintenance') ? 'orange' :
-                                log.action.includes('impersonat')  ? 'yellow' :
-                                log.action.includes('announcement') ? 'teal'   : 'blue'
-                              }-lt`}>
-                                {log.action}
-                              </span>
-                            </td>
-                            <td>{(log.admin as any)?.playername ?? '—'}</td>
-                            <td>{(log.target as any)?.playername ?? (log.target_user_id ? `…${log.target_user_id.slice(-6)}` : '—')}</td>
-                            <td className="text-muted" style={{ fontSize: '11px', maxWidth: '240px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                              {log.details ? JSON.stringify(log.details) : '—'}
-                            </td>
-                            <td className="text-muted" style={{ fontSize: '11px' }}>{fmt(log.created_at)}</td>
-                          </tr>
-                        ))}
-                        {auditLogs.length === 0 && (
-                          <tr><td colSpan={5} className="text-center text-muted py-4">No audit entries yet</td></tr>
-                        )}
-                      </tbody>
-                    </table>
-                  </div>
-                </div>
-              )}
+{/* ── AUDIT LOGS ── */}
+              {tab === 'audit' && <AdminAuditTab auditLogs={auditLogs} fetchAuditLogs={fetchAuditLogs} />}
 
-              {/* ── MAINTENANCE ── */}
+{/* ── MAINTENANCE ── */}
               {tab === 'maintenance' && (
-                <div className="row">
-                  <div className="col-md-6">
-                    <div className="card">
-                      <div className="card-header"><h3 className="card-title">Maintenance Mode</h3></div>
-                      <div className="card-body">
-                        <div className="mb-3">
-                          <label className="form-check form-switch">
-                            <input className="form-check-input" type="checkbox" role="switch"
-                              checked={maintenanceOn} onChange={e => setMaintenanceOn(e.target.checked)} />
-                            <span className="form-check-label">
-                              {maintenanceOn
-                                ? <span className="text-danger fw-bold">Maintenance mode is ON</span>
-                                : <span className="text-success fw-bold">System is operational</span>}
-                            </span>
-                          </label>
-                          <div className="text-muted mt-1" style={{ fontSize: '12px' }}>
-                            When enabled, a banner is shown to all non-admin users. Logins are still permitted.
-                          </div>
-                        </div>
-
-                        <div className="mb-3">
-                          <label className="form-label">Maintenance Message</label>
-                          <textarea className="form-control" rows={3} value={maintenanceMsg}
-                            onChange={e => setMaintenanceMsg(e.target.value)}
-                            placeholder="Message shown to users during maintenance..." />
-                        </div>
-
-                        {maintenanceOn && (
-                          <div className="alert alert-warning">
-                            <i className="ti ti-alert-triangle me-2" />
-                            <strong>Warning:</strong> Maintenance mode is currently active. All non-admin users will see a maintenance banner.
-                          </div>
-                        )}
-
-                        <button className="btn btn-primary" disabled={saving} onClick={saveMaintenance}>
-                          {saving ? 'Saving…' : 'Save Settings'}
-                        </button>
-                      </div>
-                    </div>
-                  </div>
-
-                  <div className="col-md-6">
-                    <div className="card">
-                      <div className="card-header"><h3 className="card-title">Preview</h3></div>
-                      <div className="card-body">
-                        <div style={{
-                          padding: '14px 18px', borderRadius: '8px',
-                          background: maintenanceOn ? 'rgba(255, 167, 38, 0.12)' : 'rgba(76,175,80,0.1)',
-                          border: `1px solid ${maintenanceOn ? 'rgba(255,167,38,0.4)' : 'rgba(76,175,80,0.3)'}`,
-                        }}>
-                          <div style={{ fontSize: '14px', fontWeight: '700', marginBottom: '6px', color: maintenanceOn ? '#b45309' : '#166534' }}>
-                            {maintenanceOn ? '🔧 System Maintenance' : '✅ System Operational'}
-                          </div>
-                          <div style={{ fontSize: '13px', color: '#6b7280' }}>
-                            {maintenanceOn
-                              ? (maintenanceMsg || 'System is temporarily offline for scheduled maintenance.')
-                              : 'All systems are running normally.'}
-                          </div>
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-                </div>
+                <AdminMaintenanceTab
+                  maintenanceOn={maintenanceOn}
+                  setMaintenanceOn={setMaintenanceOn}
+                  maintenanceMsg={maintenanceMsg}
+                  setMaintenanceMsg={setMaintenanceMsg}
+                  saving={saving}
+                  saveMaintenance={saveMaintenance}
+                />
               )}
 
-              {/* ── ANNOUNCEMENTS ── */}
+{/* ── ANNOUNCEMENTS ── */}
               {tab === 'announcements' && (
-                <div className="row">
-                  <div className="col-md-5">
-                    <div className="card">
-                      <div className="card-header"><h3 className="card-title">New Announcement</h3></div>
-                      <div className="card-body">
-                        <div className="mb-3">
-                          <label className="form-label">Title</label>
-                          <input type="text" className="form-control" value={newAnn.title}
-                            onChange={e => setNewAnn(p => ({ ...p, title: e.target.value }))}
-                            placeholder="Announcement title" maxLength={120} />
-                        </div>
-                        <div className="mb-3">
-                          <label className="form-label">Body</label>
-                          <textarea className="form-control" rows={4} value={newAnn.body}
-                            onChange={e => setNewAnn(p => ({ ...p, body: e.target.value }))}
-                            placeholder="Announcement content..." />
-                        </div>
-                        <div className="mb-3">
-                          <label className="form-label">Priority</label>
-                          <select className="form-select" value={newAnn.priority}
-                            onChange={e => setNewAnn(p => ({ ...p, priority: e.target.value as any }))}>
-                            <option value="info">ℹ️ Info</option>
-                            <option value="success">✅ Success</option>
-                            <option value="warning">⚠️ Warning</option>
-                            <option value="critical">🚨 Critical</option>
-                          </select>
-                        </div>
-                        <div className="mb-3">
-                          <label className="form-check">
-                            <input type="checkbox" className="form-check-input" checked={newAnn.ispinned}
-                              onChange={e => setNewAnn(p => ({ ...p, ispinned: e.target.checked }))} />
-                            <span className="form-check-label">📌 Pin to top</span>
-                          </label>
-                        </div>
-                        <button className="btn btn-primary w-100" onClick={createAnnouncement}>
-                          Publish Announcement
-                        </button>
-                      </div>
-                    </div>
-                  </div>
-
-                  <div className="col-md-7">
-                    <div className="card">
-                      <div className="card-header"><h3 className="card-title">Published Announcements</h3></div>
-                      <div className="list-group list-group-flush">
-                        {announcements.map(ann => (
-                          <div key={ann.id} className="list-group-item">
-                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-                              <div style={{ flex: 1 }}>
-                                <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '4px' }}>
-                                  {ann.ispinned && <span style={{ fontSize: '11px' }}>📌</span>}
-                                  <span className={`badge bg-${PRIORITY_COLOR[ann.priority]}-lt`}>{ann.priority}</span>
-                                  <strong style={{ fontSize: '13px' }}>{ann.title}</strong>
-                                </div>
-                                <p style={{ fontSize: '12px', color: '#6b7280', margin: '0 0 4px', lineHeight: 1.5 }}>
-                                  {ann.body.slice(0, 120)}{ann.body.length > 120 ? '…' : ''}
-                                </p>
-                                <small className="text-muted">{fmt(ann.createdat)} · {ann.author}</small>
-                              </div>
-                              <button className="btn btn-sm btn-ghost-danger ms-3"
-                                onClick={() => deleteAnnouncement(ann.id, ann.title)}>
-                                <i className="ti ti-trash" />
-                              </button>
-                            </div>
-                          </div>
-                        ))}
-                        {announcements.length === 0 && (
-                          <div className="text-center text-muted py-4" style={{ fontSize: '13px' }}>
-                            No announcements published yet
-                          </div>
-                        )}
-                      </div>
-                    </div>
-                  </div>
-                </div>
+                <AdminAnnouncementsTab
+                  newAnn={newAnn}
+                  setNewAnn={setNewAnn}
+                  announcements={announcements}
+                  createAnnouncement={createAnnouncement}
+                  deleteAnnouncement={deleteAnnouncement}
+                />
               )}
 
               {/* ── QUEST BUILDER ── */}
@@ -1820,7 +1383,7 @@ export const AdminPanel: React.FC = () => {
                               </div>
                               <div className="col-4">
                                 <label className="form-label">Difficulty</label>
-                                <select className="form-select" value={questForm.difficulty} onChange={e => qSet({ difficulty: e.target.value as any })}>
+                                <select className="form-select" value={questForm.difficulty} onChange={e => qSet({ difficulty: e.target.value as QuestDifficulty })}>
                                   <option value="beginner">Beginner</option>
                                   <option value="intermediate">Intermediate</option>
                                   <option value="advanced">Advanced</option>
@@ -1920,9 +1483,9 @@ export const AdminPanel: React.FC = () => {
                             <div className="d-flex justify-content-between align-items-center mb-1">
                               <label className="form-label mb-0" style={{ fontSize: '13px' }}>Theory Sections</label>
                               <div className="d-flex gap-1 flex-wrap justify-content-end">
-                                <button className="btn btn-xs btn-outline-primary" onClick={() => qSet({ theory_sections: [...questForm.theory_sections, newTheorySection('default')] })}>+ Text</button>
-                                <button className="btn btn-xs btn-outline-secondary" onClick={() => qSet({ theory_sections: [...questForm.theory_sections, newTheorySection('tip')] })}>+ Tip</button>
-                                <button className="btn btn-xs btn-outline-secondary" onClick={() => qSet({ theory_sections: [...questForm.theory_sections, newTheorySection('code')] })}>+ Code</button>
+                                <button className="btn btn-xs btn-outline-primary" onClick={() => qSet({ theory_sections: [...questForm.theory_sections, newTheorySection('default', {})] })}>+ Text</button>
+                                <button className="btn btn-xs btn-outline-secondary" onClick={() => qSet({ theory_sections: [...questForm.theory_sections, newTheorySection('tip', {})] })}>+ Tip</button>
+                                <button className="btn btn-xs btn-outline-secondary" onClick={() => qSet({ theory_sections: [...questForm.theory_sections, newTheorySection('code', {})] })}>+ Code</button>
                                 <button className="btn btn-xs btn-outline-secondary" onClick={() => qSet({ theory_sections: [...questForm.theory_sections, newTheorySection('table', { table_headers: ['Term', 'Meaning'], table_rows: [['', '']] })] })}>+ Table</button>
                               </div>
                             </div>
@@ -2046,7 +1609,7 @@ export const AdminPanel: React.FC = () => {
                                   </div>
                                   <div className="col-4">
                                     <select className="form-select form-select-sm" value={h.activity}
-                                      onChange={e => { const rows = [...questForm.hints]; rows[i] = { ...rows[i], activity: e.target.value as any }; qSet({ hints: rows }) }}>
+                                      onChange={e => { const rows = [...questForm.hints]; rows[i] = { ...rows[i], activity: e.target.value as HintActivityScope }; qSet({ hints: rows }) }}>
                                       {HINT_ACTIVITY_OPTIONS.map(opt => <option key={opt.value} value={opt.value}>{opt.label}</option>)}
                                     </select>
                                   </div>
@@ -2081,8 +1644,8 @@ export const AdminPanel: React.FC = () => {
                                 <div key={act.key} className="col-auto">
                                   <label className="form-check form-check-inline">
                                     <input type="checkbox" className="form-check-input"
-                                      checked={questForm[act.key] as boolean}
-                                      onChange={e => qSet({ [act.key]: e.target.checked } as any)} />
+                                      checked={questForm[act.key]}
+                                      onChange={e => setQuestActivity(act.key, e.target.checked)} />
                                     <span className="form-check-label">{act.icon} {act.label}</span>
                                   </label>
                                 </div>
@@ -2349,6 +1912,11 @@ export const AdminPanel: React.FC = () => {
                         {/* Save / Replace */}
                         <div className="card">
                           <div className="card-body">
+                            {replaceTarget === null && (
+                              <div className="alert alert-warning" role="alert">
+                                This restored draft has no saved editing target. Select the original quest below to update it, or confirm saving it as a new quest.
+                              </div>
+                            )}
                             {replaceTarget && (
                               <div className="alert alert-warning py-2 mb-2" style={{ fontSize: '12px' }}>
                                 Editing: <strong>{existingQuests.find(q => q.id === replaceTarget)?.title ?? replaceTarget}</strong>
@@ -2364,12 +1932,15 @@ export const AdminPanel: React.FC = () => {
                                   {questSaving ? 'Saving…' : '✓ Update Quest'}
                                 </button>
                               ) : (
-                                <button className="btn btn-primary" disabled={questSaving || !questForm.title.trim()} onClick={() => saveQuest()}>
+                                <button className="btn btn-primary" disabled={questSaving || !questForm.title.trim()} onClick={() => {
+                                  if (replaceTarget === null && !window.confirm('This draft has no saved editing target. Create a new quest? Cancel and select the original quest if you intended to update it.')) return
+                                  saveQuest()
+                                }}>
                                   {questSaving ? 'Saving…' : '✓ Save as New Quest'}
                                 </button>
                               )}
                               <div className="d-flex gap-1 align-items-center">
-                                <select className="form-select form-select-sm" style={{ width: '220px' }} value={replaceTarget}
+                                <select className="form-select form-select-sm" style={{ width: '220px' }} value={replaceTarget ?? ''}
                                   onChange={e => setReplaceTarget(e.target.value)}>
                                   <option value="">— Or load existing to edit —</option>
                                   {existingQuests.filter(q => q.level === questForm.level).map(q => (
@@ -2379,7 +1950,7 @@ export const AdminPanel: React.FC = () => {
                                 {replaceTarget && (
                                   <button className="btn btn-sm btn-outline-secondary" onClick={() => {
                                     const quest = existingQuests.find(q => q.id === replaceTarget)
-                                    if (quest) loadQuestForEdit(quest)
+                                    if (quest) void loadQuestForEdit(quest)
                                   }}>
                                     Load
                                   </button>
@@ -2465,7 +2036,7 @@ export const AdminPanel: React.FC = () => {
                           </div>
                           <div className="col-6 col-md-2">
                             <label className="form-label">Level</label>
-                            <select className="form-select form-select-sm" value={questLevelFilter} onChange={e => setQuestLevelFilter(e.target.value as any)}>
+                            <select className="form-select form-select-sm" value={questLevelFilter} onChange={e => setQuestLevelFilter(e.target.value)}>
                               <option value="all">All levels</option>
                               {questLevelOptions.map(level => (
                                 <option key={level} value={String(level)}>Level {level}</option>
@@ -2474,7 +2045,7 @@ export const AdminPanel: React.FC = () => {
                           </div>
                           <div className="col-6 col-md-2">
                             <label className="form-label">Status</label>
-                            <select className="form-select form-select-sm" value={questStatusFilter} onChange={e => setQuestStatusFilter(e.target.value as any)}>
+                            <select className="form-select form-select-sm" value={questStatusFilter} onChange={e => setQuestStatusFilter(e.target.value as typeof questStatusFilter)}>
                               <option value="all">All status</option>
                               <option value="active">Active</option>
                               <option value="inactive">Inactive</option>
@@ -2493,7 +2064,7 @@ export const AdminPanel: React.FC = () => {
                       <div className="table-responsive">
                         <table className="table table-vcenter card-table table-striped">
                           <thead>
-                            <tr><th>Title</th><th>Level</th><th>Activities</th><th>XP</th><th>Order</th><th>Status</th><th className="text-end">Actions</th></tr>
+                            <tr><th>Title</th><th>Level</th><th>Primary activity</th><th>XP</th><th>Order</th><th>Status</th><th className="text-end">Actions</th></tr>
                           </thead>
                           <tbody>
                             {questsLoading && existingQuests.length === 0 && (
@@ -2519,7 +2090,7 @@ export const AdminPanel: React.FC = () => {
                                 <td>{q.isactive ? <span className="badge bg-green">Active</span> : <span className="badge bg-secondary">Inactive</span>}</td>
                                 <td className="text-end">
                                   <div className="d-flex gap-1 justify-content-end flex-wrap">
-                                    <button className="btn btn-sm btn-outline-primary" disabled={!!questActionId} onClick={() => { loadQuestForEdit(q); }}>Edit</button>
+                                    <button className="btn btn-sm btn-outline-primary" disabled={!!questActionId} onClick={() => { void loadQuestForEdit(q) }}>Edit</button>
                                     <button className="btn btn-sm btn-outline-warning" disabled={!!questActionId} onClick={() => toggleQuestActive(q)}>
                                       {isBusy ? 'Working...' : q.isactive ? 'Deactivate' : 'Activate'}
                                     </button>
@@ -2547,6 +2118,7 @@ export const AdminPanel: React.FC = () => {
           </div>
         </div>
       </div>
+      {liveHelp && <AdminLiveSupport key={liveHelp.session.id} session={liveHelp.session} learnerName={liveHelp.learnerName} onClose={() => setLiveHelp(null)} />}
     </div>
   )
 }

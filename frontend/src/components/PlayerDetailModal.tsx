@@ -20,10 +20,11 @@ interface PlayerRow {
   id: string
   playername: string
   totalxp: number
-  currentlevel: number
   sandbox_runs: number
-  quests_completed: number   // ← pulled directly from users table
-  createdat: string
+  quests_completed: number
+  isactive: boolean | null
+  is_banned: boolean
+  createdat: string | null
   lastactive: string | null
   charactertype: string | null
   user_type: 'student' | 'professional' | null
@@ -32,7 +33,7 @@ interface PlayerRow {
 interface ReportInsight {
   id: string
   type: string | null
-  createdat: string
+  createdat: string | null
   mode_context: string | null
   cognitive_complexity: number | null
 }
@@ -40,7 +41,11 @@ interface ReportInsight {
 interface QuestInsight {
   questid: string | null
   status: string | null
+  attempts: number | null
   hintsused: number | null
+  xp_gained: number | null
+  completed_activities: string[] | null
+  startedat: string | null
   completedat: string | null
   first_completed_at: string | null
   updatedat: string | null
@@ -65,6 +70,49 @@ interface PlayerProfileDetail {
   activity: ActivityInsight[]
   avatarUrl: string | null
   bannerUrl: string | null
+}
+
+const parsePlayerRow = (value: unknown, userId: string): PlayerRow => {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) {
+    throw new TypeError(`Learner ${userId} has an invalid profile record.`)
+  }
+  const row = value as Record<string, unknown>
+  if (row.id !== userId || typeof row.playername !== 'string' || row.playername.length === 0) {
+    throw new TypeError(`Learner ${userId} has an invalid ID or player name.`)
+  }
+  for (const field of ['totalxp', 'sandbox_runs', 'quests_completed'] as const) {
+    if (typeof row[field] !== 'number' || !Number.isFinite(row[field])) {
+      throw new TypeError(`Learner ${userId} has a null or invalid ${field} value. Repair the users row before previewing it.`)
+    }
+  }
+  if (row.createdat !== null && (typeof row.createdat !== 'string' || !Number.isFinite(Date.parse(row.createdat)))) {
+    throw new TypeError(`Learner ${userId} has an invalid createdat value.`)
+  }
+  if (row.lastactive !== null && typeof row.lastactive !== 'string') {
+    throw new TypeError(`Learner ${userId} has an invalid lastactive value.`)
+  }
+  if (row.charactertype !== null && typeof row.charactertype !== 'string') {
+    throw new TypeError(`Learner ${userId} has an invalid charactertype value.`)
+  }
+  if (row.user_type !== 'student' && row.user_type !== 'professional') {
+    throw new TypeError(`Learner ${userId} has an invalid user_type value.`)
+  }
+  if ((row.isactive !== null && typeof row.isactive !== 'boolean') || typeof row.is_banned !== 'boolean') {
+    throw new TypeError(`Learner ${userId} has an invalid account status value.`)
+  }
+  return {
+    id: row.id,
+    playername: row.playername,
+    totalxp: row.totalxp as number,
+    sandbox_runs: row.sandbox_runs as number,
+    quests_completed: row.quests_completed as number,
+    isactive: row.isactive,
+    is_banned: row.is_banned,
+    createdat: row.createdat as string | null,
+    lastactive: row.lastactive as string | null,
+    charactertype: row.charactertype as string | null,
+    user_type: row.user_type,
+  }
 }
 
 const questTitle = (quest: QuestInsight): string => {
@@ -120,25 +168,82 @@ const fmtDuration = (seconds: number): string => {
 const pct = (value: number, total: number): number =>
   total <= 0 ? 0 : Math.min(100, Math.round((value / total) * 100))
 
+const loadQuestProgress = async (userId: string, allRows: boolean): Promise<QuestInsight[]> => {
+  const rows: QuestInsight[] = []
+  const pageSize = allRows ? 500 : 50
+  for (let start = 0; ; start += pageSize) {
+    const { data, error } = await supabase.from('mission_progress')
+      .select('questid, status, attempts, hintsused, xp_gained, completed_activities, startedat, completedat, first_completed_at, updatedat, completion_time_seconds, quests(title)')
+      .eq('userid', userId).order('updatedat', { ascending: false }).range(start, start + pageSize - 1)
+    if (error) throw new Error(`Could not load quest progress for ${userId}: ${error.message}`)
+    const page = (data ?? []) as unknown as QuestInsight[]
+    for (const row of page) {
+      if (row.completed_activities !== null &&
+        (!Array.isArray(row.completed_activities) || row.completed_activities.some(activity => typeof activity !== 'string'))) {
+        throw new TypeError(`Learner ${userId} has invalid completed activities for quest ${row.questid}. Expected a JSON array of activity names.`)
+      }
+    }
+    rows.push(...page)
+    if (!allRows || page.length < pageSize) return rows
+  }
+}
+
+const loadReportHistory = async (userId: string, allRows: boolean): Promise<ReportInsight[]> => {
+  const rows: ReportInsight[] = []
+  const pageSize = allRows ? 500 : 50
+  for (let start = 0; ; start += pageSize) {
+    const { data, error } = await supabase.from('reports')
+      .select('id, type, createdat, mode_context, cognitive_complexity')
+      .eq('userid', userId).order('createdat', { ascending: false }).range(start, start + pageSize - 1)
+    if (error) throw new Error(`Could not load analysis reports for ${userId}: ${error.message}`)
+    const page = (data ?? []) as ReportInsight[]
+    rows.push(...page)
+    if (!allRows || page.length < pageSize) return rows
+  }
+}
+
+const loadActivityHistory = async (userId: string, allRows: boolean): Promise<ActivityInsight[]> => {
+  const rows: ActivityInsight[] = []
+  const pageSize = allRows ? 500 : 8
+  for (let start = 0; ; start += pageSize) {
+    const { data, error } = await supabase.from('activity_log')
+      .select('id, type, title, description, xp_gained, createdat')
+      .eq('userid', userId).order('createdat', { ascending: false }).range(start, start + pageSize - 1)
+    if (error) throw new Error(`Could not load activity history for ${userId}: ${error.message}`)
+    const page = (data ?? []) as ActivityInsight[]
+    rows.push(...page)
+    if (!allRows || page.length < pageSize) return rows
+  }
+}
+
 export const PlayerDetailModal: React.FC<{
   userId: string
   currentUserId?: string
+  showAllProgress: boolean
   onClose: () => void
-}> = ({ userId, currentUserId, onClose }) => {
+}> = ({ userId, currentUserId, showAllProgress, onClose }) => {
   const [detail, setDetail] = useState<PlayerProfileDetail | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
+  const [reportCode, setReportCode] = useState<{ id: string; sourceCode: string | null } | null>(null)
+  const [reportCodeError, setReportCodeError] = useState<string | null>(null)
+  const [reportCodeLoading, setReportCodeLoading] = useState<string | null>(null)
+  const [visibleReports, setVisibleReports] = useState(50)
+  const [visibleActivity, setVisibleActivity] = useState(50)
 
   useEffect(() => {
     let cancelled = false
     const fetchAll = async () => {
       setLoading(true)
       setError(null)
+      setReportCode(null)
+      setReportCodeError(null)
+      setVisibleReports(50)
+      setVisibleActivity(50)
 
-      // Single query — quests_completed now lives on the users row (synced by DB trigger)
       const { data, error: err } = await supabase
         .from('users')
-        .select('id, playername, totalxp, currentlevel, sandbox_runs, quests_completed, createdat, lastactive, charactertype, user_type')
+        .select('id, playername, totalxp, sandbox_runs, quests_completed, isactive, is_banned, createdat, lastactive, charactertype, user_type')
         .eq('id', userId)
         .maybeSingle()
 
@@ -149,39 +254,36 @@ export const PlayerDetailModal: React.FC<{
         setLoading(false)
         return
       }
+      const selectedPlayer = parsePlayerRow(data, userId)
 
-      const [reportsRes, activityRes, progressRes, rankRes, profileImages] = await Promise.all([
-        supabase.from('reports').select('id, type, createdat, mode_context, cognitive_complexity').eq('userid', userId).order('createdat', { ascending: false }).limit(50),
-        supabase.from('activity_log').select('id, type, title, description, xp_gained, createdat').eq('userid', userId).order('createdat', { ascending: false }).limit(8),
-        supabase.from('mission_progress').select('questid, status, hintsused, completedat, first_completed_at, updatedat, completion_time_seconds, quests(title)').eq('userid', userId).order('updatedat', { ascending: false }).limit(50),
-        supabase.from('users').select('*', { count: 'exact', head: true }).eq('isactive', true).gt('totalxp', data.totalxp ?? 0),
+      const [reports, activity, quests, rankRes, profileImages] = await Promise.all([
+        loadReportHistory(userId, showAllProgress),
+        loadActivityHistory(userId, showAllProgress),
+        loadQuestProgress(userId, showAllProgress),
+        supabase.from('users').select('id', { count: 'exact', head: true }).eq('isactive', true).eq('is_banned', false).gt('totalxp', selectedPlayer.totalxp),
         getProfileImageUrls(userId),
       ])
 
-      if (reportsRes.error) throw new Error(`Could not load report history: ${reportsRes.error.message}`)
-      if (activityRes.error) throw new Error(`Could not load activity feed: ${activityRes.error.message}`)
-      if (progressRes.error) throw new Error(`Could not load quest progress: ${progressRes.error.message}`)
       if (rankRes.error) throw new Error(`Could not load leaderboard rank: ${rankRes.error.message}`)
 
-      const reports = (reportsRes.data ?? []) as ReportInsight[]
-      const quests = (progressRes.data ?? []) as unknown as QuestInsight[]
-      const activity = (activityRes.data ?? []) as ActivityInsight[]
       const latestQuest = quests[0]
-      const completedCount = (data as PlayerRow).quests_completed ?? countUniqueCompletedQuests(quests)
+      const completedCount = showAllProgress
+        ? countUniqueCompletedQuests(quests)
+        : selectedPlayer.quests_completed
       setDetail({
         player: {
-        ...data,
+        ...selectedPlayer,
           quests_completed: completedCount,
-        lastactive: latestActivityIso([
-          data.lastactive,
+          lastactive: latestActivityIso([
+            selectedPlayer.lastactive,
             reports[0]?.createdat,
             activity[0]?.createdat,
             latestQuest?.updatedat,
             latestQuest?.first_completed_at,
             latestQuest?.completedat,
-        ]),
-        } as PlayerRow,
-        rankPosition: (rankRes.count ?? 0) + 1,
+          ]),
+        },
+        rankPosition: selectedPlayer.isactive === true && !selectedPlayer.is_banned ? (rankRes.count ?? 0) + 1 : null,
         reports,
         quests,
         activity,
@@ -196,7 +298,25 @@ export const PlayerDetailModal: React.FC<{
       setLoading(false)
     })
     return () => { cancelled = true }
-  }, [userId])
+  }, [userId, showAllProgress])
+
+  const openReportCode = async (reportId: string): Promise<void> => {
+    setReportCodeLoading(reportId)
+    setReportCodeError(null)
+    try {
+      const { data, error: reportError } = await supabase.from('reports')
+        .select('sourcecode').eq('id', reportId).eq('userid', userId).maybeSingle()
+      if (reportError || !data) throw new Error(`Could not load saved code for report ${reportId}: ${reportError?.message ?? 'report not found'}`)
+      if (data.sourcecode !== null && typeof data.sourcecode !== 'string') {
+        throw new TypeError(`Report ${reportId} has an invalid sourcecode field.`)
+      }
+      setReportCode({ id: reportId, sourceCode: data.sourcecode })
+    } catch (caught: unknown) {
+      setReportCodeError(caught instanceof Error ? caught.message : String(caught))
+    } finally {
+      setReportCodeLoading(null)
+    }
+  }
 
   // Close on Escape
   useEffect(() => {
@@ -236,6 +356,9 @@ export const PlayerDetailModal: React.FC<{
 
   return (
     <div
+      role="dialog"
+      aria-modal="true"
+      aria-label="Learner profile and progress snapshot"
       onClick={onClose}
       style={{
         position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.82)', backdropFilter: 'blur(6px)',
@@ -314,7 +437,7 @@ export const PlayerDetailModal: React.FC<{
                   {isMe && <span style={{ fontSize: '11px', color: '#4caf50', marginLeft: '6px', fontWeight: '700' }}>(you)</span>}
                 </div>
                 <div style={{ color: '#8b949e', fontSize: '12px', marginTop: '4px' }}>
-                  {rank?.name ?? 'Squire'} · #{detail?.rankPosition ?? '?'} leaderboard · Joined {new Date(player.createdat).toLocaleDateString([], { month: 'short', year: 'numeric' })}
+                  {rank?.name ?? 'Squire'} · {detail?.rankPosition === null ? 'Unranked' : `#${detail?.rankPosition ?? '?'} leaderboard`} · Joined {player.createdat ? new Date(player.createdat).toLocaleDateString([], { month: 'short', year: 'numeric' }) : 'unknown'}
                 </div>
                 <div style={{ color: '#58a6ff', fontSize: '12px', marginTop: '5px', fontWeight: 700 }}>
                   {signature}
@@ -425,7 +548,66 @@ export const PlayerDetailModal: React.FC<{
               </div>
             )}
 
-            {(detail?.activity.length ?? 0) > 0 && (
+            {showAllProgress && <div style={{ marginBottom: 18 }}>
+              <div style={{ fontSize: 10, color: '#8b949e', letterSpacing: 1.5, textTransform: 'uppercase', marginBottom: 8, fontWeight: 800 }}>
+                All quest progress ({detail?.quests.length ?? 0})
+              </div>
+              <div style={{ maxHeight: 280, overflow: 'auto', border: '1px solid #30363d', borderRadius: 8 }}>
+                {(detail?.quests.length ?? 0) === 0
+                  ? <p style={{ color: '#8b949e', padding: 12 }}>No quest progress yet.</p>
+                  : detail?.quests.map((quest, index) => <div key={`${quest.questid}-${index}`} style={{ padding: '9px 12px', borderBottom: '1px solid #30363d', fontSize: 12 }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12 }}>
+                      <span style={{ color: '#e6edf3' }}>{questTitle(quest)}</span>
+                      <span style={{ color: '#8b949e', whiteSpace: 'nowrap' }}>{quest.status ?? 'Not started'}</span>
+                    </div>
+                    <div style={{ color: '#8b949e', marginTop: 4 }}>
+                      {quest.attempts ?? 0} attempts · {quest.hintsused ?? 0} hints · {quest.xp_gained ?? 0} XP
+                      {quest.completed_activities?.length ? ` · ${quest.completed_activities.join(', ')}` : ''}
+                      {quest.first_completed_at ? ` · First completed ${new Date(quest.first_completed_at).toLocaleDateString()}` : quest.startedat ? ` · Started ${new Date(quest.startedat).toLocaleDateString()}` : ''}
+                    </div>
+                  </div>)}
+              </div>
+            </div>}
+
+            {showAllProgress && <div style={{ marginBottom: 18 }}>
+              <div style={{ fontSize: 10, color: '#8b949e', letterSpacing: 1.5, textTransform: 'uppercase', marginBottom: 8, fontWeight: 800 }}>
+                Analysis reports ({detail?.reports.length ?? 0})
+              </div>
+              <div style={{ maxHeight: 280, overflow: 'auto', border: '1px solid #30363d', borderRadius: 8 }}>
+                {detail?.reports.length === 0
+                  ? <p style={{ color: '#8b949e', padding: 12 }}>No saved analysis reports yet.</p>
+                  : detail?.reports.slice(0, visibleReports).map(report => <div key={report.id} style={{ padding: '9px 12px', borderBottom: '1px solid #30363d', fontSize: 12 }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, alignItems: 'center' }}>
+                      <span style={{ color: '#e6edf3' }}>{report.mode_context ?? report.type ?? 'Analysis'} · {report.createdat ? new Date(report.createdat).toLocaleString() : 'Date unknown'} · complexity {report.cognitive_complexity ?? '—'}</span>
+                      <button type="button" data-testid={`preview-report-${report.id}`} disabled={reportCodeLoading !== null} onClick={() => { void openReportCode(report.id) }}>
+                        {reportCodeLoading === report.id ? 'Loading…' : 'View code'}
+                      </button>
+                    </div>
+                    {reportCode?.id === report.id && <pre style={{ color: '#c9d1d9', whiteSpace: 'pre-wrap', overflowWrap: 'anywhere', maxHeight: 220, overflow: 'auto', margin: '8px 0 0' }}>
+                      {reportCode.sourceCode ?? 'No source code saved with this report.'}
+                    </pre>}
+                  </div>)}
+              </div>
+              {(detail?.reports.length ?? 0) > visibleReports && <button type="button" onClick={() => setVisibleReports(count => count + 50)}>Show 50 more reports</button>}
+              {reportCodeError && <p role="alert" style={{ color: '#f85149', fontSize: 12 }}>{reportCodeError}</p>}
+            </div>}
+
+            {showAllProgress && <div style={{ marginBottom: 18 }}>
+              <div style={{ fontSize: 10, color: '#8b949e', letterSpacing: 1.5, textTransform: 'uppercase', marginBottom: 8, fontWeight: 800 }}>
+                Activity history ({detail?.activity.length ?? 0})
+              </div>
+              <div style={{ maxHeight: 280, overflow: 'auto', border: '1px solid #30363d', borderRadius: 8 }}>
+                {detail?.activity.length === 0
+                  ? <p style={{ color: '#8b949e', padding: 12 }}>No activity recorded yet.</p>
+                  : detail?.activity.slice(0, visibleActivity).map(item => <div key={item.id} style={{ padding: '9px 12px', borderBottom: '1px solid #30363d', fontSize: 12 }}>
+                    <div style={{ color: '#e6edf3' }}>{item.title} · {new Date(item.createdat).toLocaleString()}</div>
+                    <div style={{ color: '#8b949e', marginTop: 4 }}>{item.description || item.type}{item.xp_gained ? ` · +${item.xp_gained} XP` : ''}</div>
+                  </div>)}
+              </div>
+              {(detail?.activity.length ?? 0) > visibleActivity && <button type="button" onClick={() => setVisibleActivity(count => count + 50)}>Show 50 more activities</button>}
+            </div>}
+
+            {!showAllProgress && (detail?.activity.length ?? 0) > 0 && (
               <div style={{ marginBottom: 18 }}>
                 <div style={{ fontSize: 10, color: '#484f58', letterSpacing: 1.5, textTransform: 'uppercase', marginBottom: 8, fontWeight: 800 }}>Recent Signal</div>
                 {detail!.activity.slice(0, 4).map(item => (

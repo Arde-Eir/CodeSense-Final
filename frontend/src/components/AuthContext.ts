@@ -9,20 +9,18 @@ export interface AuthContextType {
   isAdmin: boolean
   maintenanceMode: boolean
   maintenanceMessage: string
-  impersonatingUser: ExplorerProfile | null
   setUser: Dispatch<SetStateAction<ExplorerProfile | null>>
   login: (playerName: string, secretCode: string) => Promise<void>
   signup: (
     playerName: string,
     secretCode: string,
     email: string,
-    userType?: 'student' | 'professional'
+    userType: 'student' | 'professional',
+    recaptchaToken: string
   ) => Promise<void>
   logout: () => void
   continueAsGuest: () => void
   goBack: () => void
-  startImpersonation: (targetUser: ExplorerProfile) => void
-  stopImpersonation: () => void
   refreshMaintenanceMode: () => Promise<void>
 }
 

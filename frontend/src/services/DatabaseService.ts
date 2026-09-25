@@ -69,8 +69,12 @@ export const DatabaseService = {
     playerName: string,
     secretCode: string,
     email: string,
-    userType: 'student' | 'professional' = 'student'
+    userType: 'student' | 'professional',
+    recaptchaToken: string
   ): Promise<ExplorerProfile> {
+    if (!recaptchaToken.trim()) {
+      throw new TypeError('reCAPTCHA verification is required. Please submit the registration form again.')
+    }
     try {
       const { data, error } = await supabase.auth.signUp({
         email,
@@ -79,6 +83,8 @@ export const DatabaseService = {
           data: {
             playername: playerName,
             user_type: userType,
+            // Enforced by the Supabase Before User Created HTTP hook.
+            recaptcha_token: recaptchaToken,
             // charactertype omitted: trigger enum cast fails; set via update after auth succeeds
           },
         },
@@ -311,6 +317,11 @@ export const DatabaseService = {
         .single()
 
       if (profileErr || !profile) return null
+      if (profile.is_banned) {
+        const { error: signOutError } = await supabase.auth.signOut()
+        if (signOutError) throw signOutError
+        return null
+      }
       return mapProfile(profile)
 
     } catch (error) {

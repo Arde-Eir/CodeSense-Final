@@ -22,13 +22,22 @@ export const CodeFillGame: React.FC<Props> = ({ items, onComplete, resetSignal, 
   const [results, setResults] = React.useState<boolean[]>([]);
 
   const scoreRef = React.useRef(0);
+  const completedRef = React.useRef(false);
+  const completionTimer = React.useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => { onItemChange?.(idx); }, [idx, onItemChange]);
 
+  useEffect(() => () => {
+    if (completionTimer.current !== null) clearTimeout(completionTimer.current);
+  }, []);
+
   useEffect(() => {
     if (resetSignal > 0) {
+      if (completionTimer.current !== null) clearTimeout(completionTimer.current);
+      completionTimer.current = null;
       setIdx(0); setAnswers([]); setChecked(false); setResults([]);
       scoreRef.current = 0;
+      completedRef.current = false;
     }
   }, [resetSignal]);
 
@@ -49,10 +58,13 @@ export const CodeFillGame: React.FC<Props> = ({ items, onComplete, resetSignal, 
     setResults(res); setChecked(true);
     const allCorrect = res.every(Boolean);
     if (allCorrect) scoreRef.current += 1;
-    // Advance automatically only on a correct last answer — the user must
-    // press "Next →" / "Finish ✓" for incorrect attempts so they can retry.
     if (allCorrect && isLast) {
-      setTimeout(() => onComplete(scoreRef.current, items.length), 700);
+      completionTimer.current = setTimeout(() => {
+        completionTimer.current = null;
+        if (completedRef.current) return;
+        completedRef.current = true;
+        onComplete(scoreRef.current, items.length);
+      }, 700);
     }
   };
 
@@ -61,7 +73,14 @@ export const CodeFillGame: React.FC<Props> = ({ items, onComplete, resetSignal, 
   const filledCount = item.answers.reduce((n, _, i) => n + (answers[i] !== undefined && answers[i] !== '' ? 1 : 0), 0);
 
   const doNext = () => {
-    if (isLast) { onComplete(scoreRef.current, items.length); return; }
+    if (isLast) {
+      if (completedRef.current) return;
+      if (completionTimer.current !== null) clearTimeout(completionTimer.current);
+      completionTimer.current = null;
+      completedRef.current = true;
+      onComplete(scoreRef.current, items.length);
+      return;
+    }
     setIdx(i => i + 1); setAnswers([]); setChecked(false); setResults([]);
   };
 
@@ -78,6 +97,7 @@ export const CodeFillGame: React.FC<Props> = ({ items, onComplete, resetSignal, 
               return (
                 <input
                   key={bi}
+                  data-testid={`code-fill-input-${bi}`}
                   value={answers[bi] ?? ''}
                   onChange={e => { const a = [...answers]; a[bi] = e.target.value; setAnswers(a); }}
                   disabled={checked}
@@ -134,9 +154,9 @@ export const CodeFillGame: React.FC<Props> = ({ items, onComplete, resetSignal, 
       )}
       <div style={{ display: 'flex', gap: 10 }}>
         {!checked
-          ? <button onClick={doCheck} disabled={filledCount < item.answers.length} style={{ flex: 1, padding: '11px', borderRadius: 8, border: 'none', background: filledCount < item.answers.length ? 'rgba(72,79,88,0.2)' : 'linear-gradient(135deg,#238636,#196127)', color: filledCount < item.answers.length ? '#484f58' : '#fff', fontWeight: 700, fontSize: 13, cursor: filledCount < item.answers.length ? 'not-allowed' : 'pointer', fontFamily: 'Inter,sans-serif' }}>Check Answers</button>
+          ? <button data-testid="code-fill-check" onClick={doCheck} disabled={filledCount < item.answers.length} style={{ flex: 1, padding: '11px', borderRadius: 8, border: 'none', background: filledCount < item.answers.length ? 'rgba(72,79,88,0.2)' : 'linear-gradient(135deg,#238636,#196127)', color: filledCount < item.answers.length ? '#484f58' : '#fff', fontWeight: 700, fontSize: 13, cursor: filledCount < item.answers.length ? 'not-allowed' : 'pointer', fontFamily: 'Inter,sans-serif' }}>Check Answers</button>
           : results.every(Boolean)
-            ? <button onClick={doNext} style={{ flex: 1, padding: '11px', borderRadius: 8, border: 'none', background: isLast ? '#facc15' : '#238636', color: '#000', fontWeight: 700, fontSize: 13, cursor: 'pointer', fontFamily: 'Inter,sans-serif' }}>
+            ? <button data-testid={isLast ? 'code-fill-finish' : 'code-fill-next'} onClick={doNext} style={{ flex: 1, padding: '11px', borderRadius: 8, border: 'none', background: isLast ? '#facc15' : '#238636', color: '#000', fontWeight: 700, fontSize: 13, cursor: 'pointer', fontFamily: 'Inter,sans-serif' }}>
                 {isLast ? 'Finish ✓' : 'Next →'}
               </button>
             : <button onClick={() => { setAnswers([]); setChecked(false); setResults([]); }} style={{ flex: 1, padding: '11px', borderRadius: 8, border: '2px solid #da3633', background: 'rgba(218,54,51,0.12)', color: '#f85149', fontWeight: 700, fontSize: 13, cursor: 'pointer', fontFamily: 'Inter,sans-serif' }}>Try Again</button>

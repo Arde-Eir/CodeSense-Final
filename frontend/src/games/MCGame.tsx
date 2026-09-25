@@ -29,6 +29,20 @@ const MCGameInner: React.FC<{ questions: MCQ[]; onComplete: (score: number, tota
   // onComplete() and the done screen always read the correct final value
   // regardless of React's batched setState scheduling.
   const scoreRef = React.useRef(0);
+  const completionTimer = React.useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  React.useEffect(() => () => {
+    if (completionTimer.current !== null) clearTimeout(completionTimer.current);
+  }, []);
+
+  const retry = () => {
+    setQIdx(0);
+    setFinalScore(0);
+    setSelected(null);
+    setRevealed(false);
+    setDone(false);
+    scoreRef.current = 0;
+  };
 
   // ── Empty state (must be before any variable that uses qIdx) ──────────────
   if (!questions.length) return (
@@ -51,6 +65,11 @@ const MCGameInner: React.FC<{ questions: MCQ[]; onComplete: (score: number, tota
             ? 'Better luck next time.'
             : `${Math.round((finalScore / questions.length) * 100)}% accuracy`}
       </div>
+      {finalScore < questions.length && (
+        <button data-testid="mc-retry" onClick={retry} style={{ padding: '12px 24px', borderRadius: 8, border: 'none', background: '#a371f7', color: '#fff', fontWeight: 700, cursor: 'pointer', fontFamily: 'Inter,sans-serif' }}>
+          Try Again ↺
+        </button>
+      )}
     </div>
   );
 
@@ -71,8 +90,13 @@ const MCGameInner: React.FC<{ questions: MCQ[]; onComplete: (score: number, tota
       const score = scoreRef.current;
       setFinalScore(score);
       setDone(true);
-      // Small delay lets the "Finish" button feedback register visually
-      setTimeout(() => onComplete(score, questions.length), 400);
+      if (score === questions.length) {
+        // Small delay lets the "Finish" button feedback register visually.
+        completionTimer.current = setTimeout(() => {
+          completionTimer.current = null;
+          onComplete(score, questions.length);
+        }, 400);
+      }
       return;
     }
     setQIdx(v => v + 1);
@@ -139,6 +163,7 @@ const MCGameInner: React.FC<{ questions: MCQ[]; onComplete: (score: number, tota
           return (
             <button
               key={i}
+              data-testid={`mc-option-${i}`}
               onClick={() => pick(i)}
               disabled={revealed}
               style={{
@@ -174,6 +199,7 @@ const MCGameInner: React.FC<{ questions: MCQ[]; onComplete: (score: number, tota
             </div>
           )}
           <button
+            data-testid={isLast ? 'mc-finish' : 'mc-next'}
             onClick={next}
             style={{ marginTop: 10, padding: '12px', borderRadius: 8, border: 'none', background: isLast ? '#facc15' : '#238636', color: '#000', fontWeight: 700, fontSize: 13, cursor: 'pointer', fontFamily: 'Inter,sans-serif' }}
           >

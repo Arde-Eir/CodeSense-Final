@@ -95,6 +95,21 @@ describe('OrderingGame', () => {
     expect(onComplete).toHaveBeenCalledWith(1, 1);
   });
 
+  it('cancels a pending completion on reset and unmount', async () => {
+    const onComplete = vi.fn();
+    const item: OrderItem = { id: 'x', label: 'Only', correct_order: 1 };
+    const { rerender, unmount } = render(<OrderingGame items={[item]} onComplete={onComplete} resetSignal={0} />);
+    fireEvent.click(screen.getByTestId('ordering-check'));
+    rerender(<OrderingGame items={[item]} onComplete={onComplete} resetSignal={1} />);
+    await act(async () => { vi.advanceTimersByTime(700); });
+    expect(onComplete).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByTestId('ordering-check'));
+    unmount();
+    await act(async () => { vi.advanceTimersByTime(700); });
+    expect(onComplete).not.toHaveBeenCalled();
+  });
+
   it('hides Shuffle and Check Order after submission', async () => {
     const onComplete = vi.fn();
     render(<OrderingGame items={[{ id: 'x', label: 'Only', correct_order: 1 }]} onComplete={onComplete} resetSignal={0} />);

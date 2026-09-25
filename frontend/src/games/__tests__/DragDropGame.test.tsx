@@ -157,6 +157,28 @@ describe('DragDropGame', () => {
     expect(onComplete).toHaveBeenCalledWith(2, 2);
   });
 
+  it('cancels a pending completion on reset and unmount', async () => {
+    const onComplete = vi.fn();
+    const items = [ITEMS[0]];
+    const zones = [ZONES[0]];
+    const { rerender, unmount } = render(<DragDropGame items={items} zones={zones} onComplete={onComplete} resetSignal={0} />);
+    const submitMatch = () => {
+      fireEvent.dragStart(screen.getByTestId('drag-item-i1'));
+      fireEvent.drop(screen.getByTestId('drop-zone-z1'));
+      fireEvent.click(screen.getByTestId('drag-check'));
+    };
+
+    submitMatch();
+    rerender(<DragDropGame items={items} zones={zones} onComplete={onComplete} resetSignal={1} />);
+    await act(async () => { vi.advanceTimersByTime(700); });
+    expect(onComplete).not.toHaveBeenCalled();
+
+    submitMatch();
+    unmount();
+    await act(async () => { vi.advanceTimersByTime(700); });
+    expect(onComplete).not.toHaveBeenCalled();
+  });
+
   it('resets state when resetSignal changes', () => {
     const { rerender } = render(
       <DragDropGame items={ITEMS} zones={ZONES} onComplete={vi.fn()} resetSignal={0} />

@@ -9,7 +9,8 @@
     "lint": "eslint .",
     "preview": "vite preview",
     "test": "vitest --config=vitest.browser.config.ts --run",
-    "test:browser": "vitest --config=vitest.browser.config.ts"
+    "test:browser": "vitest --config=vitest.browser.config.ts",
+    "test:support-video": "node tests/liveSupportVideo.browser.mjs"
   },
   "dependencies": {
     "@dagrejs/dagre": "^2.0.3",

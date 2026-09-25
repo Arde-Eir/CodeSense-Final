@@ -93,14 +93,10 @@ export class SymbolicExecutor {
     this.valueTrace = [];
     this.resetState();
 
-    try {
-      this.initializeStandardLibrary();
-      this.initializeGlobals();
-      this.visit(ast);
-      this.checkForMemoryLeaks();
-    } catch (error: any) {
-      this.addSafetyCheck(0, 'executor', 'WARNING', `Analysis halted: ${error.message}`);
-    }
+    this.initializeStandardLibrary();
+    this.initializeGlobals();
+    this.visit(ast);
+    this.checkForMemoryLeaks();
 
     return this.safetyChecks;
   }

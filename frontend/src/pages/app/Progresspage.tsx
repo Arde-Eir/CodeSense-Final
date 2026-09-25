@@ -409,7 +409,7 @@ export const ProgressPage: React.FC = () => {
 
       const { count: higherRanks, error: rankError } = await supabase
         .from('users').select('*', { count: 'exact', head: true })
-        .eq('isactive', true).gt('totalxp', profile?.totalxp ?? 0)
+        .eq('isactive', true).eq('is_banned', false).gt('totalxp', profile?.totalxp ?? 0)
       if (rankError) throw rankError
 
       const { data: avatarData } = await supabase.storage.from('Avatars')

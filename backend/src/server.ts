@@ -2,15 +2,16 @@ import express, { Request, Response, NextFunction } from 'express';
 import cors from 'cors';
 import bodyParser from 'body-parser';
 import analyzeRoutes from './routes/analyze';
+import registrationCaptchaRoutes from './routes/registrationCaptcha';
 
 const app = express();
 
 // Vercel provides process.env.PORT; 3000 is our local fallback
 const PORT = process.env.PORT || 3000;
 const LOG_ANALYSIS_REQUESTS = process.env.LOG_ANALYSIS_REQUESTS === 'true';
-const RATE_LIMIT_WINDOW_MS = 60_000;
-const RATE_LIMIT_MAX_REQUESTS = 60;
-const RATE_LIMIT_MAX_ANALYZE_REQUESTS = 20;
+const RATE_LIMIT_WINDOW_MS = readPositiveIntegerEnvironment('RATE_LIMIT_WINDOW_MS', 60_000);
+const RATE_LIMIT_MAX_REQUESTS = readPositiveIntegerEnvironment('RATE_LIMIT_MAX_REQUESTS', 60);
+const RATE_LIMIT_MAX_ANALYZE_REQUESTS = readPositiveIntegerEnvironment('RATE_LIMIT_MAX_ANALYZE_REQUESTS', 20);
 
 type RateBucket = {
     windowStart: number;
@@ -26,6 +27,18 @@ type HttpError = Error & {
     limit?: number;
     length?: number;
 };
+
+function readPositiveIntegerEnvironment(name: string, fallback: number): number {
+    const rawValue = process.env[name];
+    if (rawValue === undefined) return fallback;
+
+    const parsedValue = Number(rawValue);
+    if (!Number.isSafeInteger(parsedValue) || parsedValue <= 0) {
+        throw new Error(`${name} must be a positive integer; received ${JSON.stringify(rawValue)}.`);
+    }
+
+    return parsedValue;
+}
 
 const apiRateBuckets = new Map<string, RateBucket>();
 const analyzeRateBuckets = new Map<string, RateBucket>();
@@ -169,6 +182,7 @@ app.use('/api', (req: Request, res: Response, next: NextFunction) => {
 });
 
 // Enable parsing of JSON bodies (1 MB max to guard against oversized payloads)
+app.use('/api', registrationCaptchaRoutes);
 app.use(bodyParser.json({ limit: '1mb' }));
 
 /**

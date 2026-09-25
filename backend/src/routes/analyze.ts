@@ -4,11 +4,40 @@ import { TypeChecker } from '../analysis/typechecker';
 import { SymbolicExecutor } from '../analysis/symbolicexe';
 import { CFGGenerator } from '../analysis/cfgGenerator';
 import { CognitiveComplexity, CyclomaticComplexity } from '../analysis/scoring';
-import type { AnalysisResult, AnalysisError } from '../types';
+import type {
+  ASTNode,
+  AnalysisError,
+  IncludeNode,
+  ProgramNode,
+  SafetyCheck,
+} from '../types';
 import { Translator } from '../analysis/translator';
 import { GameEngine } from '../gamification/GameEngine';
+import {
+  errorMessage,
+  isAnalysisPhaseError,
+  runAnalysisPhase,
+} from '../analysis/phaseErrors';
+import {
+  buildSymbolicTrace,
+  collectAstBeginnerWarnings,
+  dedupeWarnings,
+  detectFunctionOverloads,
+  filterUserSymbols,
+  formatWarningExplanation,
+  getCleanAST,
+  getNamespaceName,
+  getSyntaxErrorLocation,
+  normalizePastedSourceCode,
+  stripCommentsAndLiterals,
+} from './analyzeSupport';
 
-const parser = require('../analysis/parser');
+
+type ParserModule = {
+  parse(source: string): ASTNode;
+};
+
+const parser = require('../analysis/parser') as ParserModule;
 const router = Router();
 
 // ---------------------------------------------------------------------------
@@ -197,10 +226,12 @@ router.post('/analyze', (req, res) => {
   }
 
   // ─── PHASE 2: Syntactic Analysis ──────────────────────────────────────────
-  let ast: any = null;
+  let ast: ASTNode | null = null;
   try {
     ast = parser.parse(sourceCode);
-  } catch (syntaxErr: any) {
+  } catch (syntaxError: unknown) {
+    const syntaxMessage = errorMessage(syntaxError);
+    const syntaxLocation = getSyntaxErrorLocation(syntaxError);
     const unsupportedHints = unsupportedWarnings.length > 0
       ? unsupportedWarnings.map(w => `⚠️ **Unsupported Feature:** ${w.message}`)
       : [];
@@ -211,9 +242,9 @@ router.post('/analyze', (req, res) => {
       errors: [
         {
           type: 'syntactic',
-          message: syntaxErr.message,
-          line: syntaxErr.location?.start.line || 1,
-          column: syntaxErr.location?.start.column || 1,
+          message: syntaxMessage,
+          line: syntaxLocation.line,
+          column: syntaxLocation.column,
           severity: 'error',
         },
         ...unsupportedWarnings,
@@ -229,7 +260,7 @@ router.post('/analyze', (req, res) => {
       gamification: { xpEarned: 0, qualityBonus: 0, levelTitle: 'Squire' },
       explanations: [
         `❌ **Status:** Syntax Error Detected`,
-        `🔧 **Line ${syntaxErr.location?.start.line || '?'}:** ${syntaxErr.message}`,
+        `🔧 **Line ${syntaxLocation.line}:** ${syntaxMessage}`,
         ...unsupportedHints,
         ...(unsupportedWarnings.length > 0 ? ['💡 **Tip:** This analyzer supports intro/intermediate C++ — remove unsupported features and try again.'] : []),
       ],
@@ -265,12 +296,14 @@ router.post('/analyze', (req, res) => {
     const sourceForDependencyScan = stripCommentsAndLiterals(sourceCode);
     const usesIo = /\b(cout|cin|endl|cerr|clog|getline)\b/.test(sourceForDependencyScan);
     const usesStdPrefix = /\bstd::/.test(sourceForDependencyScan);
-    const hasUsingStd = ast.namespace?.name === 'std' || usesStdPrefix;
+    const namespaceName = getNamespaceName(ast);
+    const hasUsingStd = namespaceName === 'std' || usesStdPrefix;
 
+    const directives = ast.type === 'Program' ? (ast as ProgramNode).directives : [];
     const includedHeaders = new Set(
-      (ast.directives || [])
-        .filter((d: any) => d.type === 'Include')
-        .map((d: any) => d.name),
+      directives
+        .filter((directive): directive is IncludeNode => directive.type === 'Include')
+        .map(directive => directive.name),
     );
 
     // Helper: check if a header is in the directive list
@@ -323,20 +356,7 @@ router.post('/analyze', (req, res) => {
 
     // ─── PHASE 4: Semantic Analysis & Symbol Table ───────────────────────────
     const typeChecker = new TypeChecker();
-    let typeResult: { symbolTable: any; errors: any[] };
-    try {
-      typeResult = typeChecker.check(ast);
-    } catch (tcErr: any) {
-      console.error('⚠️ TypeChecker Error:', tcErr?.message, tcErr?.stack);
-      typeResult = {
-        symbolTable: {},
-        errors: [{
-          type: 'semantic', severity: 'warning' as const,
-          message: `Type checker stopped early: ${tcErr?.message ?? 'unknown error'}`,
-          line: 0, column: 0,
-        }],
-      };
-    }
+    const typeResult = runAnalysisPhase('Type checker', () => typeChecker.check(ast));
 
     const semanticErrors = typeResult.errors.filter(e => e.severity === 'error');
     const semanticWarnings = typeResult.errors.filter(
@@ -352,8 +372,10 @@ router.post('/analyze', (req, res) => {
     if (semanticErrors.length > 0) {
       // Build partial CFG even on semantic error so the frontend can show
       // what was parsed successfully.
-      let partialCfg = { nodes: [] as any[], edges: [] as any[] };
-      try { partialCfg = new CFGGenerator().generate(ast); } catch (_) { /* best-effort */ }
+      const partialCfg = runAnalysisPhase(
+        'Partial control-flow graph generation',
+        () => new CFGGenerator().generate(ast),
+      );
 
       return res.status(200).json({
         success: false,
@@ -378,22 +400,11 @@ router.post('/analyze', (req, res) => {
     }
 
     // ─── PHASE 5: Symbolic Execution (Safety Checks) ────────────────────────
-    let safetyChecks: any[] = [];
-    let executorCrashMsg = '';
     const executor = new SymbolicExecutor(typeResult.symbolTable);
-
-    try {
-      safetyChecks = executor.execute(ast);
-    } catch (execErr: any) {
-      console.error('⚠️ Symbolic Executor Crashed:', execErr?.message);
-      executorCrashMsg = execErr?.message ?? 'unknown error';
-      safetyChecks = [{
-        line: 0,
-        operation: 'Safety analyzer',
-        status: 'WARNING',
-        message: `Safety analyzer stopped early: ${executorCrashMsg}`,
-      }];
-    }
+    const safetyChecks: SafetyCheck[] = runAnalysisPhase(
+      'Symbolic execution',
+      () => executor.execute(ast),
+    );
 
     // ─── PHASE 6: Symbolic Execution — real value trace for the Math tab ──────
     // Pull the rich value trace from the executor (concrete values tracked during execution)
@@ -402,32 +413,27 @@ router.post('/analyze', (req, res) => {
       : buildSymbolicTrace(typeResult.symbolTable);
 
     // ─── PHASE 7: Control Flow Graph ─────────────────────────────────────────
-    let cfg: any = { nodes: [], edges: [] };
-    let cfgCrashMsg = '';
-    try {
-      if (ast && ast.type === 'Program') {
-        cfg = new CFGGenerator().generate(ast);
-      }
-    } catch (cfgErr: any) {
-      console.error('⚠️ CFG Error caught in Phase 7:', cfgErr?.message);
-      cfgCrashMsg = cfgErr?.message ?? 'unknown error';
-      cfg = { nodes: [{ id: 'cfg_error', type: 'end', label: 'CFG Generation Failed', x: 0, y: 0, children: [] }], edges: [] };
-    }
+    const cfg = runAnalysisPhase(
+      'Control-flow graph generation',
+      () => new CFGGenerator().generate(ast),
+    );
 
     // ─── PHASE 8: Mentor Explanations ────────────────────────────────────────
-    let mentorExplanations: string[] = [];
-    try { mentorExplanations = new Translator().translate(ast); }
-    catch (transErr: any) { console.error('⚠️ Translator Error:', transErr?.message); }
+    const mentorExplanations = runAnalysisPhase(
+      'Mentor explanation generation',
+      () => new Translator().translate(ast),
+    );
 
     // ─── PHASE 9: Cognitive + Cyclomatic Complexity ──────────────────────────
-    let complexityScore = 0;
-    let cyclomaticResult: any = { score: 1, rating: 'low', interpretation: 'Simple code.' };
     const cleanAstForScoring = getCleanAST(ast);
-
-    try { complexityScore = new CognitiveComplexity().calculate(cleanAstForScoring); }
-    catch (scoreErr: any) { console.error('⚠️ Cognitive Scoring Error:', scoreErr?.message); }
-    try { cyclomaticResult = new CyclomaticComplexity().calculate(cleanAstForScoring); }
-    catch (scoreErr: any) { console.error('⚠️ Cyclomatic Scoring Error:', scoreErr?.message); }
+    const complexityScore = runAnalysisPhase(
+      'Cognitive complexity calculation',
+      () => new CognitiveComplexity().calculate(cleanAstForScoring),
+    );
+    const cyclomaticResult = runAnalysisPhase(
+      'Cyclomatic complexity calculation',
+      () => new CyclomaticComplexity().calculate(cleanAstForScoring),
+    );
 
     // ─── PHASE 10: Gamification ──────────────────────────────────────────────
      const gameEngine = new GameEngine();
@@ -444,7 +450,7 @@ router.post('/analyze', (req, res) => {
         cyclomaticComplexity: cyclomaticResult,
         errors: [],
         safetyChecks,
-      } as any,
+      },
       hintsUsed,
     );
     return res.status(200).json({
@@ -462,8 +468,6 @@ router.post('/analyze', (req, res) => {
         "✅ **Status:** Analysis Successful",
         ...combinedWarnings.map(formatWarningExplanation),
         ...unsupportedWarnings.map(w => `⚠️ **Unsupported Feature:** ${w.message}`),
-        ...(executorCrashMsg ? [`⚠️ **Safety Analyzer:** Stopped early — ${executorCrashMsg}`] : []),
-        ...(cfgCrashMsg      ? [`⚠️ **Flow Graph:** Generation failed — ${cfgCrashMsg}`]       : []),
         ...mentorExplanations,
     ],
     // OPTIONAL: If your frontend specifically looks for a 'logs' key, add it here
@@ -479,18 +483,26 @@ router.post('/analyze', (req, res) => {
         qualityBonus: reward.bonus,
         levelTitle: gameEngine.getLevelTitle(currentLevel),
     },
-} as any); 
+});
 
-  } catch (criticalErr: any) {
-    console.error('🔥 Critical Engine Error:', criticalErr?.message);
-    return res.status(200).json({
+  } catch (criticalError: unknown) {
+    const phase = isAnalysisPhaseError(criticalError)
+      ? criticalError.phase
+      : 'Analysis pipeline';
+    const message = errorMessage(criticalError);
+    console.error('Analysis engine failure', {
+      phase,
+      message,
+      stack: criticalError instanceof Error ? criticalError.stack : undefined,
+    });
+    return res.status(500).json({
       success: false,
       tokens: lexResult.tokens,
       ast: getCleanAST(ast),
       errors: [{
         type: 'semantic',
         severity: 'error',
-        message: `Internal Engine Error: ${criticalErr.message}`,
+        message: `Internal analysis failure during ${phase}.`,
         line: 0,
       }],
       warnings: [],
@@ -504,290 +516,9 @@ router.post('/analyze', (req, res) => {
       gamification: { xpEarned: 0, qualityBonus: 0, levelTitle: 'Squire' },
       explanations: [
         '❌ **Status:** The analysis engine encountered an unexpected error.',
-        `🚨 **Critical Error:** ${criticalErr.message}`
+        `🚨 **Failed phase:** ${phase}. Please retry and report this failure if it persists.`
       ],
     });
   }
 });
-
-// ---------------------------------------------------------------------------
-// Helper: strip stdlib pre-registered symbols, keep only user-declared ones
-// ---------------------------------------------------------------------------
-const STDLIB_NAMES = new Set([
-  'cout','cin','cerr','clog','endl','setw','setprecision','setfill',
-  'fixed','showpoint','left','right','boolalpha','noboolalpha',
-  'pow','sqrt','abs','fabs','ceil','floor','round','fmod',
-  'log','log2','log10','exp','sin','cos','tan','asin','acos','atan','atan2',
-  'system','exit','rand','srand','getline',
-  'stoi','stol','stoul','stod','stof','to_string',
-  'ifstream','ofstream','fstream','string','nullptr',
-]);
-
-function filterUserSymbols(symbolTable: Record<string, any>): Record<string, any> {
-  const result: Record<string, any> = {};
-  for (const [key, sym] of Object.entries(symbolTable)) {
-    const shortName = (key.split('::').pop() ?? key) as string;
-    // Only skip if BOTH line is 0 AND it's a known stdlib name
-    if ((sym.line ?? 0) === 0 && STDLIB_NAMES.has(shortName)) continue;
-    if (STDLIB_NAMES.has(shortName) && sym.scope === 'global') continue;
-    result[key] = sym;
-  }
-  return result;
-}
-
-
-// ---------------------------------------------------------------------------
-// Helper: convert the symbol table into SymbolicEntry[] for the Math tab
-// ---------------------------------------------------------------------------
-function buildSymbolicTrace(
-  symbolTable: Record<string, any>,
-): Array<{ expression: string; value: string | number }> {
-  const entries: Array<{ expression: string; value: string | number }> = [];
-  for (const [key, sym] of Object.entries(symbolTable)) {
-    if ((sym.line ?? 0) === 0) continue;      // skip stdlib
-    if (sym.kind === 'function') continue;
-    const label = key.split('::').slice(1).join('::') || sym.name;
-    const dimensions = Array.isArray(sym.dimensions) && sym.dimensions.length
-      ? sym.dimensions.map((d: any) => `[${d}]`).join('')
-      : '';
-    entries.push({
-      expression: `${sym.type} ${label}${dimensions}`,
-      value: sym.initialized ? sym.type : 'uninitialized',
-    });
-  }
-  return entries;
-}
-
-function getCleanAST(node: any): any {
-  if (!node || typeof node !== 'object') return node;
-  if (Array.isArray(node)) {
-    return node.map(getCleanAST);
-  }
-  const copy = { ...node };
-  delete copy.parent;
-  for (const key in copy) {
-    copy[key] = getCleanAST(copy[key]);
-  }
-  return copy;
-}
-
 export default router;
-
-function collectAstBeginnerWarnings(ast: any): AnalysisError[] {
-  const warnings: AnalysisError[] = [];
-  const pushed = new Set<string>();
-
-  const pushWarning = (line: number, message: string) => {
-    const key = `${line}|${message}`;
-    if (pushed.has(key)) return;
-    pushed.add(key);
-    warnings.push({
-      type: 'semantic',
-      severity: 'warning',
-      message,
-      line: line || 0,
-      column: 0,
-    });
-  };
-
-  const visit = (node: any) => {
-    if (!node || typeof node !== 'object') return;
-
-    if (node.type === 'IfStatement') {
-      const cond = node.condition;
-      if (cond?.type === 'Assignment' && cond.operator === '=') {
-        pushWarning(
-          cond.line || node.line || 0,
-          `Suspicious assignment in condition: use '==' for comparison instead of '='.`,
-        );
-      }
-    }
-
-    if (node.type === 'FunctionDecl' && node.name === 'main') {
-      const body = Array.isArray(node.body) ? node.body : [];
-      const hasLogic = body.some((s: any) => {
-        if (!s) return false;
-        if (s.type === 'ReturnStatement') return false;
-        if (s.type === 'Block' && Array.isArray(s.statements) && s.statements.length === 0) return false;
-        return true;
-      });
-      if (!hasLogic) {
-        pushWarning(
-          node.line || 0,
-          `No executable logic found in 'main' (only return/empty statements). Add at least one meaningful statement.`,
-        );
-      }
-    }
-
-    const candidates = [node.body, node.statements, node.thenBranch, node.elseBranch, node.cases, node.handlers];
-    candidates.forEach((c: any) => {
-      if (Array.isArray(c)) c.forEach(visit);
-    });
-    if (node.condition) visit(node.condition);
-  };
-
-  visit(ast);
-  return warnings;
-}
-
-function dedupeWarnings(warnings: AnalysisError[]): AnalysisError[] {
-  const seen = new Set<string>();
-  const out: AnalysisError[] = [];
-  for (const w of warnings) {
-    const key = `${w.line}|${w.message}`;
-    if (seen.has(key)) continue;
-    seen.add(key);
-    out.push(w);
-  }
-  return out;
-}
-
-function formatWarningExplanation(warning: AnalysisError): string {
-  const guidance = getWarningGuidance(warning.message);
-  const suffix = guidance
-    ? `\n   Why: ${guidance.why}\n   Try this: ${guidance.suggestion}`
-    : `\n   Why: The analyzer found something that may be confusing, risky, or outside the expected beginner pattern.\n   Try this: Review the highlighted line and make the intent explicit.`;
-  return `⚠️ **WARNING (L${warning.line}):** ${warning.message}${suffix}`;
-}
-
-function getWarningGuidance(message: string): { why: string; suggestion: string } | null {
-  const lower = message.toLowerCase();
-
-  if (lower.includes('unused variable')) {
-    return {
-      why: 'The variable is declared but never read, so it does not affect the program result.',
-      suggestion: 'Use the variable later in a condition, assignment, output, or return value, or remove it if it is not needed.',
-    };
-  }
-
-  if (lower.includes('redundant assignment') || lower.includes('overwritten')) {
-    return {
-      why: 'A value is assigned, then replaced before any code reads the first value.',
-      suggestion: 'Remove the earlier assignment, or read/use the value before assigning a new one.',
-    };
-  }
-
-  if (lower.includes('possible data loss') || lower.includes('narrowing conversion')) {
-    return {
-      why: 'The value may lose decimal precision or range when stored in the target type.',
-      suggestion: 'Use a matching type such as double/float, or convert intentionally only when losing precision is acceptable.',
-    };
-  }
-
-  if (lower.includes('uninitialized')) {
-    return {
-      why: 'Reading a variable before assigning it can use unpredictable leftover memory.',
-      suggestion: 'Assign an initial value before the first read, for example int count = 0;.',
-    };
-  }
-
-  if (lower.includes('infinite loop')) {
-    return {
-      why: 'The loop condition may never become false.',
-      suggestion: 'Update the condition variable inside the loop or add a clear break condition.',
-    };
-  }
-
-  if (lower.includes('unsupported') || lower.includes('outside') || lower.includes('not supported')) {
-    return {
-      why: 'This analyzer focuses on CP1/CP2 procedural code, so some advanced C++ features are intentionally limited.',
-      suggestion: 'Use simpler variables, arrays, functions, loops, conditionals, and supported headers for now.',
-    };
-  }
-
-  if (lower.includes('header') || lower.includes('preprocessor') || lower.includes('include')) {
-    return {
-      why: 'Strict mode checks whether library features have the matching #include directive.',
-      suggestion: 'Add the required header, or replace the library call with basic arithmetic/control-flow code.',
-    };
-  }
-
-  if (lower.includes('logical contradiction') || lower.includes('always false')) {
-    return {
-      why: 'The condition can never be true, so part of the code will not run.',
-      suggestion: 'Check the comparison operator and the values used in the condition.',
-    };
-  }
-
-  if (lower.includes('logical tautology') || lower.includes('always true')) {
-    return {
-      why: 'The condition is always true, so the alternative path cannot run.',
-      suggestion: 'Simplify the condition or change it so both paths are possible when needed.',
-    };
-  }
-
-  return null;
-}
-
-function detectFunctionOverloads(ast: any): AnalysisError[] {
-  const signaturesByName = new Map<string, Set<string>>();
-  const firstLineByName = new Map<string, number>();
-  const errors: AnalysisError[] = [];
-
-  const scan = (nodes: any[]) => {
-    nodes.forEach(node => {
-      if (!node || (node.type !== 'FunctionDecl' && node.type !== 'FunctionPrototype')) return;
-      const params = Array.isArray(node.params) ? node.params : [];
-      const signature = params
-        .map((param: any) => normalizeTypeForSignature(param?.varType || 'unknown'))
-        .join(',');
-      const known = signaturesByName.get(node.name) || new Set<string>();
-      const firstLine = firstLineByName.get(node.name) || node.line || 0;
-
-      if (known.size > 0 && !known.has(signature)) {
-        errors.push({
-          type: 'semantic',
-          severity: 'error',
-          message: `Unsupported feature: Function overloading is not included in the CP1/CP2 foundations scope. '${node.name}' was already declared with a different parameter list on line ${firstLine}.`,
-          line: node.line || 0,
-          column: node.column || 0,
-        });
-      }
-
-      known.add(signature);
-      signaturesByName.set(node.name, known);
-      if (!firstLineByName.has(node.name)) firstLineByName.set(node.name, node.line || 0);
-    });
-  };
-
-  if (Array.isArray(ast?.body)) scan(ast.body);
-  if (Array.isArray(ast?.namespace?.body)) scan(ast.namespace.body);
-  return errors;
-}
-
-function normalizeTypeForSignature(type: string): string {
-  return String(type).replace(/\s+/g, ' ').trim();
-}
-
-function stripCommentsAndLiterals(source: string): string {
-  return source
-    .replace(/\/\*[\s\S]*?\*\//g, match => ' '.repeat(match.length))
-    .replace(/\/\/[^\n\r]*/g, match => ' '.repeat(match.length))
-    .replace(/(?:u8|u|U|L)?R"([^(]*)\([\s\S]*?\)\1"/g, match => ' '.repeat(match.length))
-    .replace(/(?:u8|u|U|L)?"(?:\\[\s\S]|[^"\\])*"/g, match => ' '.repeat(match.length))
-    .replace(/(?:u|U|L)?'(?:\\[\s\S]|[^'\\])*'/g, match => ' '.repeat(match.length));
-}
-
-function normalizePastedSourceCode(source: string): string {
-  let normalized = source
-    .replace(/<br\s*\/?>/gi, '\n')
-    .replace(/<\/p\s*>/gi, '\n')
-    .replace(/<\/div\s*>/gi, '\n')
-    .replace(/<\/?(?:span|code|pre|div|p|table|thead|tbody|tr|td|th|strong|em|b|i|section|article|blockquote)(?:\s[^>]*)?>/gi, '')
-    .replace(/&lt;/g, '<')
-    .replace(/&gt;/g, '>')
-    .replace(/&amp;/g, '&')
-    .replace(/&quot;/g, '"')
-    .replace(/&#39;/g, "'")
-    .trim();
-
-  const fenced = normalized.match(/^```(?:cpp|c\+\+|cxx|cc)?\s*([\s\S]*?)\s*```$/i);
-  if (fenced) normalized = fenced[1].trim();
-
-  const lines = normalized.split(/\r?\n/);
-  if (/^(?:cpp|c\+\+|cxx|cc)$/i.test(lines[0]?.trim() ?? '')) {
-    normalized = lines.slice(1).join('\n').trim();
-  }
-
-  return normalized;
-}

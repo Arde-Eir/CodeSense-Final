@@ -35,6 +35,11 @@ const DragDropGameInner: React.FC<{
   const [results,       setResults]       = React.useState<Record<string, boolean>>({});
   const [submitted,     setSubmitted]     = React.useState(false);
   const [shuffledItems] = React.useState(() => [...items].sort(() => Math.random() - 0.5));
+  const completionTimer = React.useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  React.useEffect(() => () => {
+    if (completionTimer.current !== null) clearTimeout(completionTimer.current);
+  }, []);
 
   const usedIds   = new Set(Object.values(dropped));
   const allFilled = Object.keys(dropped).length >= zones.length;
@@ -47,7 +52,10 @@ const DragDropGameInner: React.FC<{
     const score = Object.values(r).filter(Boolean).length;
     if (score === zones.length) {
       setSubmitted(true);
-      setTimeout(() => onComplete(score, zones.length), 700);
+      completionTimer.current = setTimeout(() => {
+        completionTimer.current = null;
+        onComplete(score, zones.length);
+      }, 700);
     }
   };
 
@@ -107,6 +115,7 @@ const DragDropGameInner: React.FC<{
             return (
               <div
                 key={item.id}
+                data-testid={`drag-item-${item.id}`}
                 draggable={!used && !submitted}
                 onDragStart={() => { if (!used && !submitted) setDragging(item.id); }}
                 onDragEnd={() => setDragging(null)}
@@ -151,6 +160,7 @@ const DragDropGameInner: React.FC<{
             return (
               <div
                 key={zone.id}
+                data-testid={`drop-zone-${zone.id}`}
                 onDragOver={e => { e.preventDefault(); setDragOver(zone.id); }}
                 onDragLeave={() => setDragOver(null)}
                 onDrop={e => {
@@ -268,6 +278,7 @@ const DragDropGameInner: React.FC<{
           Reset
         </button>
         <button
+          data-testid="drag-check"
           onClick={doCheck}
           disabled={!allFilled || submitted}
           style={{

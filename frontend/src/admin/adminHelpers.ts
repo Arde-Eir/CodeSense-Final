@@ -28,8 +28,6 @@ export interface MCQuestionLite {
   correctAnswers?: unknown;
   correct_answers?: unknown;
   correct_indices?: unknown;
-  // extra fields ignored
-  [k: string]: unknown;
 }
 
 export interface QuestBuilderMCQuestion {
@@ -70,6 +68,8 @@ export interface QuestBuilderCodeFillItem {
 }
 
 export interface QuestBuilderValidationInput {
+  basexp: number;
+  requiredxp: number;
   act_mc: boolean;
   act_balloon: boolean;
   act_drag: boolean;
@@ -285,6 +285,13 @@ const validateChoiceQuestions = (
 
 export function validateQuestBuilderForm(form: QuestBuilderValidationInput): QuestBuilderValidationResult {
   const errors: string[] = [];
+
+  if (!Number.isInteger(form.basexp) || form.basexp < 0 || form.basexp > 2_147_483_647) {
+    errors.push('XP Reward must be a whole number between 0 and 2147483647.');
+  }
+  if (!Number.isInteger(form.requiredxp) || form.requiredxp < 0 || form.requiredxp > 2_147_483_647) {
+    errors.push('Required XP to Unlock must be a whole number between 0 and 2147483647.');
+  }
 
   if (!form.act_mc && !form.act_balloon && !form.act_drag && !form.act_ordering && !form.act_codefill) {
     errors.push('Select at least one activity tab.');

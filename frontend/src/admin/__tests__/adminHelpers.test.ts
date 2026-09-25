@@ -468,6 +468,8 @@ describe('parseCodeFillAnswers', () => {
 
 // ─── validateQuestBuilderForm ─────────────────────────────────────────────
 const validBuilderForm = (): QuestBuilderValidationInput => ({
+  basexp: 100,
+  requiredxp: 0,
   act_mc: true,
   act_balloon: false,
   act_drag: false,
@@ -487,6 +489,21 @@ const validBuilderForm = (): QuestBuilderValidationInput => ({
 describe('validateQuestBuilderForm', () => {
   it('accepts a complete multiple-choice quest', () => {
     expect(validateQuestBuilderForm(validBuilderForm())).toEqual({ ok: true, errors: [] });
+  });
+
+  it('rejects quest XP values outside the database integer constraints', () => {
+    const result = validateQuestBuilderForm({
+      ...validBuilderForm(),
+      basexp: -1,
+      requiredxp: 2_147_483_648,
+    });
+    expect(result.errors).toContain('XP Reward must be a whole number between 0 and 2147483647.');
+    expect(result.errors).toContain('Required XP to Unlock must be a whole number between 0 and 2147483647.');
+  });
+
+  it('rejects fractional quest XP values', () => {
+    const result = validateQuestBuilderForm({ ...validBuilderForm(), basexp: 1.5 });
+    expect(result.errors).toContain('XP Reward must be a whole number between 0 and 2147483647.');
   });
 
   it('rejects a selected activity with no complete content', () => {

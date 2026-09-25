@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '@/components/AuthContext';
+import { executeSignupRecaptcha } from '@/services/recaptcha';
 
 
 // ── Reusable field component ──────────────────────────────────────────────────
@@ -126,6 +127,7 @@ const PrivacyConsentModal: React.FC<{ onAgree: () => void; onClose: () => void }
             <p style={np}>CodeSense does <b style={{ color: '#f85149' }}>not sell, rent, or trade</b> your personal data. Limited sharing occurs only as follows:</p>
             {[
               ['Supabase (Database & Storage)',     'Stores your account data and avatar under strict data processing agreements.'],
+              ['Google reCAPTCHA',                  'Processes browser and device signals to protect registration from automated abuse. Google’s Privacy Policy and Terms of Service apply.'],
               ['AI Analysis Provider',              'Your submitted code is sent for analysis. No personally identifiable information accompanies the code payload.'],
               ['NPC & Competent Authorities',       'Disclosed only when required by Philippine law or lawful court order under Sec. 13 of RA 10173.'],
             ].map(([party, desc]) => (
@@ -327,17 +329,12 @@ export const SignupPage: React.FC = () => {
   const [isLoading,        setIsLoading]        = useState(false);
   const [focusedField,     setFocusedField]     = useState<string | null>(null);
 
-  // ── Bot-detection: math CAPTCHA + honeypot + timing ─────────────────────────
-  const [captchaQ, setCaptchaQ]         = useState({ a: 0, b: 0 });
-  const [captchaAnswer, setCaptchaAnswer] = useState('');
+  // ── Bot-detection: reCAPTCHA v3 + honeypot + timing ─────────────────────────
   const [honeypot, setHoneypot]         = useState('');  // bots fill this; humans don't
   const formLoadTime = useRef(Date.now());
+  const submitting = useRef(false);
 
   useEffect(() => {
-    setCaptchaQ({
-      a: Math.floor(Math.random() * 9) + 1,
-      b: Math.floor(Math.random() * 9) + 1,
-    });
     formLoadTime.current = Date.now();
   }, []);
 
@@ -366,31 +363,29 @@ export const SignupPage: React.FC = () => {
     else if (formData.password !== formData.confirmPassword) errs.confirmPassword = 'Codes do not match';
     if (!agreedToPrivacy)                      errs.privacy = 'You must agree to the Data Privacy Policy';
 
-    // Math CAPTCHA
-    const expected = captchaQ.a + captchaQ.b;
-    if (!captchaAnswer.trim())                         errs.captcha = 'Please answer the security question';
-    else if (parseInt(captchaAnswer, 10) !== expected) errs.captcha = 'Incorrect answer — try again';
-
     setErrors(errs);
     return Object.keys(errs).length === 0;
   };
 
 const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
   e.preventDefault();
-  if (!validateForm()) return;
+  if (submitting.current || !validateForm()) return;
+  submitting.current = true;
   setIsLoading(true);
   
   try {
+    const recaptchaToken = await executeSignupRecaptcha();
     await signup(
       formData.username.trim(),
       formData.password,
       formData.email.trim(),
-      formData.userType
+      formData.userType,
+      recaptchaToken
     );
     
     navigate('/welcome');
-  } catch (err: any) {
-    const msg = err?.message ?? '';
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
     // Handle specific errors from DatabaseService
     if      (msg === 'USERNAME_TAKEN')          setErrors({ username: 'This player name is already taken.' });
     else if (msg === 'EMAIL_TAKEN')             setErrors({ email: 'An account with this email already exists.' });
@@ -402,6 +397,7 @@ const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
       setErrors({ submit: msg || 'An unexpected error occurred. Please try again.' });
     }
   } finally {
+    submitting.current = false;
     setIsLoading(false);
   }
 };
@@ -475,32 +471,32 @@ const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
             <p style={{ color: '#484f58', fontSize: 13, margin: 0 }}>Choose your path in CodeSense</p>
           </div>
 
-          <form onSubmit={handleSubmit} noValidate>
+          <form id="signup-form" onSubmit={handleSubmit} noValidate>
 
             {/* Player Name */}
             <Field label="Player Name" error={errors.username}>
-              <input type="text" name="username" value={formData.username} onChange={handleChange}
+              <input id="signup-username" type="text" name="username" value={formData.username} onChange={handleChange}
                 placeholder="e.g. CoderKnight" autoComplete="username"
                 style={inputStyle('username', !!errors.username)} {...focusProps('username')} />
             </Field>
 
             {/* Email */}
             <Field label="Email Address" error={errors.email}>
-              <input type="email" name="email" value={formData.email} onChange={handleChange}
+              <input id="signup-email" type="email" name="email" value={formData.email} onChange={handleChange}
                 placeholder="e.g. yourname@gmail.com" autoComplete="email"
                 style={inputStyle('email', !!errors.email)} {...focusProps('email')} />
             </Field>
 
             {/* Password */}
             <Field label="Secret Code (Password)" error={errors.password}>
-              <input type="password" name="password" value={formData.password} onChange={handleChange}
+              <input id="signup-password" type="password" name="password" value={formData.password} onChange={handleChange}
                 placeholder="At least 8 characters" autoComplete="new-password"
                 style={inputStyle('password', !!errors.password)} {...focusProps('password')} />
             </Field>
 
             {/* Confirm Password */}
             <Field label="Confirm Code" error={errors.confirmPassword}>
-              <input type="password" name="confirmPassword" value={formData.confirmPassword} onChange={handleChange}
+              <input id="signup-confirm-password" type="password" name="confirmPassword" value={formData.confirmPassword} onChange={handleChange}
                 placeholder="Repeat your code" autoComplete="new-password"
                 style={inputStyle('confirmPassword', !!errors.confirmPassword)} {...focusProps('confirmPassword')} />
             </Field>
@@ -508,7 +504,7 @@ const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
             {/* ── Honeypot: invisible to humans, bots auto-fill it ── */}
             <div style={{ position: 'absolute', left: '-9999px', opacity: 0, pointerEvents: 'none' }} aria-hidden="true">
               <input
-                type="text" tabIndex={-1} autoComplete="off"
+                id="signup-website" name="website" type="text" tabIndex={-1} autoComplete="off"
                 value={honeypot} onChange={e => setHoneypot(e.target.value)}
               />
             </div>
@@ -539,17 +535,6 @@ const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
               </div>
             </Field>
 
-            {/* Math CAPTCHA */}
-            <Field label={`Security Check: What is ${captchaQ.a} + ${captchaQ.b}?`} error={errors.captcha}>
-              <input
-                type="number" inputMode="numeric" value={captchaAnswer}
-                onChange={e => { setCaptchaAnswer(e.target.value); if (errors.captcha) setErrors(p => ({ ...p, captcha: '' })); }}
-                placeholder="Enter the answer"
-                style={inputStyle('captcha', !!errors.captcha)}
-                {...focusProps('captcha')}
-              />
-            </Field>
-
             {/* Privacy checkbox */}
             <div style={{
               background: errors.privacy ? 'rgba(248,81,73,0.06)' : 'rgba(88,166,255,0.04)',
@@ -557,7 +542,7 @@ const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
               borderRadius: 8, padding: '12px 14px', marginBottom: 20, transition: 'border-color 0.2s',
             }}>
               <label style={{ display: 'flex', alignItems: 'flex-start', cursor: 'pointer', gap: 10 }}>
-                <input type="checkbox" checked={agreedToPrivacy}
+                <input id="signup-privacy-consent" type="checkbox" checked={agreedToPrivacy}
                   onChange={e => { setAgreedToPrivacy(e.target.checked); if (e.target.checked) setErrors(prev => ({ ...prev, privacy: '' })); }}
                   style={{ marginTop: 2, accentColor: '#58a6ff', width: 15, height: 15, flexShrink: 0, cursor: 'pointer' }}
                 />
@@ -579,7 +564,7 @@ const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
 
             {/* Submit error */}
             {errors.submit && (
-              <div style={{
+              <div id="signup-error" role="alert" style={{
                 background: 'rgba(248,81,73,0.08)', border: '1px solid rgba(248,81,73,0.3)',
                 borderRadius: 8, padding: '10px 14px', marginBottom: 16,
                 color: '#f85149', fontSize: 13, textAlign: 'center',
@@ -589,7 +574,7 @@ const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
             )}
 
             {/* Submit button */}
-            <button type="submit" disabled={isLoading} style={{
+            <button id="signup-submit" type="submit" disabled={isLoading} aria-busy={isLoading} style={{
               width: '100%', padding: '13px',
               background: isLoading ? '#21262d' : 'linear-gradient(135deg, #238636 0%, #2ea043 100%)',
               color: isLoading ? '#484f58' : 'white', border: 'none', borderRadius: 8,
@@ -603,6 +588,14 @@ const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
             >
               {isLoading ? '⟳  Creating your account…' : 'START JOURNEY →'}
             </button>
+
+            <p id="recaptcha-notice" style={{ color: '#8b949e', fontSize: 11, lineHeight: 1.6, textAlign: 'center', margin: '14px 0 0' }}>
+              This site is protected by reCAPTCHA and the Google{' '}
+              <a href="https://policies.google.com/privacy" target="_blank" rel="noopener noreferrer" style={{ color: '#58a6ff' }}>Privacy Policy</a>
+              {' '}and{' '}
+              <a href="https://policies.google.com/terms" target="_blank" rel="noopener noreferrer" style={{ color: '#58a6ff' }}>Terms of Service</a>
+              {' '}apply.
+            </p>
 
             {/* Sign-in link */}
             <p style={{ textAlign: 'center', marginTop: 20, color: '#484f58', fontSize: 13 }}>

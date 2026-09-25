@@ -5,9 +5,8 @@
 // types from `types/campaign`.
 //
 // Completion model:
-//   • Each game tab calls onComplete(score, total). We add the tab to
-//     mission_progress.completed_activities and award the tab's share of
-//     basexp (or a small replay bonus if the user already finished it once).
+//   • Each game tab calls onComplete(score, total). Passing tabs are saved
+//     through the Campaign RPC, which owns progress and XP changes.
 //   • When ALL available tabs (computed from what data the quest carries)
 //     are in completed_activities, we mark mission_progress.status='completed'
 //     AND set first_completed_at via the patched RPC. That timestamp is the
@@ -20,7 +19,6 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { useAuth } from '@/components/AuthContext';
 import { supabase } from '@/services/supabase';
-import { calculateLevel } from '@/types';
 
 import { DragDropGame  } from '@/games/DragDropGame';
 import { CodeFillGame  } from '@/games/CodeFillGame';
@@ -30,6 +28,7 @@ import { BalloonPopGame } from '@/games/BalloonPopGame';
 
 import TheorySectionBlock from '@/components/TheorySection';
 import type { ActivityTab, HintItem, Quest, TheorySection } from '@/types/campaign';
+import { isCampaignPhase, levelForPhase, phaseForLevel } from '@/types/campaign';
 import { composeHints, type ItemHintInput } from '@/campaign/composeHints';
 import { generateAutoHints } from '@/campaign/generateAutoHints';
 import {
@@ -124,33 +123,6 @@ function withTimeout<T>(thenable: PromiseLike<T>, ms = FETCH_TIMEOUT_MS): Promis
       setTimeout(() => reject(new Error(`Request timed out after ${ms / 1000}s`)), ms)
     ),
   ]);
-}
-
-async function saveMissionProgressRow(
-  userid: string,
-  questid: string,
-  payload: Record<string, unknown>,
-): Promise<{ id?: string }> {
-  const { data: updated, error: updateErr } = await withTimeout(
-    supabase
-      .from('mission_progress')
-      .update(payload)
-      .eq('userid', userid)
-      .eq('questid', questid)
-      .select('id')
-  );
-  if (updateErr) throw new Error(updateErr.message);
-  if (updated?.length) return updated[0] as { id?: string };
-
-  const { data: inserted, error: insertErr } = await withTimeout(
-    supabase
-      .from('mission_progress')
-      .insert({ userid, questid, ...payload })
-      .select('id')
-      .single()
-  );
-  if (insertErr) throw new Error(insertErr.message);
-  return (inserted ?? {}) as { id?: string };
 }
 
 // ─── XP Toast ─────────────────────────────────────────────────────────────
@@ -466,7 +438,6 @@ export const LessonActivity: React.FC = () => {
   const [activeTab,    setActiveTab]    = useState<ActivityTab>('drag');
   const [resetSignal,  setResetSignal]  = useState(0);
 
-  const [progressId,   setProgressId]   = useState<string | null>(null);
   // `hintsUsed` is the UI counter (which reveal cards are open). Resets to 0
   // when the player moves to a new question — see handleItemChange.
   const [hintsUsed,           setHintsUsed]           = useState(0);
@@ -495,6 +466,8 @@ export const LessonActivity: React.FC = () => {
 
   // Refs for values used inside async callbacks (avoid stale closures).
   const completedActivitiesRef = useRef<ActivityTab[]>([]);
+  const completionPendingRef = useRef(false);
+  const loadEpochRef = useRef(0);
   const everCompletedRef       = useRef<ActivityTab[]>([]);  // tabs completed in any prior session
   const hintsUsedRef           = useRef(0);
   // mission_progress.xp_gained as it stood when this quest was loaded. Used
@@ -531,6 +504,8 @@ export const LessonActivity: React.FC = () => {
   // ── Load quest + this user's mission_progress row ─────────────────────
   const doFetch = useCallback(async () => {
     if (!user?.id || !questId) return;
+    const loadEpoch = ++loadEpochRef.current;
+    completionPendingRef.current = false;
     setLoading(true); setFetchError(null);
 
     // RESET per-quest state — `/lesson/:questId` keeps the same component
@@ -543,7 +518,6 @@ export const LessonActivity: React.FC = () => {
     setIsCompleted(false);
     setEarnedXP(0);
     setHintsUsed(0);
-    setProgressId(null);
     setNextQuestId(undefined);
     setAppPhase('tutorial');
     syncCompletedActivities([]);
@@ -560,69 +534,92 @@ export const LessonActivity: React.FC = () => {
       const { data: q, error: qErr } = await withTimeout(
         supabase
           .from('quests')
-          .select('id,title,description,difficulty,level,phase,basexp,requiredxp,sortorder,isactive,question_type,objectives,hints,game_items,drop_zones,ordering_items,mc_questions,code_fill_items,tutorial_title,tutorial_body,tutorial_image,theory_sections')
+          .select('id,title,description,difficulty,level,phase,mode,basexp,requiredxp,sortorder,isactive,question_type,objectives,hints,game_items,drop_zones,ordering_items,mc_questions,code_fill_items,tutorial_title,tutorial_body,tutorial_image,theory_sections')
           .eq('id', questId)
           .single()
       );
+      if (loadEpoch !== loadEpochRef.current) return;
       if (qErr || !q) throw new Error(qErr?.message ?? 'Quest not found');
       const quest = q as unknown as Quest;
-      setQuest(quest);
+      if (quest.mode !== 'campaign' || !quest.isactive || !isCampaignPhase(quest.phase)) {
+        throw new Error('This lesson is not an active Campaign quest.');
+      }
 
-      // Look up the next active quest in the same phase by sortorder. Used by
-      // the side-panel "Next Quest" button after completion. We don't fail the
-      // whole page if this query errors — just fall back to "no next quest".
-      try {
-        const { data: nextRow } = await withTimeout(
+      const { data: phaseQuests, error: phaseError } = await withTimeout(
+        supabase
+          .from('quests')
+          .select('id,sortorder,isactive')
+          .eq('phase', quest.phase)
+          .eq('mode', 'campaign')
+          .order('sortorder', { ascending: true })
+          .order('id', { ascending: true })
+      );
+      if (loadEpoch !== loadEpochRef.current) return;
+      if (phaseError) throw new Error(`Could not load Campaign quest order: ${phaseError.message}`);
+      if (!phaseQuests) throw new Error('The Campaign quest order query returned no data.');
+      const activeQuests = phaseQuests.filter(row => row.isactive);
+      const questIndex = activeQuests.findIndex(row => row.id === quest.id);
+      if (questIndex < 0) throw new Error('This Campaign quest is no longer available.');
+
+      const phaseIds = phaseQuests.map(row => row.id);
+      const { data: phaseProgress, error: phaseProgressError } = await withTimeout(
+        supabase
+          .from('mission_progress')
+          .select('questid,hintsused,status,xp_gained,completed_activities,first_completed_at')
+          .eq('userid', user.id)
+          .in('questid', phaseIds)
+      );
+      if (loadEpoch !== loadEpochRef.current) return;
+      if (phaseProgressError) throw new Error(`Could not load Campaign progress: ${phaseProgressError.message}`);
+      if (!phaseProgress) throw new Error('The Campaign progress query returned no data.');
+      const progressByQuest = new Map(phaseProgress.map(row => [row.questid, row]));
+      if (activeQuests.slice(0, questIndex).some(row => !progressByQuest.get(row.id)?.first_completed_at)) {
+        throw new Error('Finish the earlier quests in this level before opening this lesson.');
+      }
+
+      const level = levelForPhase(quest.phase);
+      if (level > 1) {
+        const previousPhase = phaseForLevel(level - 1);
+        const { data: previousQuests, error: previousError } = await withTimeout(
           supabase
             .from('quests')
             .select('id')
-            .eq('phase', quest.phase)
+            .eq('phase', previousPhase)
             .eq('mode', 'campaign')
             .eq('isactive', true)
-            .gt('sortorder', quest.sortorder ?? 0)
-            .order('sortorder', { ascending: true })
-            .limit(1)
-            .maybeSingle()
         );
-        setNextQuestId(nextRow?.id ?? null);
-      } catch (e) {
-        console.warn('[LessonActivity] next-quest lookup failed', e);
-        setNextQuestId(null);
-      }
-
-      // Fetch fixed phase XP cap and how much XP this user has already earned
-      // in the phase, so capped levels award 0 XP.
-      if (quest.phase) {
-        try {
-          const [phQRes, phPRes] = await Promise.all([
-            withTimeout(supabase.from('quests').select('id').eq('phase', quest.phase).eq('mode', 'campaign').eq('isactive', true)),
-            withTimeout(supabase.from('mission_progress').select('questid,xp_gained').eq('userid', user.id)),
-          ]);
-          const phaseIds = new Set((phQRes.data ?? []).map((r: any) => r.id));
-          levelXpCapRef.current    = levelXpCapForPhase(quest.phase);
-          levelXpEarnedRef.current = (phPRes.data ?? []).filter((r: any) => phaseIds.has(r.questid)).reduce((s: number, r: any) => s + (r.xp_gained ?? 0), 0);
-        } catch (e) {
-          console.warn('[LessonActivity] level XP cap fetch failed', e);
+        if (loadEpoch !== loadEpochRef.current) return;
+        if (previousError) throw new Error(`Could not check the previous level: ${previousError.message}`);
+        if (!previousQuests?.length) throw new Error('The previous Campaign level has no active quests.');
+        const { data: previousProgress, error: previousProgressError } = await withTimeout(
+          supabase
+            .from('mission_progress')
+            .select('questid,first_completed_at')
+            .eq('userid', user.id)
+            .in('questid', previousQuests.map(row => row.id))
+        );
+        if (loadEpoch !== loadEpochRef.current) return;
+        if (previousProgressError) throw new Error(`Could not check previous-level progress: ${previousProgressError.message}`);
+        if (!previousProgress) throw new Error('The previous-level progress query returned no data.');
+        const finishedPrevious = new Set(previousProgress
+          .filter(row => row.first_completed_at)
+          .map(row => row.questid));
+        if (previousQuests.some(row => !finishedPrevious.has(row.id))) {
+          throw new Error('Finish the previous Campaign level before opening this lesson.');
         }
       }
+
+      levelXpCapRef.current = levelXpCapForPhase(quest.phase);
+      levelXpEarnedRef.current = phaseProgress.reduce((sum, row) => sum + (row.xp_gained ?? 0), 0);
+      setNextQuestId(activeQuests[questIndex + 1]?.id ?? null);
 
       // Pick the first available tab for this quest as the default.
       const tabs = computeAvailableTabs(quest);
       if (tabs.length > 0) setActiveTab(tabs[0]);
 
-      // Load existing mission_progress (with first_completed_at).
-      const { data: ex } = await withTimeout(
-        supabase
-          .from('mission_progress')
-          .select('id,hintsused,status,xp_gained,completed_activities,first_completed_at')
-          .eq('userid', user.id)
-          .eq('questid', questId)
-          .limit(1)
-          .maybeSingle()
-      );
+      const ex = progressByQuest.get(quest.id);
 
       if (ex) {
-        setProgressId(ex.id);
         // `hintsused` from the DB is cumulative for XP/leaderboard accounting.
         // The visible hint cards are per activity/question and must stay hidden
         // until the player pays for one with the bottom hint button.
@@ -632,17 +629,11 @@ export const LessonActivity: React.FC = () => {
         let done = (Array.isArray(ex.completed_activities) ? ex.completed_activities : []) as ActivityTab[];
         let loadedStatus = ex.status;
         if (shouldStartFreshRetake && ex.first_completed_at) {
-          const { error: retakeResetErr } = await supabase
-            .from('mission_progress')
-            .update({
-              status: 'active',
-              completedat: null,
-              completed_activities: [],
-              hintsused: 0,
-              updatedat: new Date().toISOString(),
-            })
-            .eq('userid', user.id)
-            .eq('questid', questId);
+          const { error: retakeResetErr } = await supabase.rpc('reset_quest_for_retake', {
+            p_userid: user.id,
+            p_questid: quest.id,
+          });
+          if (loadEpoch !== loadEpochRef.current) return;
           if (retakeResetErr) throw new Error(`Failed to start retake for quest ${questId}: ${retakeResetErr.message}`);
           done = [];
           loadedStatus = 'active';
@@ -665,25 +656,15 @@ export const LessonActivity: React.FC = () => {
           setEarnedXP(ex.xp_gained ?? quest.basexp ?? 0);
           setAppPhase('game');  // show LockedBanner inside the game area
         }
-      } else {
-        // Seed an empty progress row so subsequent UPDATEs find it.
-        const ins = await saveMissionProgressRow(user.id, questId, {
-          status: 'active',
-          attempts: 0,
-          hintsused: 0,
-          completed_activities: [],
-          startedat: new Date().toISOString(),
-        });
-        if (ins.id) setProgressId(ins.id);
-        priorXpGainedRef.current         = 0;
-        hasEverFullyCompletedRef.current = false;
       }
+      setQuest(quest);
     } catch (err) {
+      if (loadEpoch !== loadEpochRef.current) return;
       const msg = err instanceof Error ? err.message : 'Failed to load lesson';
       console.error('[LessonActivity] fetch error', err);
       setFetchError(msg);
     } finally {
-      setLoading(false);
+      if (loadEpoch === loadEpochRef.current) setLoading(false);
     }
   }, [user?.id, questId, shouldStartFreshRetake, setSearchParams, syncCompletedActivities]);
 
@@ -811,8 +792,8 @@ export const LessonActivity: React.FC = () => {
   }, [nextQuestId, quest?.phase, navigate]);
 
   // ── Take a hint ──────────────────────────────────────────────────────
-  const handleTakeHint = useCallback(async () => {
-    if (!user?.id || !quest || !progressId || isCompleted) return;
+  const handleTakeHint = useCallback(() => {
+    if (!user?.id || !quest || isCompleted) return;
     if (hintsUsed >= maxHints) return;
 
     const nextPerQ        = hintsUsed + 1;
@@ -820,27 +801,22 @@ export const LessonActivity: React.FC = () => {
     setHintsUsed(nextPerQ);
     hintsUsedRef.current = nextCumulative;
 
-    // Best-effort persist of the cumulative count for analytics/progress UI.
-    supabase
-      .from('mission_progress')
-      .update({ hintsused: nextCumulative })
-      .eq('id', progressId)
-      .then(({ error }) => { if (error) console.warn('hintsused update failed', error); });
-
     setHintToast({ visible: true });
     if (hintToastTimer.current) clearTimeout(hintToastTimer.current);
     hintToastTimer.current = setTimeout(() => setHintToast({ visible: false }), 3500);
-  }, [user?.id, quest, progressId, isCompleted, hintsUsed, maxHints]);
+  }, [user?.id, quest, isCompleted, hintsUsed, maxHints]);
 
   // ── Complete current activity ────────────────────────────────────────
-  const handleComplete = useCallback(async (_score: number, _total: number) => {
+  const handleComplete = useCallback(async (score: number, total: number) => {
     if (!user?.id || !quest) return;
-    // Ignore re-completion of a tab already finished IN THIS SESSION.
+    if (total < 1 || score !== total || completionPendingRef.current) return;
     if (completedActivitiesRef.current.includes(activeTab)) return;
+    completionPendingRef.current = true;
+    const loadEpoch = loadEpochRef.current;
+    setFetchError(null);
 
     const wasAlreadyDone = everCompletedRef.current.includes(activeTab);
     const newFinished    = [...new Set([...completedActivitiesRef.current, activeTab])] as ActivityTab[];
-    syncCompletedActivities(newFinished);
 
     const allDone = availableTabs.every(t => newFinished.includes(t));
     // XP is only awarded on full quest completion. Use the durable
@@ -852,7 +828,6 @@ export const LessonActivity: React.FC = () => {
       levelRemaining,
       hintsUsed: hintsUsedRef.current,
     });
-    levelXpEarnedRef.current += xpGainedNow;
 
     // What we'll write to mission_progress.xp_gained. This row is the durable
     // cap-accounting source and must be monotonic.
@@ -862,9 +837,7 @@ export const LessonActivity: React.FC = () => {
       xpDelta:       xpGainedNow,
     });
 
-    // Snapshot the "is this the lifetime-first full completion" flag BEFORE
-    // we later flip hasEverFullyCompletedRef. Drives celebration suppression
-    // (level-up flash + activity log) on the XP toast far below.
+    // Snapshot the lifetime-first completion flag before updating local state.
     const isLifetimeFirstFinish = allDone && !hasEverFullyCompletedRef.current;
     // True only when this specific handleComplete call is what tips the quest
     // to fully done for the first time. isCompleted is the React state from
@@ -872,8 +845,13 @@ export const LessonActivity: React.FC = () => {
     const isFirstFullFinish = allDone && !isCompleted;
 
     try {
-      let rpcResult: any = null;
-      const { data, error: rpcErr } = await supabase.rpc('complete_campaign_quest', {
+      let completionTimeSeconds: number | null = null;
+      if (allDone) {
+        const startedAt = gameStartedAtRef.current;
+        if (startedAt === null) throw new Error('The quest timer has not started. Reopen the lesson before completing it.');
+        completionTimeSeconds = Math.round((Date.now() - startedAt) / 1000);
+      }
+      const { data: rpcResult, error: rpcErr } = await supabase.rpc('complete_campaign_quest', {
         p_userid:               user.id,
         p_questid:              quest.id,
         p_xp_gained:            xpRowValue,
@@ -881,79 +859,12 @@ export const LessonActivity: React.FC = () => {
         p_completed_activities: newFinished,
         p_hintsused:            hintsUsedRef.current,
         p_is_full_completion:   allDone,
+        p_completion_time_seconds: completionTimeSeconds,
       });
-
-      if (rpcErr) {
-        let firstCompletedAt: string | null = null;
-        if (allDone) {
-          const { data: existingProgress } = await supabase
-            .from('mission_progress')
-            .select('first_completed_at')
-            .eq('userid', user.id)
-            .eq('questid', quest.id)
-            .limit(1)
-            .maybeSingle();
-          firstCompletedAt = existingProgress?.first_completed_at ?? new Date().toISOString();
-        }
-        await saveMissionProgressRow(user.id, quest.id, {
-          status:               allDone ? 'completed' : 'active',
-          xp_gained:            xpRowValue,
-          completed_activities: newFinished,
-          hintsused:            hintsUsedRef.current,
-          completedat:          allDone ? firstCompletedAt : null,
-          first_completed_at:   allDone ? firstCompletedAt : null,
-          updatedat:            new Date().toISOString(),
-        });
-
-        const { data: userRow, error: userFetchErr } = await supabase
-          .from('users')
-          .select('totalxp')
-          .eq('id', user.id)
-          .single();
-        if (userFetchErr) throw new Error(userFetchErr.message);
-        const totalXP = (userRow?.totalxp ?? 0) + xpGainedNow;
-        const { error: userUpdateErr } = await supabase
-          .from('users')
-          .update({
-            totalxp: totalXP,
-            currentlevel: calculateLevel(totalXP),
-            lastactive: new Date().toISOString(),
-          })
-          .eq('id', user.id);
-        if (userUpdateErr) throw new Error(userUpdateErr.message);
-
-        rpcResult = { levelled_up: false };
-      } else {
-        rpcResult = data;
-      }
-
-      // Some RPC deployments return success but don't persist first_completed_at.
-      // Campaign unlock logic depends on this field, so enforce it on full finish.
-      if (allDone) {
-        const { data: progressRow, error: progressFetchErr } = await supabase
-          .from('mission_progress')
-          .select('first_completed_at')
-          .eq('userid', user.id)
-          .eq('questid', quest.id)
-          .limit(1)
-          .maybeSingle();
-        if (progressFetchErr) throw new Error(progressFetchErr.message);
-
-        if (!progressRow?.first_completed_at) {
-          const firstCompletedAt = new Date().toISOString();
-          const { error: enforceCompletionErr } = await supabase
-            .from('mission_progress')
-            .update({
-              status: 'completed',
-              completedat: firstCompletedAt,
-              first_completed_at: firstCompletedAt,
-              updatedat: firstCompletedAt,
-            })
-            .eq('userid', user.id)
-            .eq('questid', quest.id);
-          if (enforceCompletionErr) throw new Error(enforceCompletionErr.message);
-        }
-      }
+      if (loadEpoch !== loadEpochRef.current) return;
+      if (rpcErr) throw new Error(`Could not save Campaign quest ${quest.id}: ${rpcErr.message}`);
+      syncCompletedActivities(newFinished);
+      levelXpEarnedRef.current += xpGainedNow;
 
       const levelledUp = rpcResult?.levelled_up === true;
       const newLevel   = rpcResult?.new_level;
@@ -962,6 +873,7 @@ export const LessonActivity: React.FC = () => {
         // RPC already set status='completed' and first_completed_at on first
         // full completion. Reflect locally.
         setIsCompleted(true);
+        if (completionTimeSeconds !== null) setElapsed(completionTimeSeconds);
         // Show the durable row value in the post-completion banner, not the
         // smaller retake event delta.
         setEarnedXP(xpRowValue);
@@ -970,36 +882,10 @@ export const LessonActivity: React.FC = () => {
         // post-retake UI knows what was historically done.
         everCompletedRef.current = [...new Set([...everCompletedRef.current, ...newFinished])];
 
-        // Skip activity-feed spam and level-up flashes on retakes — the
-        // first full completion is the milestone. We still mark the quest
-        // completed locally; the retake just earns a small XP toast.
-        if (!hasEverFullyCompletedRef.current) {
-          // Fire-and-forget: write to activity_log for the activity feed.
-          supabase.from('activity_log').insert({
-            userid:      user.id,
-            type:        'quest_completed',
-            title:       `Quest completed: ${quest.title}`,
-            description: hintsUsedRef.current > 0
-              ? `${hintsUsedRef.current} hint${hintsUsedRef.current > 1 ? 's' : ''} used`
-              : 'No hints used',
-            xp_gained:   xpRowValue,
-            meta:        { questid: quest.id, phase: quest.phase },
-          }).then(({ error }) => { if (error) console.warn('activity_log write failed', error); });
-        }
         // From this point on within the session, any further completions
         // (retakes triggered without leaving the page) are retake runs.
         hasEverFullyCompletedRef.current = true;
 
-        // Fire-and-forget: record how long the user took to finish the quest.
-        if (gameStartedAtRef.current !== null) {
-          const totalSeconds = Math.round((Date.now() - gameStartedAtRef.current) / 1000);
-          supabase
-            .from('mission_progress')
-            .update({ completion_time_seconds: totalSeconds })
-            .eq('userid', user.id)
-            .eq('questid', quest.id)
-            .then(({ error }) => { if (error) console.warn('completion_time save failed', error); });
-        }
       }
 
       // XP toast — only show when XP was actually earned.
@@ -1019,11 +905,12 @@ export const LessonActivity: React.FC = () => {
       }
 
     } catch (err) {
-      // Roll back local state on failure.
-      syncCompletedActivities(completedActivitiesRef.current.filter(g => g !== activeTab));
-      levelXpEarnedRef.current       -= xpGainedNow;
+      if (loadEpoch !== loadEpochRef.current) return;
       console.error('complete_campaign_quest failed', err);
       setFetchError(err instanceof Error ? err.message : 'Could not save your progress');
+      setResetSignal(signal => signal + 1);
+    } finally {
+      if (loadEpoch === loadEpochRef.current) completionPendingRef.current = false;
     }
   }, [user?.id, quest, activeTab, availableTabs, isCompleted, levelRemaining, syncCompletedActivities]);
 
@@ -1043,35 +930,14 @@ export const LessonActivity: React.FC = () => {
   // ── Retake ───────────────────────────────────────────────────────────
   const handleRetake = useCallback(async () => {
     if (!user?.id || !quest) return;
+    setFetchError(null);
     try {
-      // IMPORTANT: do NOT reset xp_gained here. It is the durable amount of
-      // campaign XP already credited for this quest and drives phase-cap
-      // accounting across reloads. persistedXpGained() keeps it monotonic.
-      // We also preserve first_completed_at so the campaign-gating UI
-      // doesn't briefly think this quest is locked again mid-retake.
-      const resetPayload = {
-        status: 'active',
-        completedat: null,
-        completed_activities: [],
-        hintsused: 0,
-        updatedat: new Date().toISOString(),
-      };
+      const { error: resetErr } = await supabase.rpc('reset_quest_for_retake', {
+        p_userid: user.id,
+        p_questid: quest.id,
+      });
+      if (resetErr) throw new Error(`Could not reset Campaign quest ${quest.id}: ${resetErr.message}`);
 
-      // Do not rely on reset_quest_for_retake RPC: if the function is broken
-      // (e.g. "control reached end of function without RETURN"), direct table
-      // reset keeps retake working.
-      const { error: resetErr } = await supabase
-        .from('mission_progress')
-        .update(resetPayload)
-        .eq('userid', user.id)
-        .eq('questid', quest.id);
-      if (resetErr) throw new Error(resetErr.message);
-
-      // Ensure a row exists for this quest after retake without relying on a
-      // DB-side unique constraint for (userid, questid).
-      await saveMissionProgressRow(user.id, quest.id, resetPayload);
-
-      // Verify we really moved out of completed state.
       const { data: verifyRows, error: verifyErr } = await supabase
         .from('mission_progress')
         .select('status')
@@ -1088,11 +954,7 @@ export const LessonActivity: React.FC = () => {
       return;
     }
 
-    // Local reset. Note: everCompletedRef is preserved (used for replay-XP
-    // detection). first_completed_at on the row is also preserved by the RPC,
-    // so the next quest stays unlocked. priorXpGainedRef is also preserved —
-    // it carries the lifetime row max forward so the next complete writes
-    // max(prior, session) and never drops xp_gained below its lock.
+    // The RPC preserves first_completed_at and previously credited XP.
     everCompletedRef.current         = [...completedActivitiesRef.current];
     syncCompletedActivities([]);
     // The user just finished this quest at least once — every subsequent
@@ -1179,6 +1041,13 @@ export const LessonActivity: React.FC = () => {
           )}
         </div>
       </header>
+
+      {fetchError && (
+        <div role="alert" style={{ padding: '10px 24px', background: 'rgba(248,81,73,0.12)', borderBottom: '1px solid rgba(248,81,73,0.35)', color: '#ffaba8', fontSize: 12 }}>
+          Could not save or load Campaign progress: {fetchError}
+          <button onClick={doFetch} style={{ marginLeft: 12, border: '1px solid currentColor', borderRadius: 5, background: 'transparent', color: 'inherit', cursor: 'pointer', padding: '3px 8px' }}>Reload progress</button>
+        </div>
+      )}
 
       {/* Body — overflowY:auto lets the layout scroll at high browser zoom
            instead of clipping the bottom action bar */}

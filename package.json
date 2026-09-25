@@ -6,7 +6,7 @@
     "check": "npm run scan:secrets && npm run lint && npm test && npm run build",
     "lint": "npm --prefix frontend run lint",
     "scan:secrets": "node tests/scan-secrets.mjs",
-    "test": "npm run test:report",
+    "test": "npm run test:report && npm run test:integration",
     "test:backend:unit": "npm --prefix backend test",
     "test:frontend": "npm --prefix frontend run test",
     "test:integration": "node --test tests/run-integration-tests.mjs",

@@ -1,75 +1,44 @@
-import React, { useEffect, useState } from 'react';
-import { BrowserRouter, Routes, Route, Navigate, useNavigate } from 'react-router-dom';
+import React, { lazy, Suspense, useEffect, useState } from 'react';
+import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { AuthProvider } from '@/components/AuthScreen';
 import { useAuth } from '@/components/AuthContext';
+import { LearnerLiveSupport } from '@/components/LearnerLiveSupport';
 import { OnboardingWalkthrough, ONBOARD_ACTIVE_KEY, ONBOARD_KEY, ONBOARD_STEP_KEY } from '@/components/OnboardingWalkthrough';
 import { AccountRoute, AdminRoute, ProtectedRoute } from '@/routes/guards';
-import { HomeDashboard } from '@/pages/app/HomeDashboard';
-import { SignupPage } from '@/pages/public/Signuppage';
-import { LoginPage } from '@/pages/public/Loginpage';
-import { SandboxPage } from '@/pages/app/SandboxPage';
-import { LandingPage } from '@/pages/public/Landingpage';
-import { ProgressPage } from '@/pages/app/Progresspage';
-import { ProfileSettings } from '@/pages/app/ProfileSettings';
-import { LeaderboardPage } from '@/pages/app/LeaderboardPage';
-import { WelcomePage } from '@/pages/public/WelcomePage';
-import { CampaignPage } from '@/pages/app/CampaignPage';
-import CampaignInside from '@/pages/app/CampaignInside';
-// LevelOneDashboard removed — CampaignInside now handles all three phases.
-import LessonActivity from '@/pages/app/lessonactivity';
-import { AdminPanel } from '@/pages/admin/AdminPanel';
-import UserManualPage from '@/pages/public/UserManualPage';
-import TutorialsPage from '@/pages/public/TutorialsPage';
-import PatchNotesPage from '@/pages/public/PatchNotesPage';
 
-// ── Impersonation banner — shown globally when an admin is previewing a user ──
-const BANNER_HEIGHT = 40; // px — keep in sync with banner padding + line-height
+const HomeDashboard = lazy(() => import('@/pages/app/HomeDashboard').then(module => ({ default: module.HomeDashboard })));
+const SignupPage = lazy(() => import('@/pages/public/Signuppage').then(module => ({ default: module.SignupPage })));
+const LoginPage = lazy(() => import('@/pages/public/Loginpage').then(module => ({ default: module.LoginPage })));
+const SandboxPage = lazy(() => import('@/pages/app/SandboxPage').then(module => ({ default: module.SandboxPage })));
+const LandingPage = lazy(() => import('@/pages/public/Landingpage').then(module => ({ default: module.LandingPage })));
+const ProgressPage = lazy(() => import('@/pages/app/Progresspage').then(module => ({ default: module.ProgressPage })));
+const ProfileSettings = lazy(() => import('@/pages/app/ProfileSettings').then(module => ({ default: module.ProfileSettings })));
+const LeaderboardPage = lazy(() => import('@/pages/app/LeaderboardPage').then(module => ({ default: module.LeaderboardPage })));
+const WelcomePage = lazy(() => import('@/pages/public/WelcomePage').then(module => ({ default: module.WelcomePage })));
+const CampaignPage = lazy(() => import('@/pages/app/CampaignPage').then(module => ({ default: module.CampaignPage })));
+const CampaignInside = lazy(() => import('@/pages/app/CampaignInside'));
+const LessonActivity = lazy(() => import('@/pages/app/lessonactivity'));
+const AdminPanel = lazy(() => import('@/pages/admin/AdminPanel').then(module => ({ default: module.AdminPanel })));
+const UserManualPage = lazy(() => import('@/pages/public/UserManualPage'));
+const TutorialsPage = lazy(() => import('@/pages/public/TutorialsPage'));
+const PatchNotesPage = lazy(() => import('@/pages/public/PatchNotesPage'));
 
-const ImpersonationBanner: React.FC = () => {
-  const { impersonatingUser, stopImpersonation, user } = useAuth();
-  const navigate = useNavigate();
-
-  if (!impersonatingUser) return null;
-  return (
-    <div style={{
-      position: 'fixed', top: 0, left: 0, right: 0, zIndex: 9999,
-      height: `${BANNER_HEIGHT}px`, boxSizing: 'border-box',
-      background: 'linear-gradient(90deg, #b45309, #92400e)',
-      color: 'white', padding: '0 20px',
-      display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-      fontSize: '13px', fontWeight: '600', boxShadow: '0 2px 12px rgba(0,0,0,0.5)',
-    }}>
-      <span>
-        👁️ Admin preview — you are <strong>{impersonatingUser.playerName}</strong>
-        {' '}viewing as <strong>{user?.playerName}</strong>
-      </span>
-      <button
-        onClick={() => { stopImpersonation(); navigate('/admin'); }}
-        style={{
-          background: 'rgba(255,255,255,0.2)', border: '1px solid rgba(255,255,255,0.4)',
-          color: 'white', borderRadius: '6px', padding: '4px 14px',
-          cursor: 'pointer', fontSize: '12px', fontWeight: '700',
-        }}
-      >
-        Exit Preview
-      </button>
-    </div>
-  );
-};
-
-const RouteFrame: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  const { impersonatingUser } = useAuth();
-
-  return (
-    <div style={{
+const RouteLoading: React.FC = () => (
+  <main
+    aria-busy="true"
+    aria-label="Loading page"
+    style={{
       minHeight: '100vh',
-      boxSizing: 'border-box',
-      paddingTop: impersonatingUser ? BANNER_HEIGHT : 0,
-    }}>
-      {children}
-    </div>
-  );
-};
+      display: 'grid',
+      placeItems: 'center',
+      background: '#0d1117',
+      color: '#c9d1d9',
+      fontFamily: 'system-ui, sans-serif',
+    }}
+  >
+    Loading…
+  </main>
+);
 
 // ── Tour controller — lives outside <Routes> so the overlay persists across ──
 // all page navigations. Auto-shows for new accounts; responds to the global
@@ -145,42 +114,44 @@ export const App: React.FC = () => {
     <BrowserRouter>
       <AuthProvider>
         <TourController />
-        <ImpersonationBanner />
-        <RouteFrame>
-          <Routes>
-            {/* Public Routes */}
-            <Route path="/" element={<LandingPage />} />
-            <Route path="/signup" element={<SignupPage />} />
-            <Route path="/login" element={<LoginPage />} />
-            <Route path="/welcome" element={<WelcomePage />} />
-            <Route path="/leaderboard" element={<LeaderboardPage />} />
-            <Route path="/manual" element={<UserManualPage />} />
-            <Route path="/tutorials" element={<TutorialsPage />} />
-            <Route path="/patch-notes" element={<PatchNotesPage />} />
+        <LearnerLiveSupport />
+        <div style={{ minHeight: '100vh' }}>
+          <Suspense fallback={<RouteLoading />}>
+            <Routes>
+              {/* Public Routes */}
+              <Route path="/" element={<LandingPage />} />
+              <Route path="/signup" element={<SignupPage />} />
+              <Route path="/login" element={<LoginPage />} />
+              <Route path="/welcome" element={<WelcomePage />} />
+              <Route path="/leaderboard" element={<LeaderboardPage />} />
+              <Route path="/manual" element={<UserManualPage />} />
+              <Route path="/tutorials" element={<TutorialsPage />} />
+              <Route path="/patch-notes" element={<PatchNotesPage />} />
 
-            {/* Protected Routes — guests allowed */}
-            <Route path="/home"    element={<ProtectedRoute><HomeDashboard /></ProtectedRoute>} />
-            <Route path="/sandbox" element={<ProtectedRoute><SandboxPage /></ProtectedRoute>} />
+              {/* Protected Routes — guests allowed */}
+              <Route path="/home" element={<ProtectedRoute><HomeDashboard /></ProtectedRoute>} />
+              <Route path="/sandbox" element={<ProtectedRoute><SandboxPage /></ProtectedRoute>} />
 
-            {/* Account-only Routes — guests are redirected to sign up */}
-            <Route path="/progress" element={<AccountRoute><ProgressPage /></AccountRoute>} />
-            <Route path="/profile"  element={<AccountRoute><ProfileSettings /></AccountRoute>} />
+              {/* Account-only Routes — guests are redirected to sign up */}
+              <Route path="/progress" element={<AccountRoute><ProgressPage /></AccountRoute>} />
+              <Route path="/profile" element={<AccountRoute><ProfileSettings /></AccountRoute>} />
 
-            {/* Campaign Routes — account required to track progress */}
-            <Route path="/campaign"               element={<AccountRoute><CampaignPage /></AccountRoute>} />
-            <Route path="/campaign/inside/:phase" element={<AccountRoute><CampaignInside /></AccountRoute>} />
-            <Route path="/lesson/:questId"        element={<AccountRoute><LessonActivity /></AccountRoute>} />
+              {/* Campaign Routes — account required to track progress */}
+              <Route path="/campaign" element={<AccountRoute><CampaignPage /></AccountRoute>} />
+              <Route path="/campaign/inside/:phase" element={<AccountRoute><CampaignInside /></AccountRoute>} />
+              <Route path="/lesson/:questId" element={<AccountRoute><LessonActivity /></AccountRoute>} />
 
-            {/* Admin Route — only accessible to users with is_admin = true */}
-            <Route path="/admin" element={<AdminRoute><AdminPanel /></AdminRoute>} />
+              {/* Admin Route — only accessible to users with is_admin = true */}
+              <Route path="/admin" element={<AdminRoute><AdminPanel /></AdminRoute>} />
 
-            {/* Redirects */}
-            <Route path="/settings" element={<Navigate to="/home" replace />} />
+              {/* Redirects */}
+              <Route path="/settings" element={<Navigate to="/home" replace />} />
 
-            {/* Catch-all */}
-            <Route path="*" element={<Navigate to="/" replace />} />
-          </Routes>
-        </RouteFrame>
+              {/* Catch-all */}
+              <Route path="*" element={<Navigate to="/" replace />} />
+            </Routes>
+          </Suspense>
+        </div>
       </AuthProvider>
     </BrowserRouter>
   );

@@ -27,17 +27,63 @@ copy frontend\.env.example frontend\.env.local
 
 Keep real secrets and deployment values in ignored `.env.local` files or hosting-provider environment settings. See [docs/SECURITY_AND_ACCESS.md](docs/SECURITY_AND_ACCESS.md) and [docs/SUPABASE_RLS_CHECKLIST.md](docs/SUPABASE_RLS_CHECKLIST.md).
 
+Registration requires Google reCAPTCHA v3 keys and a Supabase Auth hook. Follow [the reCAPTCHA setup guide](docs/RECAPTCHA_SETUP.md) before enabling registration.
+
 Backend environment values:
 
 ```text
 PORT=3000
 CORS_ORIGINS=https://your-frontend.example
 LOG_ANALYSIS_REQUESTS=false
+RATE_LIMIT_WINDOW_MS=60000
+RATE_LIMIT_MAX_REQUESTS=60
+RATE_LIMIT_MAX_ANALYZE_REQUESTS=20
 ```
 
 `CORS_ORIGINS` must contain exact trusted browser origins. Do not allow whole hosting suffixes such as every `.vercel.app` or `.netlify.app` preview domain.
 
 `LOG_ANALYSIS_REQUESTS=true` only logs request size metadata. It does not log submitted source code.
+
+### Admin live preview and help
+
+The Users tab includes an offline read-only snapshot of learner profile, all
+quest-progress rows, analysis reports (with saved code opened on demand), and
+activity history. Live Preview & Help shows the learner's actual CodeSense tab
+only after that learner approves sharing and control. The learner sees an admin
+cursor and can stop the session at any time. Browser-protected password fields,
+file pickers, and external links remain learner-only actions.
+
+Live help is disabled until its database and network services are deployed. Apply
+`supabase/migrations/202609170001_live_support_sessions.sql` with the Supabase
+migration owner after reviewing the read-only `supabase/schema_preflight.sql`
+results. The migration creates consented sessions, private Realtime
+authorization, and an action audit that records clicks, dropdown changes, and
+text-field changes without storing typed text. It also grants administrator
+read policies for learner progress, reports, and activity when those tables
+have row-level security enabled; review existing table grants and policies in
+staging before enabling the feature.
+
+Live video and remote controls use the existing private Supabase Realtime
+channel. Set `VITE_SUPPORT_ENABLED=true` in Netlify's production build environment
+alongside the existing Supabase URL and public key, then rebuild the frontend.
+No TURN provider, TURN credentials, ICE configuration, or Vercel video endpoint
+is required. The Vercel backend continues to serve the other application APIs.
+
+The learner's browser encodes continuous WebM/VP8 video at up to 24 fps and a
+target bitrate of 1 Mbps. Packets are capped at 64 KB of base64, below Supabase's
+256 KB Free-plan message limit. Playback has a short buffer, so remote control
+has more viewing delay than a direct WebRTC call. Bandwidth and Realtime message
+usage count toward the Supabase project's quotas; a one-hour session at the
+target bitrate can transfer roughly 600 MB after base64 overhead. Screen chunks
+are broadcast in memory, not stored as recordings. Unsupported browsers,
+missing packets, excessive buffering, and disconnected channels stop the
+connection with an error. Use current desktop Chrome or Edge on both sides.
+
+Test with separate admin and learner accounts over HTTPS: request help, accept
+sharing the CodeSense tab, verify video/cursor/navigation and a harmless profile
+edit, then stop sharing and confirm control ends. The learner must explicitly
+choose the CodeSense browser tab; other tabs are not controllable. A current
+browser that reports the selected tab as a browser capture surface is required.
 
 ## Run Locally
 
@@ -67,8 +113,9 @@ npm run check
 
 This runs:
 
+- secret scanning
 - frontend lint
-- backend unit tests, frontend Vitest tests, and integration report
+- backend unit tests, frontend Vitest tests, the integration report, and the full 52-case API integration suite
 - frontend production build
 - backend production build
 
@@ -80,7 +127,10 @@ npm test
 npm run build
 npm run build:frontend
 npm run build:backend
+npm run test:integration
 ```
+
+The integration command starts and stops an isolated backend on an available local port; no separately running development server is required.
 
 ## Project Structure
 

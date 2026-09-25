@@ -9,23 +9,116 @@
  * Covers the same 14 suites as the Cypress spec.
  */
 
+import { spawn } from 'node:child_process';
+import { createServer } from 'node:net';
+import { dirname, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { setTimeout as delay } from 'node:timers/promises';
 import { test, describe, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 
-const BASE = 'http://localhost:3000';
-const API = `${BASE}/api/analyze`;
+const REPOSITORY_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
+const BACKEND_ROOT = resolve(REPOSITORY_ROOT, 'backend');
+
+let backendProcess = null;
+let backendOutput = '';
+let baseUrl = '';
+let analyzeUrl = '';
+
+async function findAvailablePort() {
+  const server = createServer();
+  await new Promise((resolveListen, rejectListen) => {
+    server.once('error', rejectListen);
+    server.listen(0, '127.0.0.1', resolveListen);
+  });
+
+  const address = server.address();
+  if (!address || typeof address === 'string') {
+    server.close();
+    throw new Error('Could not reserve a local port for integration tests.');
+  }
+
+  await new Promise((resolveClose, rejectClose) => {
+    server.close(error => error ? rejectClose(error) : resolveClose());
+  });
+  return address.port;
+}
+
+async function waitForBackend() {
+  for (let attempt = 1; attempt <= 40; attempt += 1) {
+    if (backendProcess?.exitCode !== null) {
+      throw new Error(
+        `Integration backend exited with code ${backendProcess?.exitCode}. ${backendOutput.trim()}`,
+      );
+    }
+
+    try {
+      const response = await fetch(`${baseUrl}/`);
+      if (response.ok) return;
+    } catch (error) {
+      if (attempt === 40) {
+        const reason = error instanceof Error ? error.message : String(error);
+        throw new Error(
+          `Integration backend did not become ready at ${baseUrl}: ${reason}. ${backendOutput.trim()}`,
+        );
+      }
+    }
+
+    await delay(250);
+  }
+}
+
+before(async () => {
+  const testPort = await findAvailablePort();
+  baseUrl = `http://127.0.0.1:${testPort}`;
+  analyzeUrl = `${baseUrl}/api/analyze`;
+  backendProcess = spawn(
+    process.execPath,
+    ['-r', 'ts-node/register', 'src/server.ts'],
+    {
+      cwd: BACKEND_ROOT,
+      env: {
+        ...process.env,
+        PORT: String(testPort),
+        RATE_LIMIT_MAX_REQUESTS: '1000',
+        RATE_LIMIT_MAX_ANALYZE_REQUESTS: '1000',
+      },
+      stdio: ['ignore', 'pipe', 'pipe'],
+      windowsHide: true,
+    },
+  );
+
+  backendProcess.stdout.on('data', chunk => {
+    backendOutput += chunk.toString();
+  });
+  backendProcess.stderr.on('data', chunk => {
+    backendOutput += chunk.toString();
+  });
+
+  await waitForBackend();
+});
+
+after(() => {
+  if (backendProcess?.exitCode === null) {
+    backendProcess.kill();
+  }
+});
 
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
-async function post(sourceCode, extra = {}) {
-  const res = await fetch(API, {
+async function postWithOptions(sourceCode, extra) {
+  const res = await fetch(analyzeUrl, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ sourceCode, hintsUsed: 0, ...extra }),
   });
   const body = await res.json();
   return { status: res.status, body };
+}
+
+async function post(sourceCode) {
+  return postWithOptions(sourceCode, {});
 }
 
 function expectBaseShape(body) {
@@ -43,7 +136,7 @@ function expectBaseShape(body) {
 // ---------------------------------------------------------------------------
 describe('Suite 1 – Input Validation', () => {
   test('returns HTTP 400 when body is missing sourceCode', async () => {
-    const res = await fetch(API, {
+    const res = await fetch(analyzeUrl, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({}),
@@ -54,7 +147,7 @@ describe('Suite 1 – Input Validation', () => {
   });
 
   test('returns HTTP 400 when sourceCode is not a string', async () => {
-    const res = await fetch(API, {
+    const res = await fetch(analyzeUrl, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ sourceCode: 42 }),
@@ -407,8 +500,8 @@ describe('Suite 10 – Gamification', () => {
   });
 
   test('hint penalty reduces XP', async () => {
-    const { body: noHintBody } = await post('int main() { int x = 10; return 0; }', { hintsUsed: 0 });
-    const { body: hintBody } = await post('int main() { int x = 10; return 0; }', { hintsUsed: 2 });
+    const { body: noHintBody } = await postWithOptions('int main() { int x = 10; return 0; }', { hintsUsed: 0 });
+    const { body: hintBody } = await postWithOptions('int main() { int x = 10; return 0; }', { hintsUsed: 2 });
     assert.ok(
       noHintBody.gamification.xpEarned > hintBody.gamification.xpEarned,
       `No-hint XP (${noHintBody.gamification.xpEarned}) should exceed hinted XP (${hintBody.gamification.xpEarned})`,
@@ -416,14 +509,14 @@ describe('Suite 10 – Gamification', () => {
   });
 
   test('includes levelTitle "Squire" for level 1', async () => {
-    const { body } = await post('int main() { int x = 10; return 0; }', { currentLevel: 1 });
+    const { body } = await postWithOptions('int main() { int x = 10; return 0; }', { currentLevel: 1 });
     assert.equal(body.success, true);
     assert.equal(typeof body.gamification.levelTitle, 'string');
     assert.equal(body.gamification.levelTitle, 'Squire');
   });
 
   test('levelTitle is Knight for level 2', async () => {
-    const { body } = await post('int main() { int x = 10; return 0; }', { currentLevel: 2 });
+    const { body } = await postWithOptions('int main() { int x = 10; return 0; }', { currentLevel: 2 });
     assert.equal(body.success, true);
     assert.equal(body.gamification.levelTitle, 'Knight');
   });
@@ -459,7 +552,7 @@ describe('Suite 11 – Path Analysis', () => {
 // ---------------------------------------------------------------------------
 describe('Suite 12 – Health Check', () => {
   test('GET / returns 200', async () => {
-    const res = await fetch(`${BASE}/`);
+    const res = await fetch(`${baseUrl}/`);
     assert.equal(res.status, 200);
   });
 });

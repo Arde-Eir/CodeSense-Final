@@ -174,7 +174,9 @@ export const LeaderboardPage: React.FC = () => {
     try {
       const { data } = await supabase
         .from('mission_progress')
-        .select('userid, questid, completion_time_seconds, users(id, playername, totalxp, currentlevel, sandbox_runs, createdat, lastactive, charactertype, user_type), quests(title)')
+        .select('userid, questid, completion_time_seconds, users!inner(id, playername, totalxp, currentlevel, sandbox_runs, createdat, lastactive, charactertype, user_type), quests(title)')
+        .eq('users.isactive', true)
+        .eq('users.is_banned', false)
         .not('completion_time_seconds', 'is', null)
         .order('completion_time_seconds', { ascending: true })
         .limit(50)
@@ -194,7 +196,7 @@ export const LeaderboardPage: React.FC = () => {
   const fetchStatsSummary = useCallback(async () => {
     const since = new Date(Date.now() - 86400_000).toISOString()
     const [usersRes, reportsRes, activityRes, progressRes] = await Promise.all([
-      supabase.from('users').select('id, totalxp, lastactive').eq('isactive', true),
+      supabase.from('users').select('id, totalxp, lastactive').eq('isactive', true).eq('is_banned', false),
       supabase.from('reports').select('userid, createdat').gte('createdat', since).limit(1000),
       supabase.from('activity_log').select('userid, createdat').gte('createdat', since).limit(1000),
       supabase.from('mission_progress').select('userid, updatedat').gte('updatedat', since).limit(1000),
@@ -205,14 +207,15 @@ export const LeaderboardPage: React.FC = () => {
     const avgXP = totalPlayers === 0 ? 0 : Math.round(data.reduce((s, p) => s + (p.totalxp ?? 0), 0) / totalPlayers)
     const topXP = data.reduce((m, p) => Math.max(m, p.totalxp ?? 0), 0)
     const dayAgo = Date.now() - 86400_000
+    const eligibleIds = new Set(data.map(player => player.id))
     const activeIds = new Set<string>()
     for (const player of data) {
       const activeAt = validActivityTime(player.lastactive)
       if (activeAt != null && activeAt >= dayAgo) activeIds.add(player.id)
     }
-    for (const row of (reportsRes.data ?? []) as any[]) activeIds.add(row.userid)
-    for (const row of (activityRes.data ?? []) as any[]) activeIds.add(row.userid)
-    for (const row of (progressRes.data ?? []) as any[]) activeIds.add(row.userid)
+    for (const row of (reportsRes.data ?? []) as any[]) if (eligibleIds.has(row.userid)) activeIds.add(row.userid)
+    for (const row of (activityRes.data ?? []) as any[]) if (eligibleIds.has(row.userid)) activeIds.add(row.userid)
+    for (const row of (progressRes.data ?? []) as any[]) if (eligibleIds.has(row.userid)) activeIds.add(row.userid)
     const activeToday = activeIds.size
     setStatsSummary({ totalPlayers, avgXP, topXP, activeToday })
   }, [])
@@ -225,6 +228,7 @@ export const LeaderboardPage: React.FC = () => {
         .from('users')
         .select('id, playername, totalxp, currentlevel, sandbox_runs,  quests_completed, createdat, lastactive, charactertype, user_type', { count: 'exact' })
         .eq('isactive', true)
+        .eq('is_banned', false)
 
       if (filterKey !== 'all') {
         query = query.eq('user_type', filterKey)
@@ -312,7 +316,7 @@ export const LeaderboardPage: React.FC = () => {
       setMyPlayer({ ...(me as Player), ...profileImages })
       const { count } = await supabase
         .from('users').select('*', { count: 'exact', head: true })
-        .eq('isactive', true).gt('totalxp', me.totalxp)
+        .eq('isactive', true).eq('is_banned', false).gt('totalxp', me.totalxp)
       setMyRank((count ?? 0) + 1)
     }
   }, [user])
@@ -891,6 +895,7 @@ export const LeaderboardPage: React.FC = () => {
         <PlayerDetailModal
           userId={detailPlayer.id}
           currentUserId={user?.id}
+          showAllProgress={false}
           onClose={() => setDetailPlayer(null)}
         />
       )}
