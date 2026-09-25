@@ -26,13 +26,14 @@ const relay = `
     if (channel.state !== 'joined') throw new Error('Test relay disconnected');
     channel.bus.postMessage(JSON.stringify(message));
     if (message.kind === 'chat') channel.bus.postMessage(JSON.stringify(message));
+    await new Promise(resolve => setTimeout(resolve, 200));
   }
 `
 const rpc = `
   export const session = ${JSON.stringify(session)};
   export async function getSupportSession() { return session; }
   export async function endSupportSession() { session.status = 'ended'; return session; }
-  export async function recordSupportClick() {}
+  export async function recordSupportClick() { await new Promise(resolve => setTimeout(resolve, 250)); }
   export async function recordSupportSelection() {}
   export async function recordSupportText() {}
 `
@@ -55,6 +56,7 @@ const entry = `
       const context = canvas.getContext('2d');
       let frame = 0;
       const animate = setInterval(() => {
+        if (window.pauseDrawing) return;
         context.fillStyle = '#0d1625'; context.fillRect(0, 0, 1280, 720);
         context.fillStyle = '#f3f4f6'; context.font = '32px sans-serif';
         context.fillText('CodeSense — learner tab', 50, 70);
@@ -81,7 +83,7 @@ const entry = `
       <div id="nested" style={{ position: 'fixed', left: 20, top: 80, width: 240, height: 180, overflowY: 'auto', background: '#243247' }}>
         <div style={{ height: 1200 }}>Nested learner panel</div>
       </div>
-      <button id="target" style={{ position: 'fixed', left: '45%', top: '45%', width: '10%', height: '10%' }} onClick={() => { window.targetClicks = (window.targetClicks || 0) + 1; }}>Learner action</button>
+      <button id="target" style={{ position: 'fixed', left: '45%', top: '45%', width: '10%', height: '10%' }} onClick={() => { window.targetClicks = (window.targetClicks || 0) + 1; window.pauseDrawing = false; }}>Learner action</button>
       <div style={{ height: 2200, padding: 20 }}>Learner page scroll area</div>
       <div data-support-ui style={{ position: 'fixed', right: 16, bottom: 16, width: 300, height: 350 }}>
         <SupportChat id="learner-support-chat" peerName="Administrator" userId="learner" messages={messages} disabled={false} onSend={send} />
@@ -140,6 +142,12 @@ try {
   await admin.goto(base)
   await admin.waitForFunction(() => document.querySelector('[data-testid="support-scroll-down"]')?.disabled === false, undefined, { timeout: 15000 })
 
+  // Static screen capture runs out of future frames. It still has a current
+  // image and a live session, so chat, scrolling and navigation must remain usable.
+  await learner.evaluate(() => { window.pauseDrawing = true })
+  await admin.waitForFunction(() => document.querySelector('video')?.readyState === HTMLMediaElement.HAVE_CURRENT_DATA)
+  assert.equal(await admin.getByTestId('support-scroll-down').isDisabled(), false, 'Buffering disabled controls on a still page')
+
   await admin.getByTestId('admin-support-chat-input').fill('Hello learner <b>literal text</b>')
   await admin.getByTestId('admin-support-chat-send').click()
   await learner.getByTestId('learner-support-chat-messages').locator('[data-sender="peer"]').waitFor()
@@ -163,8 +171,12 @@ try {
   assert(await viewport.evaluate(element => element.scrollWidth > element.clientWidth && element.scrollHeight > element.clientHeight), 'Zoom did not provide a pannable view')
   await viewport.evaluate(element => { element.scrollLeft = element.clientWidth / 2; element.scrollTop = element.clientHeight / 2 })
   const videoBox = await admin.getByTestId('admin-live-help-video').boundingBox()
+  const clickStarted = Date.now()
   await admin.mouse.click(videoBox.x + videoBox.width / 2, videoBox.y + videoBox.height / 2)
   await learner.waitForFunction(() => window.targetClicks === 1)
+  const clickLatencyMs = Date.now() - clickStarted
+  assert(clickLatencyMs < 1500, 'Click waited behind old control messages')
+  await admin.waitForFunction(() => document.querySelector('video')?.readyState >= HTMLMediaElement.HAVE_FUTURE_DATA)
 
   await admin.getByTestId('support-video-zoom').selectOption('1')
   await viewport.evaluate(element => { element.scrollLeft = 0; element.scrollTop = 0 })
@@ -198,7 +210,7 @@ try {
   assert.deepEqual(await learner.evaluate(() => window.testErrors), [])
   await admin.getByTestId('admin-end-live-help').click()
   await admin.waitForFunction(() => window.adminClosed === true)
-  console.log(JSON.stringify({ chatBothDirections: true, retryDeduplication: true, rootAndNestedScrolling: true, zoomedClick: true, fullscreen: true, smallMonitorViewer: layout, screenshot }))
+  console.log(JSON.stringify({ stillScreenControls: true, clickLatencyMs, chatBothDirections: true, retryDeduplication: true, rootAndNestedScrolling: true, zoomedClick: true, fullscreen: true, smallMonitorViewer: layout, screenshot }))
 } catch (error) {
   if (browser) {
     for (const page of browser.contexts()[0].pages()) {

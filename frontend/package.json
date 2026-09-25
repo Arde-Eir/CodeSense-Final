@@ -11,7 +11,8 @@
     "test": "vitest --config=vitest.browser.config.ts --run",
     "test:browser": "vitest --config=vitest.browser.config.ts",
     "test:support-video": "node tests/liveSupportVideo.browser.mjs",
-    "test:support-controls": "node tests/liveSupportControls.browser.mjs"
+    "test:support-controls": "node tests/liveSupportControls.browser.mjs",
+    "test:quest-pdf": "node tests/questPdf.browser.mjs"
   },
   "dependencies": {
     "@dagrejs/dagre": "^2.0.3",

@@ -1,101 +1,107 @@
-/// <reference types="node" />
 import { describe, expect, it } from 'vitest'
-import { basename } from 'node:path'
-import { existsSync, readFileSync } from 'node:fs'
 import { generateQuestDraftFromText } from '@/admin/questAutoGenerator'
+import { validateQuestBuilderForm } from '@/admin/adminHelpers'
 
-const DEFAULT_PDF_TEXT_FIXTURE = `
-  C++ Input and Output Fundamentals
-  Overview:
-  C++ programs communicate with users by reading input and displaying output. A program often begins in the main function, where statements execute in order and return a final status code when the task is complete.
-
-  Input:
-  Input is data received by the program from a user or another source. The standard input stream cin reads values into variables so that the program can work with information supplied during execution.
-
-  Output:
-  Output is information the program displays to the user. The standard output stream cout presents results, instructions, and feedback so that a user understands what the program has done.
-
-  Variables:
-  A variable is named storage for a value used by the program. Variables should be declared with an appropriate data type before input is stored or calculations are performed.
-
-  Operators:
-  An operator is a symbol that performs an operation on values. The stream extraction operator reads input with cin, while the stream insertion operator sends output with cout.
-
-  Example: int score = 10;
-  Example: cout << score;
-
-  Condition:
-  A condition decides whether a code block executes, allowing a program to respond differently when the stored input changes.
+const lesson = `C++ Input and Output Fundamentals
+Overview:
+C++ programs communicate with users by reading input and displaying output.
+Input:
+Input is data received by the program from a user or another source.
+Output:
+Output is information the program displays to the user.
+Variables:
+A variable is named storage for a value used by the program.
+Operators:
+An operator is a symbol that performs an operation on values.
 `
 
-const extractPdfTextInNode = async (pdfPath: string): Promise<string> => {
-  ;(globalThis as any).DOMMatrix ??= class DOMMatrix {}
-  ;(globalThis as any).ImageData ??= class ImageData {}
-  ;(globalThis as any).Path2D ??= class Path2D {}
+const validate = (draft: ReturnType<typeof generateQuestDraftFromText>) =>
+  validateQuestBuilderForm({ ...draft, basexp: 100, requiredxp: 0 })
 
-  const pdfjs = await import('pdfjs-dist/legacy/build/pdf.mjs')
-  const data = new Uint8Array(readFileSync(pdfPath))
-  const pdf = await pdfjs.getDocument({ data, disableWorker: true } as any).promise
-  const pages: string[] = []
-
-  for (let pageNumber = 1; pageNumber <= pdf.numPages; pageNumber += 1) {
-    const page = await pdf.getPage(pageNumber)
-    const content = await page.getTextContent()
-    pages.push(content.items.map((item: any) => item.str ?? '').join(' '))
-  }
-
-  return pages.join('\n\n').replace(/\s+/g, ' ').trim()
-}
-
-describe('generateQuestDraftFromText', () => {
-  it('keeps generated games concise and avoids turning prose into code-fill blocks', () => {
-    const text = `
-      C++ Basic Input / Output (M4 Tutorial Guide)
-      C++ Basic Input and Output focus on how a program communicates with the user.
-      Input is data received by a program, commonly read with cin.
-      Output is information displayed by a program, commonly written with cout.
-      Operators use symbols such as >> for input and << for output.
-      Every program starts from a special function called main().
-      Examples include: int, float, if, else, return, while. They are case-sensitive and must be written correctly.
-      Example: int x = 10; Important rules: Must be declared before use and should be initialized.
-      This is normal lesson prose that mentions cout << "Hello World"; but should not become a full paragraph code block.
-    `
-
-    const draft = generateQuestDraftFromText(text, 'm4-input-output.pdf')
-    const allMcText = draft.mc_questions
-      .flatMap(q => [q.question, q.explanation, q.hint, ...q.options])
-      .join(' ')
-    const dragLabels = draft.drag_problems[0].drop_zones.map(zone => zone.label)
-
+describe('PDF quest generation', () => {
+  it('uses source definitions, distinct source terms and correctly indexed answers', () => {
+    const draft = generateQuestDraftFromText(lesson, 'lesson.pdf')
+    expect(validate(draft)).toEqual({ ok: true, errors: [] })
+    expect(draft.mc_questions).toHaveLength(4)
+    expect(draft.mc_questions.map(question => question.correct)).toEqual([0, 1, 2, 3])
+    for (const question of draft.mc_questions) {
+      expect(lesson).toContain(question.explanation)
+      expect(new Set(question.options).size).toBe(4)
+      expect(question.explanation.toLowerCase()).toContain(question.options[question.correct].toLowerCase())
+    }
+    expect(draft.drag_problems[0].drop_zones[0].label).toBe('___ is data received by the program from a user or another source.')
     expect(draft.act_ordering).toBe(false)
-    expect(draft.code_fill_items).toHaveLength(1)
-    expect(draft.code_fill_items[0].code_lines).toBe('___ x = 10;')
-    expect(allMcText).not.toContain('Tutorial Guide C++ Basic Input')
-    expect(new Set(draft.mc_questions[0].options).size).toBe(4)
-    expect(dragLabels.every(label => label.length <= 150)).toBe(true)
-    expect(dragLabels).toContain('Data read by the program, usually with cin.')
-    expect(dragLabels).toContain('Information displayed by the program, usually with cout.')
+    expect(draft.act_codefill).toBe(false)
   })
 
-  it(
-    'generates organized quest content from lesson fixture text or a provided PDF fixture',
-    async () => {
-      const externalPdf = process.env.CODESENSE_PDF_FIXTURE
-      const useExternalPdf = Boolean(externalPdf && existsSync(externalPdf))
-      const text = useExternalPdf
-        ? await extractPdfTextInNode(externalPdf!)
-        : DEFAULT_PDF_TEXT_FIXTURE
-      const filename = useExternalPdf ? basename(externalPdf!) : 'input-output-fundamentals.pdf'
-      const draft = generateQuestDraftFromText(text, filename)
-      const mcOptionSets = draft.mc_questions.map(q => new Set(q.options).size)
-      const codeFillText = draft.code_fill_items.map(item => item.code_lines).join('\n')
-      const dragLabels = draft.drag_problems[0]?.drop_zones.map(zone => zone.label) ?? []
+  it('keeps nested C++ and punctuation inside literals unchanged, and blanks a real token', () => {
+    const code = `#include <iostream>
+// int is mentioned in a comment, not a blank candidate.
+int main() {
+  for (int i = 0; i < 3; i++) {
+    if (i > 0) {
+      std::cout << "http://example.test; { int }";
+    }
+  }
+  return 0;
+}`
+    const draft = generateQuestDraftFromText(`${lesson}\n${code}\nFinal note: Keep this explanation after the example.`, 'nested.pdf')
+    expect(draft.code_fill_items).toHaveLength(1)
+    expect(draft.code_fill_items[0].code_lines.replace('___', draft.code_fill_items[0].answers)).toBe(code)
+    expect(draft.code_fill_items[0].code_lines).toContain('// int is mentioned')
+    expect(draft.theory_sections.find(section => section.type === 'code')?.code).toBe(code)
+    expect(draft.theory_sections.map(section => section.body).join('\n')).toContain('Keep this explanation after the example.')
+    expect(validate(draft).ok).toBe(true)
+  })
 
-      expect(text.length).toBeGreaterThan(500)
-      expect(draft.mc_questions.length).toBeGreaterThan(0)
-      expect(mcOptionSets.every(size => size === 4)).toBe(true)
-      expect(dragLabels.every(label => label.length <= 150)).toBe(true)
-      expect(codeFillText).not.toMatch(/Tutorial Guide C\+\+.*powerful programming language/i)
-    },
-  )
+  it('preserves prose after inline examples and does not treat ordinary prose as code', () => {
+    const draft = generateQuestDraftFromText(`${lesson}
+Example: int score = 10; Important rules: Declare variables before use.
+This prose mentions cout << "Hello"; without declaring a code example.`, 'inline.pdf')
+    expect(draft.code_fill_items).toHaveLength(1)
+    expect(draft.code_fill_items[0].code_lines).toBe('___ score = 10;')
+    expect(draft.theory_sections.map(section => section.body).join('\n')).toContain('Important rules: Declare variables before use.')
+  })
+
+  it('uses explicit ordered steps with numeric values without guessing an answer from shuffled items', () => {
+    const shuffled = generateQuestDraftFromText(`${lesson}\nArrange:\n- Print the result\n- Read the value\n- Initialize\nCorrect order:`, 'shuffled.pdf')
+    expect(shuffled.act_ordering).toBe(false)
+    const draft = generateQuestDraftFromText(`${lesson}\nCorrect order:\n1. Initialize score to 0.5\n2. Read 2 input values\n3. Print the result\n`, 'steps.pdf')
+    expect(draft.ordering_problems[0].items.map(item => item.label)).toEqual(['Initialize score to 0.5', 'Read 2 input values', 'Print the result'])
+    expect(validate(draft).ok).toBe(true)
+  })
+
+  it('keeps late-page content beyond the old 24,000-character cutoff', () => {
+    const tail = 'A pointer stores the memory address of another object.'
+    const draft = generateQuestDraftFromText(`${lesson}\n${'Additional reading about the lesson. '.repeat(800)}\n\nPointers:\n${tail}`, 'long.pdf')
+    expect(draft.theory_sections.some(section => section.body.includes(tail))).toBe(true)
+    expect(draft.mc_questions.some(question => question.explanation === tail)).toBe(true)
+  })
+
+  it('recognizes plain PDF headings and excludes ambiguous or incomplete answer keys', () => {
+    const draft = generateQuestDraftFromText(`${lesson.replaceAll(':', '')}\nPointer:\nA pointer stores the address of a value.\nReference:\nA reference stores the address of a value.\nSteps:\n1. Read data\n2. Process data\n3. Print data\n5. End the program`, 'headings.pdf')
+    expect(draft.mc_questions).toHaveLength(4)
+    expect(draft.mc_questions.some(question => question.options.includes('Pointer') || question.options.includes('Reference'))).toBe(false)
+    expect(draft.act_ordering).toBe(false)
+    expect(validate(draft).ok).toBe(true)
+  })
+
+  it('learns explicitly defined topics outside a fixed keyword list and preserves plural terms', () => {
+    const draft = generateQuestDraftFromText('Recursive Programming\nRecursion\nRecursion is a technique in which a function calls itself to solve a smaller problem.\n\nVectors\nVectors are containers that store a sequence of values and can grow during execution.', 'recursion.pdf')
+    expect(draft.drag_problems[0].items.map(item => item.label)).toEqual(['Recursion', 'Vectors'])
+    expect(draft.drag_problems[0].drop_zones[1].label).toContain('___ are containers')
+    expect(validate(draft).ok).toBe(true)
+  })
+
+  it('rejects unreadable, oversized or unsupported material without inventing activities', () => {
+    expect(() => generateQuestDraftFromText('Title only', 'short.pdf')).toThrow(/too little/)
+    expect(() => generateQuestDraftFromText(lesson.repeat(1000), 'large.pdf')).toThrow(/120,000/)
+    expect(() => generateQuestDraftFromText('This document mentions variables, input, output and operators but does not define any of them. '.repeat(3), 'mentions.pdf')).toThrow(/No reliable activities/)
+    expect(() => generateQuestDraftFromText(`${lesson}\nint main() { if (true) { return 0; }`, 'broken-code.pdf')).toThrow(/incomplete/)
+    const twoConcepts = generateQuestDraftFromText('Lesson Definitions\n\nInput is data received by the program from a user or another source.\n\nOutput is information the program displays to the user.', 'two.pdf')
+    expect(twoConcepts.act_mc).toBe(false)
+    expect(twoConcepts.mc_questions).toEqual([])
+    expect(twoConcepts.act_drag).toBe(true)
+    expect(validate(twoConcepts).ok).toBe(true)
+  })
 })

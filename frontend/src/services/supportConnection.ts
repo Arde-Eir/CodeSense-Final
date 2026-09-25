@@ -130,6 +130,7 @@ export const connectSupportViewer = async (
   let sequence = 0
   let lastMessage = Date.now()
   let sendingReady = false
+  let hasPlayed = false
   const viewerId = crypto.randomUUID()
   const close = async (): Promise<void> => {
     if (closed) return
@@ -154,7 +155,7 @@ export const connectSupportViewer = async (
       player?.close()
       onConnected(false)
       streamId = message.streamId
-      player = createSupportVideoPlayer(video, onConnected, fail)
+      player = createSupportVideoPlayer(video, value => { hasPlayed = value; onConnected(value) }, fail)
     } else if (message.streamId !== streamId) return
     lastMessage = Date.now()
     if (message.kind === 'video') player?.append(message.sequence, message.data)
@@ -186,8 +187,10 @@ export const connectSupportViewer = async (
       return sendSupportChat(channel, session.adminId, streamId, text)
     },
     sendControl: async command => {
+      // Decoder buffering/seeking does not revoke a live session after its first
+      // frame. Liveness, expiry, pause and close still prevent disconnected control.
       if (closed || !channel || !streamId || Date.now() - lastMessage > 5000 ||
-        Date.parse(session.expiresAt) <= Date.now() || video.paused || video.readyState < HTMLMediaElement.HAVE_FUTURE_DATA) {
+        Date.parse(session.expiresAt) <= Date.now() || video.paused || !hasPlayed) {
         throw new Error('Live control is disconnected. Wait for a current video stream before sending actions.')
       }
       await sendSupportMessage(channel, { kind: 'control', senderId: session.adminId, streamId, sequence: ++sequence, command })

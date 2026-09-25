@@ -153,7 +153,9 @@ export const AdminPanel: React.FC = () => {
   const [fixingPop,      setFixingPop]      = useState(false)
   const [fixPopResult,   setFixPopResult]   = useState<string | null>(null)
   const [autoQuestLoading, setAutoQuestLoading] = useState(false)
-  const [autoQuestResult, setAutoQuestResult] = useState<string | null>(null)
+  const [autoQuestResult, setAutoQuestResult] = useState<{ kind: 'success' | 'error'; message: string } | null>(null)
+  const questGenerationState = useRef({ form: questForm, replaceTarget })
+  useEffect(() => { questGenerationState.current = { form: questForm, replaceTarget } }, [questForm, replaceTarget])
   const qSet = (patch: Partial<QuestFormState>) => setQuestForm(p => ({ ...p, ...patch }))
   const setQuestActivity = (activity: QuestActivityFlag, checked: boolean) => {
     setQuestForm(previous => ({ ...previous, [activity]: checked }))
@@ -331,13 +333,15 @@ export const AdminPanel: React.FC = () => {
 
     setAutoQuestLoading(true)
     setAutoQuestResult(null)
+    const initialDraft = questGenerationState.current
     try {
       const text = await extractTextFromPdf(file)
-      if (text.trim().length < 120) {
-        throw new Error('Could not extract enough readable text from this PDF.')
-      }
-
       const draft = generateQuestDraftFromText(text, file.name)
+      if (questGenerationState.current !== initialDraft) {
+        throw new Error('The quest draft changed while the PDF was being read. Your edits have been kept; upload the PDF again to replace them.')
+      }
+      const validation = validateQuestBuilderForm({ ...initialDraft.form, ...draft })
+      if (!validation.ok) throw new Error(`Generated draft is invalid: ${validation.errors.join(' ')}`)
       setQuestForm(prev => ({
         ...defaultQF(),
         ...draft,
@@ -351,13 +355,13 @@ export const AdminPanel: React.FC = () => {
         drop_zones: [],
       }))
       setReplaceTarget('')
-      setAutoQuestResult(
-        `Generated ${draft.theory_sections.length} theory section(s), ${draft.objectives.length} objective(s), ${draft.mc_questions.length} quiz question(s), ${draft.drag_problems[0]?.items.length ?? 0} drag match(es), ${draft.ordering_problems[0]?.items.length ?? 0} ordering item(s), and ${draft.code_fill_items.length} code-fill item(s).`
-      )
+      setAutoQuestResult({ kind: 'success', message:
+        `Generated ${draft.theory_sections.length} theory section(s), ${draft.objectives.length} objective(s), ${draft.mc_questions.length} quiz question(s), ${draft.drag_problems[0]?.items.length ?? 0} drag match(es), ${draft.ordering_problems[0]?.items.length ?? 0} ordering item(s), and ${draft.code_fill_items.length} code-fill item(s). Only activities supported by the extracted text are enabled. Review the answer keys against the PDF before saving.`,
+      })
       showToast('PDF quest draft generated. Review it, then save.', 'success')
     } catch (error: unknown) {
       const message = errorMessage(error)
-      setAutoQuestResult(message)
+      setAutoQuestResult({ kind: 'error', message })
       showToast(message, 'error')
     } finally {
       setAutoQuestLoading(false)
@@ -801,7 +805,7 @@ export const AdminPanel: React.FC = () => {
     const validation = validateQuestBuilderForm(questForm)
     if (!validation.ok) {
       showToast(validation.errors.slice(0, 3).join(' '), 'error')
-      setAutoQuestResult(`Fix before saving: ${validation.errors.join(' ')}`)
+      setAutoQuestResult({ kind: 'error', message: `Fix before saving: ${validation.errors.join(' ')}` })
       return
     }
     const phase = levelToPhase(questForm.level)
@@ -1332,13 +1336,14 @@ export const AdminPanel: React.FC = () => {
                         <div className="card mb-3">
                           <div className="card-header">
                             <div>
-                              <h3 className="card-title mb-1">Quest Automated Generated</h3>
-                              <div className="text-muted" style={{ fontSize: '12px' }}>Upload learning material and fill the quest builder automatically.</div>
+                              <h3 className="card-title mb-1">Generate Quest from PDF</h3>
+                              <div className="text-muted" style={{ fontSize: '12px' }}>Import selectable lesson text and generate editable activities from its definitions, steps, and C++ examples. Scanned pages need OCR first. Maximum 10 MB and 80 pages.</div>
                             </div>
                           </div>
                           <div className="card-body">
                             <label className="form-label">PDF Learning Material</label>
                             <input
+                              data-testid="quest-pdf-upload"
                               type="file"
                               className="form-control"
                               accept="application/pdf,.pdf"
@@ -1353,8 +1358,8 @@ export const AdminPanel: React.FC = () => {
                               </span>
                             </div>
                             {autoQuestResult && (
-                              <div className={`alert ${autoQuestResult.toLowerCase().includes('failed') || autoQuestResult.toLowerCase().includes('could not') ? 'alert-danger' : 'alert-success'} py-2 mt-2 mb-0`} style={{ fontSize: '12px' }}>
-                                {autoQuestResult}
+                              <div data-testid="quest-pdf-result" role={autoQuestResult.kind === 'error' ? 'alert' : 'status'} className={`alert ${autoQuestResult.kind === 'error' ? 'alert-danger' : 'alert-success'} py-2 mt-2 mb-0`} style={{ fontSize: '12px' }}>
+                                {autoQuestResult.message}
                               </div>
                             )}
                           </div>

@@ -2,6 +2,8 @@ import { SUPPORT_VIDEO_PACKET_BYTES } from './supportProtocol'
 
 export const SUPPORT_VIDEO_MIME = 'video/webm;codecs=vp8'
 const MAX_QUEUED_BYTES = 1_000_000
+const MAX_IN_FLIGHT_PACKETS = 4
+const MAX_UPLOAD_QUEUE_MS = 2000
 
 export const assertSupportVideoPlayback = (): void => {
   if (typeof MediaSource === 'undefined' || !MediaSource.isTypeSupported(SUPPORT_VIDEO_MIME)) {
@@ -27,6 +29,7 @@ export const startSupportVideo = (
   let sequence = 0
   let queuedBytes = 0
   let queue = Promise.resolve()
+  const inFlight = new Set<Promise<void>>()
   const stop = (): void => {
     stopped = true
     recorder.ondataavailable = null
@@ -37,6 +40,7 @@ export const startSupportVideo = (
   recorder.onerror = () => fail(new Error('The browser could not encode the shared tab. Stop sharing and start a new session.'))
   recorder.ondataavailable = event => {
     if (stopped || event.data.size === 0) return
+    const queuedAt = performance.now()
     queuedBytes += event.data.size
     if (queuedBytes > MAX_QUEUED_BYTES) {
       fail(new Error('Live video upload cannot keep up. Check your connection and Supabase Realtime usage before trying again.'))
@@ -44,10 +48,21 @@ export const startSupportVideo = (
     }
     queue = queue.then(async () => {
       try {
+        if (stopped) return
         const bytes = new Uint8Array(await event.data.arrayBuffer())
         for (let offset = 0; offset < bytes.length && !stopped; offset += SUPPORT_VIDEO_PACKET_BYTES) {
+          // WebSocket preserves send order. Keep a bounded window in flight so
+          // one acknowledgment round trip does not delay every 250 ms of video.
+          if (inFlight.size >= MAX_IN_FLIGHT_PACKETS) await Promise.race(inFlight)
+          if (stopped) return
+          if (performance.now() - queuedAt > MAX_UPLOAD_QUEUE_MS) {
+            throw new Error('Live video upload is more than 2 seconds behind. Check the learner’s upload connection and Supabase Realtime usage, then start a new session.')
+          }
           const packet = bytes.subarray(offset, offset + SUPPORT_VIDEO_PACKET_BYTES)
-          await sendPacket(++sequence, btoa(String.fromCharCode(...packet)))
+          const delivery = sendPacket(++sequence, btoa(String.fromCharCode(...packet)))
+            .catch((error: Error) => fail(error))
+            .finally(() => { inFlight.delete(delivery) })
+          inFlight.add(delivery)
         }
       } finally {
         queuedBytes -= event.data.size
@@ -79,15 +94,14 @@ export const createSupportVideoPlayer = (
   let lastTrim = 0
   const queue: Uint8Array<ArrayBuffer>[] = []
   const playing = (): void => onPlayback(true)
-  const waiting = (): void => onPlayback(false)
+  const paused = (): void => onPlayback(false)
 
   const close = (): void => {
     if (closed) return
     closed = true
     source.removeEventListener('sourceopen', open)
     video.removeEventListener('playing', playing)
-    video.removeEventListener('waiting', waiting)
-    video.removeEventListener('pause', waiting)
+    video.removeEventListener('pause', paused)
     video.removeEventListener('error', mediaError)
     buffer?.removeEventListener('updateend', pump)
     buffer?.removeEventListener('error', mediaError)
@@ -114,8 +128,12 @@ export const createSupportVideoPlayer = (
         buffer.appendBuffer(packet)
       }
       if (video.buffered.length > 0) {
-        const end = video.buffered.end(video.buffered.length - 1)
-        if (end - video.currentTime > 1.5) video.currentTime = Math.max(0, end - 0.5)
+        const lastRange = video.buffered.length - 1
+        const start = video.buffered.start(lastRange)
+        const end = video.buffered.end(lastRange)
+        // A resumed still screen can leave a timestamp gap. Seek into the
+        // newest buffered range, never into the empty half-second before it.
+        if (end - video.currentTime > 1.5) video.currentTime = Math.max(start, end - 0.5)
         if (video.paused) void video.play().catch((error: Error) => fail(error))
       }
     } catch (error) {
@@ -134,8 +152,9 @@ export const createSupportVideoPlayer = (
   }
   source.addEventListener('sourceopen', open, { once: true })
   video.addEventListener('playing', playing)
-  video.addEventListener('waiting', waiting)
-  video.addEventListener('pause', waiting)
+  // A still tab or a short chunk boundary can exhaust future frames without
+  // disconnecting the session. Keep the last frame available for interaction.
+  video.addEventListener('pause', paused)
   video.addEventListener('error', mediaError)
   video.muted = true
   video.src = url
