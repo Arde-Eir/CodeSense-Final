@@ -1,7 +1,15 @@
 import { describe, expect, it } from 'vitest'
-import { parseSupportMessage, SUPPORT_VIDEO_PACKET_BYTES } from '@/services/supportProtocol'
+import { appendSupportChatMessage, parseSupportMessage, SUPPORT_VIDEO_PACKET_BYTES } from '@/services/supportProtocol'
 
 describe('private live-help messages', () => {
+  it('validates chat separately from field edits and deduplicates retried messages', () => {
+    const chat = { kind: 'chat', senderId: 'admin', streamId: 'stream', id: 'message', text: 'Hello learner' }
+    expect(parseSupportMessage(chat)).toEqual(chat)
+    expect(() => parseSupportMessage({ ...chat, text: ' ' })).toThrow('Chat messages')
+    expect(() => parseSupportMessage({ ...chat, text: 'x'.repeat(2001) })).toThrow('Chat messages')
+    const messages = appendSupportChatMessage([], chat)
+    expect(appendSupportChatMessage(messages, chat)).toEqual([chat])
+  })
   it('rejects oversized media and invalid packet sequences before decoding', () => {
     const packet = { kind: 'video', senderId: 'learner', streamId: 'stream', sequence: 1, data: 'AAAA' }
     expect(() => parseSupportMessage({ ...packet, data: 'A'.repeat(SUPPORT_VIDEO_PACKET_BYTES * 4 / 3 + 4) })).toThrow('oversized')

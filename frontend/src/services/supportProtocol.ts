@@ -5,6 +5,20 @@ export type SupportControl =
   | { kind: 'selectNext' }
   | { kind: 'selectPrevious' }
 
+export interface SupportChatMessage { id: string; senderId: string; text: string }
+export const SUPPORT_CHAT_MAX_LENGTH = 2000
+
+export const parseSupportChatText = (value: unknown): string => {
+  if (typeof value !== 'string' || !value.trim() || value.length > SUPPORT_CHAT_MAX_LENGTH) {
+    throw new TypeError(`Chat messages must contain 1–${SUPPORT_CHAT_MAX_LENGTH} characters.`)
+  }
+  return value.trim()
+}
+
+/** Keep the latest 100 messages in session memory and deduplicate broadcast retries. */
+export const appendSupportChatMessage = (messages: SupportChatMessage[], message: SupportChatMessage): SupportChatMessage[] =>
+  messages.some(item => item.id === message.id) ? messages : [...messages, message].slice(-100)
+
 export type SupportMessage = { senderId: string } & (
   | { kind: 'ready'; viewerId: string }
   | { kind: 'started'; viewerId: string; streamId: string }
@@ -12,6 +26,7 @@ export type SupportMessage = { senderId: string } & (
   | { kind: 'heartbeat' | 'ended'; streamId: string }
   | { kind: 'control'; streamId: string; sequence: number; command: SupportControl }
   | { kind: 'control-error'; streamId: string; message: string }
+  | { kind: 'chat'; streamId: string; id: string; text: string }
 )
 
 // 48 KB of binary video becomes 64 KB of base64, below Realtime's 256 KB limit.
@@ -46,6 +61,9 @@ export const parseSupportMessage = (value: unknown): SupportMessage => {
   if (message.kind === 'started') return { kind: 'started', senderId, streamId, viewerId: nonemptyString(message.viewerId, 'viewerId') }
   if (message.kind === 'heartbeat' || message.kind === 'ended') return { kind: message.kind, senderId, streamId }
   if (message.kind === 'control-error') return { kind: 'control-error', senderId, streamId, message: nonemptyString(message.message, 'message') }
+  if (message.kind === 'chat') return {
+    kind: 'chat', senderId, streamId, id: nonemptyString(message.id, 'id'), text: parseSupportChatText(message.text),
+  }
   const sequence = sequenceNumber(message.sequence)
   if (message.kind === 'control') return { kind: 'control', senderId, streamId, sequence, command: parseSupportControl(message.command) }
   if (message.kind === 'video') {

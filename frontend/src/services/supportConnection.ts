@@ -1,18 +1,30 @@
 import type { RealtimeChannel } from '@supabase/supabase-js'
 import type { SupportSession } from './liveSupport'
-import type { SupportControl, SupportMessage } from './supportProtocol'
+import { parseSupportChatText, type SupportChatMessage, type SupportControl, type SupportMessage } from './supportProtocol'
 import { closeSupportChannel, openSupportChannel, sendSupportMessage } from './supportTransport'
 import { createSupportVideoPlayer, startSupportVideo, type SupportVideoPlayer } from './supportVideo'
 
-export interface SupportPublisher { close: () => Promise<void> }
+export interface SupportPublisher {
+  close: () => Promise<void>
+  sendChat: (text: string) => Promise<SupportChatMessage>
+}
 export interface SupportViewer extends SupportPublisher { sendControl: (command: SupportControl) => Promise<void> }
 type ConnectionSession = Pick<SupportSession, 'id' | 'adminId' | 'learnerId' | 'expiresAt'>
+
+const sendSupportChat = async (
+  channel: RealtimeChannel, senderId: string, streamId: string, text: string,
+): Promise<SupportChatMessage> => {
+  const message = { id: crypto.randomUUID(), senderId, text: parseSupportChatText(text) }
+  await sendSupportMessage(channel, { ...message, kind: 'chat', streamId })
+  return message
+}
 
 /** The learner owns capture and control; closing disables both before any network work. */
 export const connectSupportPublisher = async (
   session: ConnectionSession,
   stream: MediaStream,
   applyControl: (command: SupportControl) => void,
+  onChat: (message: SupportChatMessage) => void,
   onError: (error: Error) => void,
 ): Promise<SupportPublisher> => {
   let channel: RealtimeChannel | null = null
@@ -64,7 +76,13 @@ export const connectSupportPublisher = async (
       }
       return
     }
-    if (message.streamId !== streamId || message.kind !== 'control') return
+    if (message.streamId !== streamId) return
+    if (message.kind === 'chat') {
+      if (Date.parse(session.expiresAt) <= Date.now()) throw new Error('The live-help session expired.')
+      onChat(message)
+      return
+    }
+    if (message.kind !== 'control') return
     // Retrying a broadcast must never click a button or advance a dropdown twice.
     if (message.sequence <= lastControlSequence) return
     if (Date.now() - lastReady > 10_000 || Date.parse(session.expiresAt) <= Date.now()) {
@@ -86,13 +104,22 @@ export const connectSupportPublisher = async (
     if (Date.parse(session.expiresAt) <= Date.now()) fail(new Error('The live-help session expired.'))
     else if (Date.now() - lastReady > 15_000) fail(new Error('The administrator disconnected. Tab sharing has stopped.'))
   }, 1000)
-  return { close }
+  return {
+    close,
+    sendChat: async text => {
+      if (closed || !channel || !streamId || Date.now() - lastReady > 10_000 || Date.parse(session.expiresAt) <= Date.now()) {
+        throw new Error('Chat is disconnected. Wait for the administrator to connect before sending a message.')
+      }
+      return sendSupportChat(channel, session.learnerId, streamId, text)
+    },
+  }
 }
 
 export const connectSupportViewer = async (
   session: ConnectionSession,
   video: HTMLVideoElement,
   onConnected: (connected: boolean) => void,
+  onChat: (message: SupportChatMessage) => void,
   onError: (error: Error) => void,
 ): Promise<SupportViewer> => {
   let channel: RealtimeChannel | null = null
@@ -131,6 +158,7 @@ export const connectSupportViewer = async (
     } else if (message.streamId !== streamId) return
     lastMessage = Date.now()
     if (message.kind === 'video') player?.append(message.sequence, message.data)
+    if (message.kind === 'chat') onChat(message)
     if (message.kind === 'control-error') onError(new Error(`Learner tab rejected an action: ${message.message}`))
     if (message.kind === 'ended') { void close().catch(onError) }
   }
@@ -151,6 +179,12 @@ export const connectSupportViewer = async (
   timer = window.setInterval(() => { void sendReady().catch(fail) }, 2000)
   return {
     close,
+    sendChat: async text => {
+      if (closed || !channel || !streamId || Date.now() - lastMessage > 10_000 || Date.parse(session.expiresAt) <= Date.now()) {
+        throw new Error('Chat is disconnected. Wait for the learner to connect before sending a message.')
+      }
+      return sendSupportChat(channel, session.adminId, streamId, text)
+    },
     sendControl: async command => {
       if (closed || !channel || !streamId || Date.now() - lastMessage > 5000 ||
         Date.parse(session.expiresAt) <= Date.now() || video.paused || video.readyState < HTMLMediaElement.HAVE_FUTURE_DATA) {

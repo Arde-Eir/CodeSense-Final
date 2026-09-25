@@ -10,12 +10,15 @@ import {
 } from '@/services/liveSupport'
 import { connectSupportPublisher, type SupportPublisher } from '@/services/supportConnection'
 import { assertSupportVideoCapture } from '@/services/supportVideo'
+import { appendSupportChatMessage, type SupportChatMessage } from '@/services/supportProtocol'
+import { SupportChat } from './SupportChat'
 
 export const LearnerLiveSupport: React.FC = () => {
   const { user, isGuest, isAdmin } = useAuth()
   const [session, setSession] = useState<SupportSession | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
+  const [messages, setMessages] = useState<SupportChatMessage[]>([])
   const [cursor, setCursor] = useState<{ x: number; y: number } | null>(null)
   const streamRef = useRef<MediaStream | null>(null)
   const connectionRef = useRef<SupportPublisher | null>(null)
@@ -132,6 +135,7 @@ export const LearnerLiveSupport: React.FC = () => {
     if (!session || busy) return
     setBusy(true)
     setError(null)
+    setMessages([])
     let stream: MediaStream | null = null
     let accepted = false
     const attempt = ++captureAttemptRef.current
@@ -169,7 +173,7 @@ export const LearnerLiveSupport: React.FC = () => {
         }
         const position = applySupportControl(command)
         if (position) setCursor(position)
-      }, failure => {
+      }, message => setMessages(current => appendSupportChatMessage(current, message)), failure => {
         void stop().then(() => setError(failure.message))
       })
       if (attempt !== captureAttemptRef.current || track.readyState !== 'live') {
@@ -211,6 +215,13 @@ export const LearnerLiveSupport: React.FC = () => {
     }
   }
 
+  const sendChat = async (text: string): Promise<void> => {
+    const connection = connectionRef.current
+    if (!connection) throw new Error('Chat is still connecting. Wait for the administrator to connect.')
+    const message = await connection.sendChat(text)
+    setMessages(current => appendSupportChatMessage(current, message))
+  }
+
   if (!session && !error) return null
 
   return <>
@@ -218,10 +229,10 @@ export const LearnerLiveSupport: React.FC = () => {
       position: 'fixed', left: `${cursor.x * 100}%`, top: `${cursor.y * 100}%`, zIndex: 2147483646,
       pointerEvents: 'none', color: '#f97316', fontSize: 25, textShadow: '0 1px 4px #000',
     }}>➤</div>}
-    <aside data-support-ui role="status" style={{
+    <aside data-support-ui className="learner-live-support" aria-label="Live help" style={{
       position: 'fixed', right: 16, bottom: 16, zIndex: 2147483645, maxWidth: 360,
       padding: 16, borderRadius: 12, background: '#111827', color: '#fff',
-      boxShadow: '0 8px 32px #0008', fontFamily: 'system-ui, sans-serif',
+      boxShadow: '0 8px 32px #0008', fontFamily: 'inherit',
     }}>
       {session?.status === 'requested' && <>
         <strong>{session.adminName} requests live help</strong>
@@ -233,6 +244,8 @@ export const LearnerLiveSupport: React.FC = () => {
         <strong>Live help with {session.adminName}</strong>
         <p style={{ margin: '8px 0' }}>This tab is being shared. The orange cursor shows the administrator’s actions.</p>
         <button type="button" data-testid="learner-stop-live-help" disabled={busy} onClick={() => { void stop() }}>Stop sharing and control</button>
+        <SupportChat key={session.id} id="learner-support-chat" peerName={session.adminName} userId={session.learnerId}
+          messages={messages} disabled={busy} onSend={sendChat} />
       </>}
       {error && <p role="alert" style={{ margin: '8px 0', color: '#fca5a5' }}>{error}</p>}
       {!session && error && <button type="button" onClick={() => setError(null)}>Dismiss</button>}

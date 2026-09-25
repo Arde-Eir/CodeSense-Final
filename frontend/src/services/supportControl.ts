@@ -21,6 +21,22 @@ const blockedTarget = (target: Element): boolean => {
 const targetAt = (x: number, y: number): Element | null =>
   document.elementFromPoint(x * window.innerWidth, y * window.innerHeight)
 
+/** Follow the actual scroll containers, including the app root and nested panels. */
+const scrollAt = (target: Element, deltaY: number): void => {
+  for (let current: Element | null = target; current; current = current.parentElement) {
+    const style = getComputedStyle(current)
+    const scrollable = /^(auto|scroll|overlay)$/.test(style.overflowY) && current.scrollHeight > current.clientHeight
+    if (!scrollable) continue
+    const hasRoom = deltaY < 0 ? current.scrollTop > 0 : current.scrollTop + current.clientHeight < current.scrollHeight - 1
+    if (hasRoom) {
+      current.scrollBy({ top: deltaY, behavior: 'instant' })
+      return
+    }
+    if (style.overscrollBehaviorY === 'contain' || style.overscrollBehaviorY === 'none') return
+  }
+  document.scrollingElement?.scrollBy({ top: deltaY, behavior: 'instant' })
+}
+
 export const applySupportControl = (value: unknown): { x: number; y: number } | null => {
   const command: SupportControl = parseSupportControl(value)
   if (command.kind === 'selectNext' || command.kind === 'selectPrevious') {
@@ -59,9 +75,7 @@ export const applySupportControl = (value: unknown): { x: number; y: number } | 
   if (blockedTarget(target)) throw new Error('This field or link cannot be controlled remotely.')
 
   if (command.kind === 'scroll') {
-    const scrollTarget = target.closest('[data-support-scroll], .overflow-auto, .table-responsive')
-    if (scrollTarget) scrollTarget.scrollBy({ top: command.deltaY, behavior: 'smooth' })
-    else window.scrollBy({ top: command.deltaY, behavior: 'smooth' })
+    scrollAt(target, command.deltaY)
     return { x: command.x, y: command.y }
   }
 

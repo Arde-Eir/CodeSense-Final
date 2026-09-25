@@ -1,25 +1,15 @@
-import React, { useEffect, useRef, useState } from 'react'
+import React, { useCallback, useEffect, useRef, useState } from 'react'
 import { endSupportSession, getSupportSession, recordSupportClick, recordSupportSelection, recordSupportText, type SupportSession } from '@/services/liveSupport'
 import { connectSupportViewer, type SupportViewer } from '@/services/supportConnection'
-import type { SupportControl } from '@/services/supportProtocol'
+import { appendSupportChatMessage, type SupportChatMessage, type SupportControl } from '@/services/supportProtocol'
+import { SupportChat } from '@/components/SupportChat'
+import { SupportVideoView } from '@/components/SupportVideoView'
+import '@/components/LiveSupport.css'
 
 interface Props {
   session: SupportSession
   learnerName: string
   onClose: () => void
-}
-
-const videoPosition = (video: HTMLVideoElement, clientX: number, clientY: number): { x: number; y: number } | null => {
-  const bounds = video.getBoundingClientRect()
-  if (video.videoWidth === 0 || video.videoHeight === 0 || bounds.width === 0 || bounds.height === 0) return null
-  const scale = Math.min(bounds.width / video.videoWidth, bounds.height / video.videoHeight)
-  const width = video.videoWidth * scale
-  const height = video.videoHeight * scale
-  const left = bounds.left + (bounds.width - width) / 2
-  const top = bounds.top + (bounds.height - height) / 2
-  const x = (clientX - left) / width
-  const y = (clientY - top) / height
-  return x >= 0 && x <= 1 && y >= 0 && y <= 1 ? { x, y } : null
 }
 
 export const AdminLiveSupport: React.FC<Props> = ({ session: initialSession, learnerName, onClose }) => {
@@ -28,9 +18,12 @@ export const AdminLiveSupport: React.FC<Props> = ({ session: initialSession, lea
   const [textValue, setTextValue] = useState('')
   const [connected, setConnected] = useState(false)
   const [busy, setBusy] = useState(false)
+  const [messages, setMessages] = useState<SupportChatMessage[]>([])
+  const [chatVisible, setChatVisible] = useState(true)
+  const [fullscreen, setFullscreen] = useState(false)
+  const dialogRef = useRef<HTMLDivElement | null>(null)
   const videoRef = useRef<HTMLVideoElement | null>(null)
   const connectionRef = useRef<SupportViewer | null>(null)
-  const lastPointerRef = useRef(0)
   const actionQueueRef = useRef<Promise<void>>(Promise.resolve())
 
   useEffect(() => {
@@ -63,6 +56,7 @@ export const AdminLiveSupport: React.FC<Props> = ({ session: initialSession, lea
     let disposed = false
     void connectSupportViewer({ id: session.id, adminId: session.adminId, learnerId: session.learnerId, expiresAt: session.expiresAt }, videoRef.current,
       value => { if (!disposed) setConnected(value) },
+      message => { if (!disposed) setMessages(current => appendSupportChatMessage(current, message)) },
       failure => { if (!disposed) setError(failure.message) },
     ).then(async connection => {
       if (disposed) { await connection.close(); return }
@@ -76,7 +70,7 @@ export const AdminLiveSupport: React.FC<Props> = ({ session: initialSession, lea
     }
   }, [session.status, session.id, session.adminId, session.learnerId, session.expiresAt])
 
-  const sendControl = async (control: SupportControl): Promise<void> => {
+  const sendControl = useCallback(async (control: SupportControl): Promise<void> => {
     const queuedAt = Date.now()
     const connection = connectionRef.current
     const work = async (): Promise<void> => {
@@ -98,7 +92,7 @@ export const AdminLiveSupport: React.FC<Props> = ({ session: initialSession, lea
     }
     actionQueueRef.current = actionQueueRef.current.then(work)
     await actionQueueRef.current
-  }
+  }, [connected, session.id])
 
   const end = async () => {
     setBusy(true)
@@ -120,37 +114,57 @@ export const AdminLiveSupport: React.FC<Props> = ({ session: initialSession, lea
     }
   }
 
-  return <div role="dialog" aria-modal="true" aria-label={`Live help for ${learnerName}`} style={{
-    position: 'fixed', inset: 0, zIndex: 20000, background: '#000c', display: 'grid', placeItems: 'center', padding: 16,
-  }}>
-    <div style={{ width: 'min(100%, 1200px)', maxHeight: '95vh', overflow: 'auto', background: '#111827', color: '#fff', borderRadius: 12, padding: 20 }}>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 16 }}>
-        <div><h2 style={{ margin: 0 }}>Live help: {learnerName}</h2>
-          <p style={{ margin: '6px 0' }}>{session.status === 'requested' ? 'Waiting for the learner to approve tab sharing and control…' : session.status === 'active' ? connected ? 'Connected to the learner’s real tab.' : 'Connecting to the learner’s tab…' : `Session ${session.status}.`}</p></div>
-        <button type="button" data-testid="admin-end-live-help" className="btn btn-danger" disabled={busy} onClick={() => { void end() }}>End session</button>
+  const sendChat = async (text: string): Promise<void> => {
+    const connection = connectionRef.current
+    if (!connection) throw new Error('Chat is still connecting. Wait for the learner to connect.')
+    const message = await connection.sendChat(text)
+    setMessages(current => appendSupportChatMessage(current, message))
+  }
+
+  useEffect(() => {
+    const changed = (): void => setFullscreen(document.fullscreenElement === dialogRef.current)
+    document.addEventListener('fullscreenchange', changed)
+    return () => document.removeEventListener('fullscreenchange', changed)
+  }, [])
+
+  const toggleFullscreen = async (): Promise<void> => {
+    try {
+      if (document.fullscreenElement === dialogRef.current) await document.exitFullscreen()
+      else {
+        if (!dialogRef.current?.requestFullscreen) throw new Error('Fullscreen is unavailable in this browser. Use View size to enlarge the shared tab.')
+        await dialogRef.current.requestFullscreen()
+      }
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : String(caught))
+    }
+  }
+
+  return <div ref={dialogRef} className="support-workspace" data-testid="admin-live-help" role="dialog" aria-modal="true" aria-label={`Live help for ${learnerName}`}>
+    <header className="support-header">
+      <div><h2>Live help: {learnerName}</h2>
+        <p>{session.status === 'requested' ? 'Waiting for the learner to approve tab sharing and control…' : session.status === 'active' ? connected ? 'Connected to the learner’s real tab.' : 'Connecting to the learner’s tab…' : `Session ${session.status}.`}</p></div>
+      <div className="support-header-actions">
+        <button type="button" data-testid="support-toggle-chat" aria-expanded={chatVisible} onClick={() => setChatVisible(value => !value)}>{chatVisible ? 'Hide chat' : `Show chat (${messages.length})`}</button>
+        <button type="button" data-testid="support-fullscreen" onClick={() => { void toggleFullscreen() }}>{fullscreen ? 'Exit fullscreen' : 'Fullscreen'}</button>
+        <button type="button" data-testid="admin-end-live-help" className="support-end" disabled={busy} onClick={() => { void end() }}>End session</button>
       </div>
-      {error && <p role="alert" style={{ color: '#fca5a5' }}>{error}</p>}
-      <video ref={videoRef} data-testid="admin-live-help-video" autoPlay playsInline muted aria-label="Learner shared tab" onClick={event => {
-        const position = videoPosition(event.currentTarget, event.clientX, event.clientY)
-        if (position) void sendControl({ kind: 'click', ...position })
-      }} onMouseMove={event => {
-        if (Date.now() - lastPointerRef.current < 150) return
-        lastPointerRef.current = Date.now()
-        const position = videoPosition(event.currentTarget, event.clientX, event.clientY)
-        if (position && connected) void sendControl({ kind: 'pointer', ...position })
-      }} onWheel={event => {
-        event.preventDefault()
-        const position = videoPosition(event.currentTarget, event.clientX, event.clientY)
-        if (position) void sendControl({ kind: 'scroll', ...position, deltaY: event.deltaY })
-      }} style={{ width: '100%', height: 'min(68vh, 700px)', objectFit: 'contain', background: '#05080e', cursor: connected ? 'crosshair' : 'default' }} />
-      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'center', marginTop: 12 }}>
-        <label htmlFor="support-text">Replace the focused text field:</label>
-        <textarea id="support-text" className="form-control" style={{ maxWidth: 500 }} rows={2} value={textValue} onChange={event => setTextValue(event.target.value)} maxLength={8000} disabled={!connected} />
-        <button type="button" data-testid="admin-send-live-help-text" className="btn btn-primary" disabled={!connected} onClick={() => { void sendControl({ kind: 'text', value: textValue }) }}>Send text</button>
-        <button type="button" className="btn btn-secondary" disabled={!connected} onClick={() => { void sendControl({ kind: 'selectPrevious' }) }}>Dropdown ↑</button>
-        <button type="button" className="btn btn-secondary" disabled={!connected} onClick={() => { void sendControl({ kind: 'selectNext' }) }}>Dropdown ↓</button>
-      </div>
-      <p style={{ color: '#9ca3af', margin: '8px 0 0' }}>Click and scroll on the shared tab, then use the text or dropdown controls for focused fields. The learner sees your cursor and can stop at any time. Passwords, secret codes, file inputs, and external links cannot be controlled remotely.</p>
+    </header>
+    {error && <p role="alert" className="support-error">{error}</p>}
+    <div className="support-body">
+      <SupportVideoView videoRef={videoRef} connected={connected} onControl={sendControl} />
+      {chatVisible && <SupportChat id="admin-support-chat" peerName={learnerName} userId={session.adminId} messages={messages}
+        disabled={session.status !== 'active' || busy} onSend={sendChat} />}
     </div>
+    <details className="support-field-controls" data-testid="support-field-controls">
+      <summary>Edit a field on the learner’s page</summary>
+      <div className="support-field-controls-content">
+        <label htmlFor="support-text">Replace the focused field:</label>
+        <textarea id="support-text" rows={2} value={textValue} onChange={event => setTextValue(event.target.value)} maxLength={8000} disabled={!connected} />
+        <button type="button" data-testid="admin-send-live-help-text" disabled={!connected} onClick={() => { void sendControl({ kind: 'text', value: textValue }) }}>Apply to field</button>
+        <button type="button" disabled={!connected} onClick={() => { void sendControl({ kind: 'selectPrevious' }) }}>Dropdown ↑</button>
+        <button type="button" disabled={!connected} onClick={() => { void sendControl({ kind: 'selectNext' }) }}>Dropdown ↓</button>
+      </div>
+      <p className="support-muted">Click a field in the shared tab before editing it. Passwords, secret codes, file inputs, and external links cannot be controlled remotely.</p>
+    </details>
   </div>
 }
