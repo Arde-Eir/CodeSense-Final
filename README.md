@@ -2,6 +2,8 @@
 
 CodeSense is a browser-based C++ logic analysis mentor for students. It combines a TypeScript/Express analysis backend with a React/Vite frontend for code analysis, flow graph visualization, tutorials, campaign quests, progress tracking, and admin tools.
 
+Frontend: [pr-codesense.netlify.app](https://pr-codesense.netlify.app/).
+
 ## Prerequisites
 
 - Node.js 18 or newer
@@ -10,10 +12,9 @@ CodeSense is a browser-based C++ logic analysis mentor for students. It combines
 
 ## Setup
 
-Install dependencies for the root test runner, backend, and frontend:
+Install dependencies for the backend and frontend:
 
 ```bash
-npm install
 npm --prefix backend install
 npm --prefix frontend install
 ```
@@ -25,15 +26,17 @@ copy backend\.env.example backend\.env.local
 copy frontend\.env.example frontend\.env.local
 ```
 
-Keep real secrets and deployment values in ignored `.env.local` files or hosting-provider environment settings. See [docs/SECURITY_AND_ACCESS.md](docs/SECURITY_AND_ACCESS.md) and [docs/SUPABASE_RLS_CHECKLIST.md](docs/SUPABASE_RLS_CHECKLIST.md).
+Keep real secrets and deployment values in ignored `.env.local` files or hosting-provider environment settings.
 
-Registration requires Google reCAPTCHA v3 keys and a Supabase Auth hook. Follow [the reCAPTCHA setup guide](docs/RECAPTCHA_SETUP.md) before enabling registration.
+Registration requires Google reCAPTCHA v3 keys and a Supabase **Before User Created** HTTP hook pointing to `https://YOUR_BACKEND/api/auth/before-user-created`. Enable that hook and set its signing secret as `AUTH_HOOK_SECRET` on the backend, including the `v1,whsec_` prefix.
+
+Set `VITE_RECAPTCHA_SITE_KEY` in the frontend build environment. Set `RECAPTCHA_SECRET_KEY`, `RECAPTCHA_ALLOWED_HOSTNAMES`, and `RECAPTCHA_MIN_SCORE` on the backend as shown in `backend/.env.example`. Allowed hostnames must match the frontend hosts registered with Google. Keep private keys on the backend; Supabase must be able to reach the hook over HTTPS.
 
 Backend environment values:
 
 ```text
 PORT=3000
-CORS_ORIGINS=https://your-frontend.example
+CORS_ORIGINS=https://pr-codesense.netlify.app
 LOG_ANALYSIS_REQUESTS=false
 RATE_LIMIT_WINDOW_MS=60000
 RATE_LIMIT_MAX_REQUESTS=60
@@ -53,15 +56,13 @@ only after that learner approves sharing and control. The learner sees an admin
 cursor and can stop the session at any time. Browser-protected password fields,
 file pickers, and external links remain learner-only actions.
 
-Live help is disabled until its database and network services are deployed. Apply
-`supabase/migrations/202609170001_live_support_sessions.sql` with the Supabase
-migration owner after reviewing the read-only `supabase/schema_preflight.sql`
-results. The migration creates consented sessions, private Realtime
+Live help requires deployed support tables and RPCs, private Realtime
 authorization, and an action audit that records clicks, dropdown changes, and
-text-field changes without storing typed text. It also grants administrator
-read policies for learner progress, reports, and activity when those tables
-have row-level security enabled; review existing table grants and policies in
-staging before enabling the feature.
+text-field changes without storing typed text. Administrator read policies for
+learner progress, reports, and activity must be configured on tables with
+row-level security enabled. Review existing table grants and policies in
+staging before enabling the feature. This deployment source assumes the
+existing Supabase database is already provisioned.
 
 Live video and remote controls use the existing private Supabase Realtime
 channel. Set `VITE_SUPPORT_ENABLED=true` in Netlify's production build environment
@@ -115,7 +116,6 @@ This runs:
 
 - secret scanning
 - frontend lint
-- backend unit tests, frontend Vitest tests, the integration report, and the full 52-case API integration suite
 - frontend production build
 - backend production build
 
@@ -123,14 +123,10 @@ Useful individual commands:
 
 ```bash
 npm run lint
-npm test
 npm run build
 npm run build:frontend
 npm run build:backend
-npm run test:integration
 ```
-
-The integration command starts and stops an isolated backend on an available local port; no separately running development server is required.
 
 ## Project Structure
 
@@ -140,7 +136,6 @@ backend/
   src/analysis/         lexer, parser output, CFG, scoring, translation, checks
   src/gamification/     XP and reward logic
   src/routes/           API routes
-  tests/                backend unit tests
 
 frontend/
   src/App.tsx           route shell and route guards
@@ -153,14 +148,9 @@ frontend/
   src/games/            interactive quest games
   src/types/            shared frontend types
 
-tests/
-  run-testing-report.mjs
-  run-integration-tests.mjs
+scripts/
+  scan-secrets.mjs       release secret scan
 
-docs/
-  SECURITY_AND_ACCESS.md
-  SUPABASE_RLS_CHECKLIST.md
-  SUPABASE_RLS_POLICY_TEMPLATE.sql
 ```
 
 ## Frontend Imports
@@ -179,4 +169,4 @@ Use local relative imports for sibling files when that reads better, such as `./
 - Do not commit `.env`, `.env.local`, private keys, service-role keys, exported user data, logs, or generated response dumps.
 - Repository viewers can see every tracked file. Do not treat folders or frontend route guards as secret storage.
 - Admin-only data must be enforced with backend checks or Supabase Row Level Security policies, not just hidden UI links.
-- Use the Supabase RLS checklist before opening the app to normal users or repository viewers.
+- Verify database grants, RLS, and Storage policies with separate user and administrator accounts before deployment.

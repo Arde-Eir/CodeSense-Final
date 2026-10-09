@@ -1,7 +1,3 @@
-// frontend/src/games/MCGame.tsx
-// Multiple-choice quiz. One question at a time, immediate feedback +
-// explanation reveal, advance through all of them.
-
 import React from 'react';
 import type { MCQ } from '@/types/campaign';
 import { normalizeMCQList } from './normalizeMCQ';
@@ -10,8 +6,7 @@ interface Props {
   questions:   MCQ[];
   onComplete:  (score: number, total: number) => void;
   resetSignal: number;
-  /** Notifies the parent of the current question index so it can show the
-   *  per-question hint in the side panel. Optional — older callers omit. */
+  /** Reports the active question for the side-panel hint. */
   onItemChange?: (index: number) => void;
 }
 
@@ -19,15 +14,12 @@ const MCGameInner: React.FC<{ questions: MCQ[]; onComplete: (score: number, tota
   const [qIdx,     setQIdx]     = React.useState(0);
   const [finalScore, setFinalScore] = React.useState(0);
 
-  // Notify on mount + on every index change (including the initial 0).
   React.useEffect(() => { onItemChange?.(qIdx); }, [qIdx, onItemChange]);
 
   const [selected, setSelected] = React.useState<number | null>(null);
   const [revealed, setRevealed] = React.useState(false);
   const [done,     setDone]     = React.useState(false);
-  // scoreRef is the single source of truth — updated synchronously so
-  // onComplete() and the done screen always read the correct final value
-  // regardless of React's batched setState scheduling.
+  // The ref keeps the final score available before React commits the state update.
   const scoreRef = React.useRef(0);
   const completionTimer = React.useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -44,14 +36,13 @@ const MCGameInner: React.FC<{ questions: MCQ[]; onComplete: (score: number, tota
     scoreRef.current = 0;
   };
 
-  // ── Empty state (must be before any variable that uses qIdx) ──────────────
   if (!questions.length) return (
     <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#484f58', fontSize: 13, fontFamily: 'Inter,sans-serif', textAlign: 'center', padding: 24 }}>
       No questions configured.<br />Add <code>mc_questions</code> to this quest in the DB.
     </div>
   );
 
-  // ── Done screen (must be before `questions[qIdx]` so qIdx === length is safe) ──
+  // Completion can advance qIdx past the last question.
   if (done) return (
     <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 16 }}>
       <div style={{ fontSize: 48 }}>🎓</div>
@@ -104,8 +95,6 @@ const MCGameInner: React.FC<{ questions: MCQ[]; onComplete: (score: number, tota
     setRevealed(false);
   };
 
-  // Progress: advance bar to 100% on the last question once answered,
-  // otherwise show answered-so-far fraction.
   const progressPct = revealed && isLast
     ? 100
     : ((qIdx + (revealed ? 1 : 0)) / questions.length) * 100;
@@ -113,7 +102,6 @@ const MCGameInner: React.FC<{ questions: MCQ[]; onComplete: (score: number, tota
   return (
     <div style={{ display: 'flex', flexDirection: 'column' }}>
 
-      {/* ── Progress bar ─────────────────────────────────────────────────── */}
       <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 14 }}>
         <div style={{ flex: 1, height: 5, background: '#21262d', borderRadius: 3, overflow: 'hidden' }}>
           <div style={{ width: `${progressPct}%`, height: '100%', background: '#a371f7', transition: 'width .4s ease' }} />
@@ -123,7 +111,6 @@ const MCGameInner: React.FC<{ questions: MCQ[]; onComplete: (score: number, tota
         </span>
       </div>
 
-      {/* ── Question card ─────────────────────────────────────────────────── */}
       <div style={{ background: 'rgba(163,113,247,0.07)', border: '1px solid rgba(163,113,247,0.25)', borderRadius: 10, padding: '14px 16px', marginBottom: 14 }}>
         <div style={{ fontSize: 10, color: '#a371f7', fontFamily: "'JetBrains Mono',monospace", letterSpacing: '1px', textTransform: 'uppercase', marginBottom: 6 }}>
           Q{qIdx + 1}
@@ -133,7 +120,6 @@ const MCGameInner: React.FC<{ questions: MCQ[]; onComplete: (score: number, tota
         </div>
       </div>
 
-      {/* ── Options ───────────────────────────────────────────────────────── */}
       <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
         {q.options.map((opt, i) => {
           const isSelected = selected === i;
@@ -149,10 +135,6 @@ const MCGameInner: React.FC<{ questions: MCQ[]; onComplete: (score: number, tota
             if (wasWrong)        { bg = 'rgba(218,54,51,0.1)';    border = '#da3633'; color = '#f85149'; }
           } else if (isSelected) { bg = 'rgba(163,113,247,0.12)'; border = '#a371f7'; color = '#a371f7'; }
 
-          // Right-side icon:
-          //  ✅ = correct answer you picked
-          //  💡 = correct answer you did NOT pick (missed it)
-          //  ❌ = wrong answer you picked
           const icon = revealed
             ? isRight && isSelected  ? '✅'
             : isRight && !isSelected ? '💡'
@@ -189,10 +171,8 @@ const MCGameInner: React.FC<{ questions: MCQ[]; onComplete: (score: number, tota
         })}
       </div>
 
-      {/* ── Explanation + Next button ──────────────────────────────────────── */}
       {revealed && (
         <>
-          {/* Only render explanation box when there is actual content */}
           {q.explanation?.trim() && (
             <div style={{ marginTop: 12, padding: '10px 14px', borderRadius: 8, background: 'rgba(255,255,255,0.03)', border: '1px solid #21262d', fontSize: 12, color: '#8b949e', lineHeight: 1.6, fontFamily: 'Inter,sans-serif' }}>
               💡 {q.explanation}

@@ -1,8 +1,3 @@
-// frontend/src/admin/adminHelpers.ts
-// Pure helpers extracted from AdminPanel.tsx for unit testing. Each function
-// mirrors behavior used inline in the panel — no DB calls, no React.
-
-// ─── Types (minimal — only what helpers touch) ─────────────────────────────
 export interface AdminUserLite {
   id:          string;
   playername:  string;
@@ -90,7 +85,6 @@ export interface QuestBuilderValidationResult {
 export type Level = number;
 export type Phase = 'beginner' | 'intermediate' | 'advanced' | `level_${number}`;
 
-// ─── User stats ────────────────────────────────────────────────────────────
 export function computeUserStats<U extends AdminUserLite>(users: U[]): UserStats {
   return {
     total:  users.length,
@@ -100,7 +94,6 @@ export function computeUserStats<U extends AdminUserLite>(users: U[]): UserStats
   };
 }
 
-// ─── User filtering (filter dropdown + search box) ─────────────────────────
 export function filterUsers<U extends AdminUserLite>(
   users:  U[],
   filter: UserFilter,
@@ -121,7 +114,6 @@ export function filterUsers<U extends AdminUserLite>(
   return list;
 }
 
-// ─── Level → phase mapping (used when saving a quest) ──────────────────────
 export function levelToPhase(level: Level): Phase {
   if (level === 1) return 'beginner';
   if (level === 2) return 'intermediate';
@@ -129,9 +121,7 @@ export function levelToPhase(level: Level): Phase {
   return `level_${Math.max(1, Math.trunc(level))}` as `level_${number}`;
 }
 
-// ─── Balloon-pop language patcher ───────────────────────────────────────────
-// Rewrites legacy "Pop the…" phrasing in MC questions to language that fits
-// non-balloon Multiple Choice quizzes. Returns the patched question text.
+// Replace balloon-specific wording in multiple-choice questions.
 export function fixPopLanguageInQuestion(orig: string): string {
   return orig
     .replace(/^Pop the item(s)? that\b/gi, 'Which item$1')
@@ -139,7 +129,6 @@ export function fixPopLanguageInQuestion(orig: string): string {
     .replace(/^Pop\s+/gi,                  'Select ');
 }
 
-// ─── Patch an MC-question array (used by the fix-pop bulk action) ──────────
 export interface PopFixResult {
   patched: MCQuestionLite[];
   /** Number of questions that changed (per call). */
@@ -157,9 +146,7 @@ export function patchMCQuestions(qs: MCQuestionLite[]): PopFixResult {
   return { patched, changed };
 }
 
-// ─── MC/balloon split (used when loading an existing quest for edit) ───────
-// New rows have a `mode` field on each MCQ. Legacy rows have no mode — the
-// whole array is one bucket determined by question_type.
+// Rows without an MCQ mode use the quest-level question_type.
 export interface MCSplit {
   mc:      MCQuestionLite[];
   balloon: MCQuestionLite[];
@@ -182,10 +169,7 @@ export function splitMCQuestions(
   return { mc: all, balloon: [] };
 }
 
-// ─── MC option normalization ───────────────────────────────────────────────
-// Admin forms display up to four option inputs, but a valid question may have
-// only three choices. Before saving or rendering, drop blank choices and move
-// the correct index to the matching non-empty option.
+// Removing blank options must preserve the selected answer.
 export function normalizeMCQuestionOptions<T extends MCQuestionLite>(q: T): T {
   const rawOptions = Array.isArray(q.options) ? q.options : [];
   const compactOptions = rawOptions
@@ -375,14 +359,7 @@ export function validateQuestBuilderForm(form: QuestBuilderValidationInput): Que
   return { ok: errors.length === 0, errors };
 }
 
-// ─── Hint editor (admin form ↔ DB JSONB round-trip) ───────────────────────
-// `quests.hints` is a JSONB array of objects shaped like:
-//   { title, body, icon?, activity?, image?, ...future fields }
-//
-// The admin form exposes title/body/icon/activity. To stay compatible with
-// hints authored via raw SQL — which may carry fields the panel doesn't
-// understand (e.g. `image: true`) — we keep the original DB object on each
-// row as `_extra` and merge it back on save so unknown fields survive.
+// Preserve unedited JSONB fields through the hint form using each row's _extra.
 
 /** Activity tabs a hint can be scoped to. 'all' is the form's representation
  *  of an *untagged* hint (no `activity` field in the DB). */
@@ -459,9 +436,6 @@ export function serializeHints(rows: HintFormRow[]): Record<string, unknown>[] |
   return out.length > 0 ? out : null;
 }
 
-// ─── Code-fill CSV parser ──────────────────────────────────────────────────
-// The admin form stores comma-separated answers as a single string. On save,
-// we split on commas, trim, drop empties.
 export function parseCodeFillAnswers(csv: string): string[] {
   return csv.split(',').map(a => a.trim()).filter(Boolean);
 }

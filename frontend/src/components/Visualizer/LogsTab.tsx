@@ -1,6 +1,5 @@
 import { useState, useEffect, useRef, useMemo } from 'react';
 
-// ─── Types ────────────────────────────────────────────────────────────────────
 interface LogsTabProps {
   explanations?: string[];
   errors?: Array<{ type: string; message: string; line?: number; severity?: string }>;
@@ -10,7 +9,6 @@ interface LogsTabProps {
   cyclomaticComplexity?: { score: number; rating: string; interpretation: string };
 }
 
-// ─── Parse a raw explanation string into structured log entry ─────────────────
 type LogLevel = 'error' | 'warning' | 'info' | 'success' | 'system' | 'hint';
 
 interface LogEntry {
@@ -37,7 +35,6 @@ function parseEntry(raw: string, index: number): LogEntry {
     raw.includes('💡') || raw.includes('→') || raw.includes('Hint') ? 'hint' :
     raw.includes('Status') || raw.includes('Phase') ? 'system' : 'info';
 
-  // Strip emoji/markdown bold markers for clean display
   const clean = raw
     .replace(/\*\*(.*?)\*\*/g, '$1')
     .replace(/❌|✅|⚠️|🚨|💡|🔧|📍|🔬|🛰|🔤/gu, '')
@@ -50,7 +47,6 @@ function parseEntry(raw: string, index: number): LogEntry {
   return { level, phase, message, raw };
 }
 
-// ─── Animated typing cursor ───────────────────────────────────────────────────
 const Cursor: React.FC = () => (
   <span style={{
     display: 'inline-block', width: '7px', height: '13px',
@@ -60,7 +56,6 @@ const Cursor: React.FC = () => (
   }} />
 );
 
-// ─── Single log line ──────────────────────────────────────────────────────────
 const LogLine: React.FC<{ entry: LogEntry; delay: number; visible: boolean }> = ({ entry, delay, visible }) => {
   const [shown, setShown] = useState(false);
   const style = LEVEL_STYLE[entry.level];
@@ -83,7 +78,6 @@ const LogLine: React.FC<{ entry: LogEntry; delay: number; visible: boolean }> = 
       marginBottom: '2px',
       animation: 'fadeSlideIn 0.2s ease-out',
     }}>
-      {/* Level badge */}
       <span style={{
         fontSize: '9px', fontWeight: '800', letterSpacing: '0.8px',
         color: style.color, background: `${style.color}18`,
@@ -94,7 +88,6 @@ const LogLine: React.FC<{ entry: LogEntry; delay: number; visible: boolean }> = 
         {style.label}
       </span>
 
-      {/* Phase */}
       <span style={{
         fontSize: '10px', color: '#484f58', fontFamily: 'IBM Plex Mono, monospace',
         flexShrink: 0, marginRight: '10px', marginTop: '1px', minWidth: '60px',
@@ -102,7 +95,6 @@ const LogLine: React.FC<{ entry: LogEntry; delay: number; visible: boolean }> = 
         {entry.phase}
       </span>
 
-      {/* Message */}
       <span style={{
         fontSize: '12px', color: entry.level === 'system' ? '#484f58' : style.color === '#484f58' ? '#8b949e' : style.color,
         fontFamily: 'IBM Plex Mono, monospace', lineHeight: '1.6', flex: 1,
@@ -116,7 +108,6 @@ const LogLine: React.FC<{ entry: LogEntry; delay: number; visible: boolean }> = 
 
 
 
-// ─── Complexity badge row ─────────────────────────────────────────────────────
 const ComplexityRow: React.FC<{ cognitive?: number; cyclomatic?: { score: number; rating: string } }> = ({ cognitive, cyclomatic }) => {
   if (cognitive === undefined && !cyclomatic) return null;
 
@@ -156,7 +147,6 @@ const ComplexityRow: React.FC<{ cognitive?: number; cyclomatic?: { score: number
   );
 };
 
-// ─── Main LogsTab ─────────────────────────────────────────────────────────────
 export const LogsTab: React.FC<LogsTabProps> = ({
   explanations = [], 
   success, cognitiveComplexity, cyclomaticComplexity,
@@ -189,7 +179,6 @@ export const LogsTab: React.FC<LogsTabProps> = ({
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%', gap: '0' }}>
 
-      {/* Terminal header bar */}
       <div style={{
         display: 'flex', alignItems: 'center', gap: '8px',
         padding: '8px 12px',
@@ -199,7 +188,6 @@ export const LogsTab: React.FC<LogsTabProps> = ({
         borderRadius: '10px 10px 0 0',
         flexShrink: 0,
       }}>
-        {/* Traffic lights */}
         <div style={{ display: 'flex', gap: '5px', flexShrink: 0 }}>
           {['#f85149', '#e3b341', '#3fb950'].map((c, i) => (
             <div key={i} style={{ width: '9px', height: '9px', borderRadius: '50%', background: c, opacity: 0.8 }} />
@@ -208,7 +196,6 @@ export const LogsTab: React.FC<LogsTabProps> = ({
         <span style={{ fontSize: '11px', color: '#484f58', fontFamily: 'IBM Plex Mono, monospace', flex: 1, textAlign: 'center' }}>
           codesense — analysis.log
         </span>
-        {/* Status dot */}
         {hasContent && (
           <div style={{ display: 'flex', alignItems: 'center', gap: '5px' }}>
             <div style={{
@@ -223,7 +210,6 @@ export const LogsTab: React.FC<LogsTabProps> = ({
         )}
       </div>
 
-      {/* Filter pills */}
       {hasContent && (
         <div style={{
           display: 'flex', gap: '4px', padding: '6px 10px',
@@ -251,7 +237,6 @@ export const LogsTab: React.FC<LogsTabProps> = ({
         </div>
       )}
 
-      {/* Terminal body */}
       <div style={{
         flex: 1, overflow: 'auto', padding: '10px 10px 12px',
         background: '#010409',
@@ -268,23 +253,19 @@ export const LogsTab: React.FC<LogsTabProps> = ({
           </div>
         ) : (
           <>
-            {/* Boot line */}
             <div style={{ color: '#2d333b', fontSize: '10px', marginBottom: '10px', paddingBottom: '8px', borderBottom: '1px solid #21262d' }}>
               $ codesense analyze --verbose --strict<br />
               <span style={{ color: '#21262d' }}>initializing engine... phases: lexical → syntactic → semantic → symbolic → cfg</span>
             </div>
 
-            {/* Log entries with staggered animation */}
             {filtered.map((entry, i) => (
               <LogLine key={i} entry={entry} delay={i * 35} visible={visible} />
             ))}
 
-            {/* Complexity at bottom */}
             {visible && (cognitiveComplexity !== undefined || cyclomaticComplexity) && (
               <ComplexityRow cognitive={cognitiveComplexity} cyclomatic={cyclomaticComplexity} />
             )}
 
-            {/* Blinking cursor at end */}
             {visible && (
               <div style={{ marginTop: '10px', color: '#2d333b', fontSize: '11px' }}>
                 $ <Cursor />

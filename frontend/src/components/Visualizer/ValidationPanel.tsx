@@ -1,20 +1,6 @@
-/**
- * ValidationPanel.tsx
- * ─────────────────────────────────────────────────────────────────────────────
- * Renders a collapsible panel listing errors and warnings from validateGraph().
- *
- * Drop this inside GenerateCodePanel, just above the Generate button.
- *
- * Props:
- *   result          — output of validateGraph()
- *   onDismiss       — called when the user clicks ✕ to hide the panel
- *   highlightNodes? — optional callback to highlight offending nodes on canvas
- */
-
 import React, { useState } from 'react';
 import type { ValidationResult, ValidationIssue } from '@/services/GraphValidator';
 
-// ─── Single issue row ─────────────────────────────────────────────────────────
 
 function suggestionForIssue(issue: ValidationIssue): string {
   switch (issue.code) {
@@ -236,12 +222,10 @@ const IssueRow: React.FC<{
         (e.currentTarget as HTMLDivElement).style.background = bg;
       }}
     >
-      {/* Severity icon */}
       <span style={{ fontSize: 12, color, marginTop: 1, flexShrink: 0, fontWeight: 700 }}>
         {icon}
       </span>
 
-      {/* Message */}
       <div style={{ flex: 1, minWidth: 0 }}>
         <span style={{ fontSize: 12, color, lineHeight: 1.6 }}>
           {issue.message}
@@ -269,7 +253,6 @@ const IssueRow: React.FC<{
   );
 };
 
-// ─── Main ValidationPanel ─────────────────────────────────────────────────────
 
 export const ValidationPanel: React.FC<{
   result:       ValidationResult;
@@ -303,7 +286,6 @@ export const ValidationPanel: React.FC<{
         flexShrink: 0,
       }}
     >
-      {/* Header */}
       <div
         role="button"
         tabIndex={0}
@@ -332,7 +314,6 @@ export const ValidationPanel: React.FC<{
           {hasErrors ? 'Cannot Generate' : 'Warnings'} — {summary}
         </span>
 
-        {/* Chevron */}
         <span style={{
           fontSize: 10, color: headerColor,
           transform: expanded ? 'rotate(180deg)' : 'none',
@@ -340,7 +321,6 @@ export const ValidationPanel: React.FC<{
           marginRight: 4,
         }}>▼</span>
 
-        {/* Dismiss */}
         <span
           role="button"
           tabIndex={0}
@@ -353,19 +333,16 @@ export const ValidationPanel: React.FC<{
         </span>
       </div>
 
-      {/* Issue list */}
       {expanded && (
         <div style={{
           display: 'flex', flexDirection: 'column', gap: 8,
           padding: 10,
           maxHeight: 360, overflowY: 'auto',
         }}>
-          {/* Errors first, then warnings */}
           {[...errors, ...warnings].map((issue, i) => (
             <IssueRow key={i} issue={issue} onHighlight={onHighlight} />
           ))}
 
-          {/* Footer hint when generation is blocked */}
           {hasErrors && (
             <div style={{
               marginTop: 4, padding: '8px 10px',

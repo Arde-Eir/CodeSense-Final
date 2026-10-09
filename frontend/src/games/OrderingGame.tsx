@@ -1,6 +1,3 @@
-// frontend/src/games/OrderingGame.tsx
-// Drag rows up/down until their correct_order matches the visual position.
-
 import React from 'react';
 import type { OrderItem } from '@/types/campaign';
 
@@ -25,8 +22,7 @@ const OrderingGameInner: React.FC<{ rawItems: OrderItem[]; onComplete: (score: n
       const j = Math.floor(nextRand() * (i + 1));
       [arr[i], arr[j]] = [arr[j], arr[i]];
     }
-    // If the result happens to be in the correct order, swap the first two
-    // items to guarantee the puzzle is not trivially solved on load.
+    // Ensure the puzzle requires a move on load.
     const alreadyCorrect = arr.every((item, i) => item.correct_order === i + 1);
     if (alreadyCorrect && arr.length >= 2) {
       [arr[0], arr[1]] = [arr[1], arr[0]];

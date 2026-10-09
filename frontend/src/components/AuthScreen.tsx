@@ -7,10 +7,6 @@ import { DatabaseService } from '@/services/DatabaseService'
 import { supabase } from '@/services/supabase'
 import type { ExplorerProfile } from '@/types'
 
-// ─── MaintenanceGate ──────────────────────────────────────────────────────────
-// Wraps the entire app. When maintenanceMode is ON, non-admin users (including
-// guests and unauthenticated visitors) see a full-screen maintenance page and
-// CANNOT navigate anywhere else. Admins pass through untouched.
 export const MaintenanceGate: React.FC<{ children: ReactNode }> = ({ children }) => {
   const { maintenanceMode, maintenanceMessage, isAdmin, isAuthenticated, logout } = useAuth()
   const location = useLocation()
@@ -20,7 +16,6 @@ export const MaintenanceGate: React.FC<{ children: ReactNode }> = ({ children })
     return <>{children}</>
   }
 
-  // Everyone else (guests, students, professionals, unauthenticated) is blocked
   return (
     <div style={{
       minHeight: '100vh',
@@ -125,7 +120,7 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         }
       }
     } catch {
-      // Table may not exist yet — fail silently
+      // Keep the current maintenance state when settings cannot be refreshed.
     }
   }, [])
 
@@ -152,8 +147,6 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     restore()
     refreshMaintenanceMode()
 
-    // Poll every 60 s so users already inside get the maintenance screen
-    // automatically when an admin turns it on, without needing a page refresh.
     const pollInterval = setInterval(refreshMaintenanceMode, 60_000)
     return () => clearInterval(pollInterval)
   }, [refreshMaintenanceMode])

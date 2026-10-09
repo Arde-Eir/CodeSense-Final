@@ -6,7 +6,6 @@ export const LandingPage: React.FC = () => {
   const navigate = useNavigate();
   const { isAuthenticated } = useAuth();
 
-  // Authenticated users who land here (e.g. via the "About" button) go home
   useEffect(() => {
     if (isAuthenticated) navigate('/home', { replace: true });
   }, [isAuthenticated, navigate]);
@@ -157,17 +156,14 @@ export const LandingPage: React.FC = () => {
 
       <div className="landing-root">
 
-        {/* Background blobs */}
         <div style={{ position: 'absolute', top: '12%', left: '6%', fontSize: '110px', opacity: 0.04, animation: 'float 6s ease-in-out infinite', pointerEvents: 'none', userSelect: 'none' }}>💻</div>
         <div style={{ position: 'absolute', bottom: '12%', right: '6%', fontSize: '90px', opacity: 0.04, animation: 'float 8s ease-in-out infinite reverse', pointerEvents: 'none', userSelect: 'none' }}>🧠</div>
         <div style={{ position: 'absolute', top: '50%', left: '50%', transform: 'translate(-50%,-50%)', width: '700px', height: '700px', borderRadius: '50%', background: 'radial-gradient(circle, rgba(76,175,80,0.05) 0%, transparent 70%)', pointerEvents: 'none' }} />
 
         <div className="landing-content">
 
-          {/* Logo */}
           <div style={{ fontSize: '72px', marginBottom: '16px', display: 'inline-block', animation: 'float 3s ease-in-out infinite' }}>🧠</div>
 
-          {/* Title */}
           <h1 style={{
             fontSize: 'clamp(36px, 5.5vw, 62px)', fontWeight: '800',
             marginBottom: '16px', letterSpacing: '-1px',
@@ -178,7 +174,6 @@ export const LandingPage: React.FC = () => {
             CodeSense
           </h1>
 
-          {/* Subtitle */}
           <p style={{
             color: '#8b949e', fontSize: 'clamp(14px, 1.8vw, 18px)',
             lineHeight: 1.75, maxWidth: '560px', margin: '0 auto 44px'
@@ -187,7 +182,6 @@ export const LandingPage: React.FC = () => {
             Master safe coding with real-time feedback.
           </p>
 
-          {/* Live stats bar */}
           <div className="stat-bar">
             <div className="stat-item">
               <span className="stat-value">4</span>
@@ -199,7 +193,6 @@ export const LandingPage: React.FC = () => {
             </div>
           </div>
 
-          {/* Feature cards */}
           <div className="feature-grid">
             {[
               { icon: '🔬', title: 'Sandbox Mode', desc: 'Experiment freely with code analysis' },
@@ -214,7 +207,6 @@ export const LandingPage: React.FC = () => {
             ))}
           </div>
 
-          {/* CTA row */}
           <div className="cta-row" style={{ display: 'flex', gap: '14px', justifyContent: 'center', marginBottom: '28px', flexWrap: 'wrap' }}>
             <button className="cta-primary" onClick={() => navigate('/signup')}>
               Create an Account

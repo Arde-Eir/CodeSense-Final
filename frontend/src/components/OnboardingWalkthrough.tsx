@@ -1,15 +1,4 @@
-/**
- * OnboardingWalkthrough.tsx
- * ─────────────────────────────────────────────────────────────────────────────
- * Optional first-time tour that runs after a user registers. Shown once only
- * (gated by localStorage). Explains every surface of the app, with
- * "Skip", "Back", and "Next / Got it" controls. Each step can deep-link to
- * the feature it describes so users can try it immediately.
- *
- * Trigger: the Home dashboard mounts, sees the user is authenticated AND
- * `localStorage['cs-onboarded-v1'] !== 'done'`, and renders this component.
- * Users can also replay it from the profile menu.
- */
+/** First-use tour, persisted in localStorage and replayable from the profile menu. */
 import React, { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 
@@ -23,7 +12,6 @@ interface Step {
   kicker: string
   body: React.ReactNode
   takeaways: string[]
-  /** Optional action: either navigate somewhere or run a callback. */
   action?: { label: string; path?: string; onClick?: () => void }
 }
 
@@ -88,8 +76,7 @@ const STEPS = (isAdmin: boolean, isGuest: boolean): Step[] => [
         </p>
         <p>
           Each verdict is <b>SAFE · WARNING · UNSAFE</b> with the exact rule
-          code that fired, the line, and a human-readable explanation. No LLM,
-          no guessing.
+          code that fired, the line, and a human-readable explanation.
         </p>
       </>
     ),
@@ -284,7 +271,6 @@ export const OnboardingWalkthrough: React.FC<{
   const step = steps[idx]
   const isLast = idx === steps.length - 1
 
-  // Close on Escape
   useEffect(() => {
     try { localStorage.setItem(ONBOARD_ACTIVE_KEY, 'true') } catch { /* quota */ }
     const previousOverflow = document.body.style.overflow
@@ -332,8 +318,7 @@ export const OnboardingWalkthrough: React.FC<{
         localStorage.setItem(ONBOARD_STEP_KEY, String(nextIdx))
       } catch { /* quota */ }
       navigate(step.action.path)
-      // Advance to the next step so the tour continues after the navigation.
-      // Do NOT call finish() — the tour is a persistent overlay at App level.
+      // Keep the App-level tour open when navigating to the next step.
       if (!isLast) setIdx(nextIdx)
     } else {
       step.action.onClick?.()
@@ -372,7 +357,6 @@ export const OnboardingWalkthrough: React.FC<{
         fontFamily: "'IBM Plex Sans', system-ui, sans-serif",
         display: 'flex', flexDirection: 'column', overflow: 'hidden',
       }}>
-        {/* Header */}
         <div style={{
           display: 'flex', alignItems: 'center', justifyContent: 'space-between',
           padding: '14px 20px', borderBottom: '1px solid #21262d',
@@ -397,7 +381,6 @@ export const OnboardingWalkthrough: React.FC<{
           </button>
         </div>
 
-        {/* Progress bar */}
         <div style={{ background: '#21262d', height: 3 }}>
           <div style={{
             width: `${((idx + 1) / steps.length) * 100}%`, height: '100%',
@@ -406,7 +389,6 @@ export const OnboardingWalkthrough: React.FC<{
           }} />
         </div>
 
-        {/* Content */}
         <div className="cs-onboard-content" style={{ padding: '28px 28px 24px', flex: 1, overflowY: 'auto' }}>
           <div style={{ display: 'flex', alignItems: 'flex-start', gap: 16, marginBottom: 12 }}>
             <div style={{
@@ -466,7 +448,6 @@ export const OnboardingWalkthrough: React.FC<{
           </div>
         </div>
 
-        {/* Action button (if any) */}
         {step.action && (
           <div style={{ padding: '0 28px' }}>
             <button onClick={goToAction} style={{
@@ -485,7 +466,6 @@ export const OnboardingWalkthrough: React.FC<{
           </div>
         )}
 
-        {/* Footer nav */}
         <div className="cs-onboard-footer" style={{
           display: 'flex', justifyContent: 'space-between', alignItems: 'center',
           padding: '18px 28px', borderTop: '1px solid #21262d', marginTop: 24,
@@ -501,7 +481,6 @@ export const OnboardingWalkthrough: React.FC<{
             ← Back
           </button>
 
-          {/* Dot indicators */}
           <div className="cs-onboard-dots" style={{ display: 'flex', gap: 6 }}>
             {steps.map((_, i) => (
               <button

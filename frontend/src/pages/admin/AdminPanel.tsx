@@ -1,5 +1,4 @@
-// AdminPanel.tsx — Tabler-based admin dashboard
-// Loads Tabler CSS from CDN on mount, removes it on unmount to avoid style bleed.
+// Scope Tabler styles to this page to prevent style bleed.
 import React, { useEffect, useState, useCallback, useMemo, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useAuth } from '@/components/AuthContext'
@@ -18,6 +17,7 @@ import {
 } from '@/admin/adminHelpers'
 import { extractTextFromPdf, generateQuestDraftFromText } from '@/admin/questAutoGenerator'
 import { generateAutoHints } from '@/campaign/generateAutoHints'
+import { assertAdminAuditReady, readAuditLogs, type AuditEntry } from '@/admin/adminAudit'
 import { isCampaignPhase, levelForPhase, phaseForLevel } from '@/types/campaign'
 import {
   AdminAnnouncementsTab,
@@ -50,11 +50,9 @@ import {
   storedChoiceQuestionToForm,
   tabHasContent,
   tabLabel,
-  writeAuditLog,
   type AdminUserChanges,
   type AdminUser,
   type Announcement,
-  type AuditEntry,
   type ExistingQuest,
   type QuestFormState,
   type QuestActivityFlag,
@@ -64,7 +62,6 @@ import {
   type Tab,
 } from '@/admin/adminPanelModel'
 
-// ─── Main component ───────────────────────────────────────────────────────────
 
 const loadAdminQuestDraft = (userId: string): { form: QuestFormState; replaceTarget: string | null; error: string | null } => {
   try {
@@ -109,6 +106,9 @@ export const AdminPanel: React.FC = () => {
   const [usersLoading, setUsersLoading] = useState(false)
   const userFetchSequence = useRef(0)
   const [auditLogs, setAuditLogs] = useState<AuditEntry[]>([])
+  const [auditLoading, setAuditLoading] = useState(false)
+  const [auditError, setAuditError] = useState<string | null>(null)
+  const auditFetchSequence = useRef(0)
   const [announcements, setAnnouncements] = useState<Announcement[]>([])
   const [maintenanceOn, setMaintenanceOn] = useState(false)
   const [maintenanceMsg, setMaintenanceMsg] = useState('')
@@ -127,10 +127,8 @@ export const AdminPanel: React.FC = () => {
     })
   }, [])
 
-  // New announcement form
   const [newAnn, setNewAnn] = useState({ title: '', body: '', priority: 'info' as Announcement['priority'], ispinned: false })
 
-  // Quest generator
   const savedQuestDraft = useMemo(() => loadAdminQuestDraft(user?.id ?? ''), [user?.id])
   const [questForm,      setQuestForm]      = useState<QuestFormState>(savedQuestDraft.form)
   const [questDraftError, setQuestDraftError] = useState<string | null>(savedQuestDraft.error)
@@ -236,13 +234,16 @@ export const AdminPanel: React.FC = () => {
       accent_color: defaultLevelAccent(level),
       banner_url: null,
     }
-    const { error } = await supabase
+    const { data, error } = await supabase
       .from('level_info')
       .upsert(row, { onConflict: 'phase', ignoreDuplicates: true })
+      .select('phase')
     if (error) throw new Error(`Level metadata failed: ${error.message}`)
+    if (!Array.isArray(data)) throw new Error('Level metadata returned no confirmation.')
   }
 
   const removeCustomLevel = async (level: number) => {
+    if (!user) return
     if (level <= 3) {
       showToast('Default Levels 1-3 cannot be removed', 'error')
       return
@@ -255,15 +256,18 @@ export const AdminPanel: React.FC = () => {
     if (!window.confirm(`Remove Level ${level}? This removes its dashboard metadata only.`)) return
 
     try {
-      const { error } = await supabase
+      await assertAdminAuditReady()
+      const { data, error } = await supabase
         .from('level_info')
         .delete()
         .eq('phase', phaseForLevel(level))
+        .select('phase')
       if (error) throw error
+      if (data?.length !== 1) throw new Error(`Level ${level} was not removed. Verify that it exists and that admin DELETE permissions allow this action.`)
+      showToast(`Level ${level} removed`)
       setQuestLevelInfoPhases(prev => prev.filter(phase => phase !== phaseForLevel(level)))
       if (questForm.level === level) qSet({ level: 1, difficulty: 'beginner' })
       if (questLevelFilter === String(level)) setQuestLevelFilter('all')
-      showToast(`Level ${level} removed`)
     } catch (error: unknown) {
       showToast(`Failed to remove level: ${errorMessage(error)}`, 'error')
     }
@@ -384,7 +388,6 @@ export const AdminPanel: React.FC = () => {
     })
   }, [existingQuests, questLevelFilter, questSearch, questStatusFilter])
 
-  // ── Tabler CSS injection ──
   useEffect(() => {
     const CSS_ID = 'tabler-admin-css'
     const ICON_ID = 'tabler-admin-icons'
@@ -415,12 +418,10 @@ export const AdminPanel: React.FC = () => {
     return () => window.clearTimeout(timer)
   }, [userSearch])
 
-  // Schema health — lets the UI tell the user which tables/columns are missing
   const [schemaIssues, setSchemaIssues] = useState<string[]>([])
   const addIssue = (msg: string) =>
     setSchemaIssues(prev => prev.includes(msg) ? prev : [...prev, msg])
 
-  // ── Data fetchers ──────────────────────────────────────────────────────────
   const fetchUserStats = useCallback(async () => {
     const [total, notBanned, banned, admins] = await Promise.all([
       supabase.from('users').select('id', { count: 'exact', head: true }),
@@ -467,28 +468,19 @@ export const AdminPanel: React.FC = () => {
   }, [debouncedUserSearch, userFilter, userPage])
 
   const fetchAuditLogs = useCallback(async () => {
-    // Try with FK joins first; fall back to plain select if the joins aren't set up.
-    const joined = await supabase
-      .from('admin_audit_log')
-      .select('*, admin:admin_id(playername), target:target_user_id(playername)')
-      .order('created_at', { ascending: false })
-      .limit(100)
-    let data = joined.data
-    const error = joined.error
-    if (error) {
-      const plain = await supabase
-        .from('admin_audit_log')
-        .select('*')
-        .order('created_at', { ascending: false })
-        .limit(100)
-      if (plain.error) {
-        console.warn('[fetchAuditLogs]', plain.error.message)
-        addIssue(`admin_audit_log table: ${plain.error.message}`)
-        return
+    const sequence = ++auditFetchSequence.current
+    setAuditLoading(true)
+    setAuditError(null)
+    try {
+      const entries = await readAuditLogs()
+      if (sequence === auditFetchSequence.current) setAuditLogs(entries)
+    } catch (caught: unknown) {
+      if (sequence === auditFetchSequence.current) {
+        setAuditError(`Could not refresh the audit log: ${errorMessage(caught)}. Check audit table SELECT permissions and its user relationships, then retry.`)
       }
-      data = plain.data
+    } finally {
+      if (sequence === auditFetchSequence.current) setAuditLoading(false)
     }
-    if (data) setAuditLogs(data as AuditEntry[])
   }, [])
 
   const fetchMaintenance = useCallback(async () => {
@@ -554,11 +546,23 @@ export const AdminPanel: React.FC = () => {
   useEffect(() => {
     const load = async () => {
       setLoading(true)
-      await Promise.all([fetchUserStats(), fetchAuditLogs(), fetchMaintenance(), fetchAnnouncements()])
+      await Promise.all([fetchUserStats(), fetchMaintenance(), fetchAnnouncements()])
       setLoading(false)
     }
     load()
-  }, [fetchUserStats, fetchAuditLogs, fetchMaintenance, fetchAnnouncements])
+  }, [fetchUserStats, fetchMaintenance, fetchAnnouncements])
+
+  useEffect(() => {
+    if (tab !== 'audit' && tab !== 'dashboard') return
+    void fetchAuditLogs()
+    const refresh = () => { if (!document.hidden) void fetchAuditLogs() }
+    const timer = window.setInterval(refresh, 30000)
+    window.addEventListener('focus', refresh)
+    return () => {
+      window.clearInterval(timer)
+      window.removeEventListener('focus', refresh)
+    }
+  }, [tab, fetchAuditLogs])
 
   useEffect(() => { void fetchUsers() }, [fetchUsers])
 
@@ -566,9 +570,9 @@ export const AdminPanel: React.FC = () => {
     if (tab === 'quests') fetchExistingQuests()
   }, [tab, fetchExistingQuests])
 
-  // ── Actions ────────────────────────────────────────────────────────────────
-  // Helper: returns count of rows actually changed — detects silent RLS denial.
+  // A zero row count can indicate an RLS denial.
   const adminUpdate = async (targetId: string, changes: AdminUserChanges): Promise<{ ok: boolean; msg: string }> => {
+    await assertAdminAuditReady()
     const { data, error } = await supabase
       .from('users').update(changes).eq('id', targetId).select('id')
     if (error) return { ok: false, msg: error.message }
@@ -587,15 +591,8 @@ export const AdminPanel: React.FC = () => {
         showToast(`Ban failed: ${res.msg}`, 'error')
         return
       }
-      await fetchUsers()
-      await fetchUserStats()
-      try {
-        await writeAuditLog(user.id, 'ban', target.id, { reason, playername: target.playername })
-        await fetchAuditLogs()
-        showToast(`${target.playername} has been banned`)
-      } catch (auditError: unknown) {
-        showToast(`${target.playername} was banned, but the audit entry failed: ${errorMessage(auditError)}`, 'error')
-      }
+      showToast(`${target.playername} has been banned`)
+      await Promise.all([fetchUsers(), fetchUserStats(), fetchAuditLogs()])
     } catch (error: unknown) {
       showToast(`Ban may have succeeded, but confirmation failed: ${errorMessage(error)}`, 'error')
     } finally {
@@ -612,15 +609,8 @@ export const AdminPanel: React.FC = () => {
         showToast(`Unban failed: ${res.msg}`, 'error')
         return
       }
-      await fetchUsers()
-      await fetchUserStats()
-      try {
-        await writeAuditLog(user.id, 'unban', target.id, { playername: target.playername })
-        await fetchAuditLogs()
-        showToast(`${target.playername} has been unbanned`)
-      } catch (auditError: unknown) {
-        showToast(`${target.playername} was unbanned, but the audit entry failed: ${errorMessage(auditError)}`, 'error')
-      }
+      showToast(`${target.playername} has been unbanned`)
+      await Promise.all([fetchUsers(), fetchUserStats(), fetchAuditLogs()])
     } catch (error: unknown) {
       showToast(`Unban may have succeeded, but confirmation failed: ${errorMessage(error)}`, 'error')
     } finally {
@@ -638,15 +628,8 @@ export const AdminPanel: React.FC = () => {
         showToast(`Failed to change admin status: ${res.msg}`, 'error')
         return
       }
-      await fetchUsers()
-      await fetchUserStats()
-      try {
-        await writeAuditLog(user.id, next ? 'grant_admin' : 'revoke_admin', target.id, { playername: target.playername })
-        await fetchAuditLogs()
-        showToast(`${target.playername} admin status ${next ? 'granted' : 'revoked'}`)
-      } catch (auditError: unknown) {
-        showToast(`${target.playername} admin status changed, but the audit entry failed: ${errorMessage(auditError)}`, 'error')
-      }
+      showToast(`${target.playername} admin status ${next ? 'granted' : 'revoked'}`)
+      await Promise.all([fetchUsers(), fetchUserStats(), fetchAuditLogs()])
     } catch (error: unknown) {
       showToast(`Admin status may have changed, but confirmation failed: ${errorMessage(error)}`, 'error')
     } finally {
@@ -672,25 +655,15 @@ export const AdminPanel: React.FC = () => {
     if (!user) return
     setSaving(true)
     try {
-      const [modeResult, messageResult] = await Promise.all([
-        supabase.from('system_settings').upsert(
-          { key: 'maintenance_mode', value: maintenanceOn, updated_by: user.id },
-          { onConflict: 'key' }
-        ),
-        supabase.from('system_settings').upsert(
-          { key: 'maintenance_message', value: maintenanceMsg || '', updated_by: user.id },
-          { onConflict: 'key' }
-        ),
-      ])
-      if (modeResult.error) throw modeResult.error
-      if (messageResult.error) throw messageResult.error
+      await assertAdminAuditReady()
+      const { data, error } = await supabase.from('system_settings').upsert([
+        { key: 'maintenance_mode', value: maintenanceOn, updated_by: user.id },
+        { key: 'maintenance_message', value: maintenanceMsg, updated_by: user.id },
+      ], { onConflict: 'key' }).select('key')
+      if (error) throw error
+      if (data?.length !== 2) throw new Error('Maintenance update did not confirm both settings. Check admin INSERT, UPDATE and SELECT permissions.')
+      showToast(`Maintenance mode ${maintenanceOn ? 'enabled' : 'disabled'}`)
       await refreshMaintenanceMode()
-      try {
-        await writeAuditLog(user.id, maintenanceOn ? 'maintenance_on' : 'maintenance_off', undefined, { message: maintenanceMsg })
-        showToast(`Maintenance mode ${maintenanceOn ? 'enabled' : 'disabled'}`)
-      } catch (auditError: unknown) {
-        showToast(`Maintenance settings saved, but the audit entry failed: ${errorMessage(auditError)}`, 'error')
-      }
     } catch (error: unknown) {
       showToast(`Maintenance settings may have changed; verify them before retrying: ${errorMessage(error)}`, 'error')
     } finally {
@@ -703,6 +676,7 @@ export const AdminPanel: React.FC = () => {
       showToast('Title and body are required', 'error'); return
     }
     try {
+      await assertAdminAuditReady()
       const { data, error } = await supabase.from('announcements').insert({
         title: newAnn.title.trim(), body: newAnn.body.trim(),
         priority: newAnn.priority, ispinned: newAnn.ispinned,
@@ -710,14 +684,9 @@ export const AdminPanel: React.FC = () => {
       }).select('id')
       if (error) throw error
       if (data?.length !== 1) throw new Error('Announcement insert returned no row. Check admin INSERT and SELECT policies.')
-      await fetchAnnouncements()
+      showToast('Announcement published')
       setNewAnn({ title: '', body: '', priority: 'info', ispinned: false })
-      try {
-        await writeAuditLog(user.id, 'announcement_create', undefined, { title: newAnn.title })
-        showToast('Announcement published')
-      } catch (auditError: unknown) {
-        showToast(`Announcement published, but the audit entry failed: ${errorMessage(auditError)}`, 'error')
-      }
+      await fetchAnnouncements()
     } catch (error: unknown) {
       showToast(`Announcement may have been published; verify before retrying: ${errorMessage(error)}`, 'error')
     }
@@ -727,22 +696,17 @@ export const AdminPanel: React.FC = () => {
     if (!user) return
     if (!window.confirm(`Delete "${title}"?`)) return
     try {
+      await assertAdminAuditReady()
       const { data, error } = await supabase.from('announcements').delete().eq('id', id).select('id')
       if (error) throw error
       if (data?.length !== 1) throw new Error(`Announcement ${id} was not deleted. Check that it still exists and admin DELETE policy allows this action.`)
+      showToast('Announcement deleted')
       await fetchAnnouncements()
-      try {
-        await writeAuditLog(user.id, 'announcement_delete', undefined, { title })
-        showToast('Announcement deleted')
-      } catch (auditError: unknown) {
-        showToast(`Announcement deleted, but the audit entry failed: ${errorMessage(auditError)}`, 'error')
-      }
     } catch (error: unknown) {
       showToast(`Announcement may have been deleted; verify before retrying: ${errorMessage(error)}`, 'error')
     }
   }
 
-  // ── Quest actions ──────────────────────────────────────────────────────────
   const resetQuestForm = () => {
     if (hasQuestContent(questForm) && !window.confirm('Discard this unsaved quest draft?')) return
     setQuestForm(defaultQF())
@@ -761,6 +725,7 @@ export const AdminPanel: React.FC = () => {
     setFixingPop(true)
     setFixPopResult(null)
     try {
+      await assertAdminAuditReady()
       const { data, error } = await supabase
         .from('quests')
         .select('id, title, mc_questions')
@@ -774,7 +739,6 @@ export const AdminPanel: React.FC = () => {
       for (const quest of data) {
         if (!Array.isArray(quest.mc_questions) || quest.mc_questions.length === 0) continue
         const { patched, changed } = patchMCQuestions(quest.mc_questions)
-        fixedQs += changed
         if (changed > 0) {
           const { data: updated, error: ue } = await supabase
             .from('quests')
@@ -784,6 +748,7 @@ export const AdminPanel: React.FC = () => {
           if (ue) throw ue
           if (!updated?.length) throw new Error(`Update was blocked for "${quest.title}". Check quest update permissions.`)
           fixedQuests++
+          fixedQs += changed
         }
       }
       const msg = fixedQs > 0
@@ -791,7 +756,6 @@ export const AdminPanel: React.FC = () => {
         : 'No balloon-pop language found in any MC questions.'
       setFixPopResult(msg)
       if (fixedQuests > 0) {
-        await writeAuditLog(user.id, 'quest_bulk_fix', undefined, { action: 'fix_pop_language', fixedQuests, fixedQs })
         await fetchExistingQuests()
       }
     } catch (error: unknown) {
@@ -829,8 +793,7 @@ export const AdminPanel: React.FC = () => {
       }))
       .filter(s => s.body || s.code || (s.type === 'table' && s.table_headers?.length))
 
-    // Per-question hint is dropped from the payload when blank so JSONB stays
-    // clean. Empty-string `hint` would otherwise pollute every MC row.
+    // Omit blank hints from the JSONB payload.
     const mc_questions_arr = [
       ...(questForm.act_mc ? normalizeMCQuestions(questForm.mc_questions).map((q, i) => ({
           id: `mc_${i + 1}`, question: q.question.trim(), options: q.options,
@@ -848,7 +811,7 @@ export const AdminPanel: React.FC = () => {
     ]
     const mc_questions = mc_questions_arr.length > 0 ? mc_questions_arr : null
 
-    // Drag & Drop only (balloon no longer uses game_items)
+    // game_items contains drag-and-drop activities.
     const game_items = (() => {
       if (questForm.act_drag && questForm.drag_problems.length > 0) {
         const all: Array<{
@@ -938,6 +901,7 @@ export const AdminPanel: React.FC = () => {
 
     setQuestSaving(true)
     try {
+      await assertAdminAuditReady()
       await ensureLevelInfoForLevel(questForm.level)
       if (replaceId) {
         const { data, error } = await supabase.from('quests').update(questData).eq('id', replaceId).select('id')
@@ -948,7 +912,7 @@ export const AdminPanel: React.FC = () => {
         if (error) throw error
         if (data?.length !== 1) throw new Error('Quest insert returned no row. Check admin INSERT and SELECT policies before retrying.')
       }
-      await fetchExistingQuests()
+      showToast(`Quest ${replaceId ? 'updated' : 'created'} successfully`)
       try {
         localStorage.removeItem(`codesense-admin-quest-draft:${user.id}`)
       } catch (storageError: unknown) {
@@ -959,14 +923,7 @@ export const AdminPanel: React.FC = () => {
       setObjectiveDraft('')
       setLessonDraft('')
       setHintDraft('')
-      try {
-        await writeAuditLog(user.id, replaceId ? 'quest_update' : 'quest_create', undefined, {
-          title: questForm.title, level: questForm.level, id: replaceId ?? null,
-        })
-        showToast(`Quest ${replaceId ? 'updated' : 'created'} successfully`)
-      } catch (auditError: unknown) {
-        showToast(`Quest ${replaceId ? 'updated' : 'created'}, but the audit entry failed: ${errorMessage(auditError)}`, 'error')
-      }
+      await fetchExistingQuests()
     } catch (error: unknown) {
       showToast(`Failed: ${errorMessage(error)}`, 'error')
     }
@@ -992,8 +949,7 @@ export const AdminPanel: React.FC = () => {
   const applyQuestForEdit = (q: ExistingQuest) => {
     const isDrag = q.question_type === 'drag_drop' || !!(q.game_items?.length && q.drop_zones?.length)
 
-    // Split mc_questions into balloon and MC buckets.
-    // New rows have a `mode` field; legacy rows without mode use question_type.
+    // Rows without mode use question_type to select the activity.
     const allMCQs = q.mc_questions ?? []
     const hasMode = allMCQs.some(m => m.mode === 'balloon' || m.mode === 'mc')
     const balloonQsDB = hasMode
@@ -1003,7 +959,6 @@ export const AdminPanel: React.FC = () => {
       ? allMCQs.filter(m => m.mode !== 'balloon')
       : q.question_type === 'pop_balloon' ? [] : allMCQs
 
-    // Reconstruct drag problems from flat game_items + drop_zones (grouped by problem_id)
     const dragProblems: QFormDragProblem[] = (() => {
       if (!isDrag || !q.game_items?.length || !q.drop_zones?.length) return [newDragProblem()]
       const problemMap = new Map<string, QFormDragProblem>()
@@ -1020,7 +975,6 @@ export const AdminPanel: React.FC = () => {
       return problemMap.size > 0 ? Array.from(problemMap.values()) : [newDragProblem()]
     })()
 
-    // Reconstruct ordering problems from flat ordering_items (grouped by problem_id)
     const orderingProblems: QFormOrderProblem[] = (() => {
       if (!q.ordering_items?.length) return [newOrderProblem()]
       const problemMap = new Map<string, QFormOrderProblem>()
@@ -1078,6 +1032,7 @@ export const AdminPanel: React.FC = () => {
     if (!user) return
     setQuestActionId(q.id)
     try {
+      await assertAdminAuditReady()
       const { data, error } = await supabase
         .from('quests')
         .update({ isactive: !q.isactive })
@@ -1085,13 +1040,8 @@ export const AdminPanel: React.FC = () => {
         .select('id')
       if (error) throw error
       if (!data?.length) throw new Error('No quest row was updated. Check quest update permissions.')
+      showToast(`Quest ${q.isactive ? 'deactivated' : 'activated'}`)
       await fetchExistingQuests()
-      try {
-        await writeAuditLog(user.id, q.isactive ? 'quest_deactivate' : 'quest_activate', undefined, { title: q.title })
-        showToast(`Quest ${q.isactive ? 'deactivated' : 'activated'}`)
-      } catch (auditError: unknown) {
-        showToast(`Quest ${q.isactive ? 'deactivated' : 'activated'}, but the audit entry failed: ${errorMessage(auditError)}`, 'error')
-      }
     } catch (error: unknown) {
       showToast(`Failed: ${errorMessage(error)}`, 'error')
     } finally {
@@ -1103,6 +1053,7 @@ export const AdminPanel: React.FC = () => {
     if (!user) return
     setQuestActionId(q.id)
     try {
+      await assertAdminAuditReady()
       const { count, error: progressError } = await supabase.from('mission_progress')
         .select('id', { count: 'exact', head: true }).eq('questid', q.id)
       if (progressError || count === null) {
@@ -1119,14 +1070,9 @@ export const AdminPanel: React.FC = () => {
         .select('id')
       if (error) throw error
       if (!data?.length) throw new Error('No quest row was deleted. Check quest delete permissions.')
+      showToast('Quest deleted')
       if (replaceTarget === q.id) setReplaceTarget('')
       await fetchExistingQuests()
-      try {
-        await writeAuditLog(user.id, 'quest_delete', undefined, { title: q.title, id: q.id })
-        showToast('Quest deleted')
-      } catch (auditError: unknown) {
-        showToast(`Quest deleted, but the audit entry failed: ${errorMessage(auditError)}`, 'error')
-      }
     } catch (error: unknown) {
       showToast(`Failed: ${errorMessage(error)}`, 'error')
     } finally {
@@ -1134,7 +1080,6 @@ export const AdminPanel: React.FC = () => {
     }
   }
 
-  // ─── Render ───────────────────────────────────────────────────────────────
   if (loading) {
     return (
       <div style={{ minHeight: '100vh', background: '#0d1117', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#8b949e' }}>
@@ -1155,7 +1100,6 @@ export const AdminPanel: React.FC = () => {
   return (
     <div className="antialiased" style={{ minHeight: '100vh', background: '#f0f4f8' }}>
 
-      {/* ── Toast ── */}
       {toast && (
         <div role={toast.type === 'error' ? 'alert' : 'status'} style={{
           position: 'fixed', top: 20, right: 20, zIndex: 9999,
@@ -1169,7 +1113,6 @@ export const AdminPanel: React.FC = () => {
       )}
 
       <div className="wrapper">
-        {/* ── Sidebar ── */}
         <aside className="navbar navbar-vertical navbar-expand-lg navbar-dark" style={{ background: '#1a2233' }}>
           <div className="container-fluid">
             <button className="navbar-toggler" type="button" aria-label="Toggle admin navigation" aria-controls="admin-nav" aria-expanded={navOpen} onClick={() => setNavOpen(open => !open)}>
@@ -1213,7 +1156,6 @@ export const AdminPanel: React.FC = () => {
           </div>
         </aside>
 
-        {/* ── Main content ── */}
         <div className="page-wrapper">
           <div className="page-header">
             <div className="container-xl">
@@ -1233,7 +1175,6 @@ export const AdminPanel: React.FC = () => {
           <div className="page-body">
             <div className="container-xl">
 
-              {/* ── Schema health banner (shown when DB is missing tables/columns) ── */}
               {schemaIssues.length > 0 && (
                 <div style={{
                   background: 'rgba(214, 57, 57, 0.08)',
@@ -1264,10 +1205,8 @@ export const AdminPanel: React.FC = () => {
               </div>}
               {avatarError && tab === 'users' && <div className="alert alert-warning" role="alert">{avatarError}</div>}
 
-{/* ── DASHBOARD ── */}
-              {tab === 'dashboard' && <AdminDashboardTab stats={stats} auditLogs={auditLogs} />}
+              {tab === 'dashboard' && <AdminDashboardTab stats={stats} auditLogs={auditLogs} auditLoading={auditLoading} auditError={auditError} />}
 
-{/* ── USERS ── */}
               {tab === 'users' && (
                 <AdminUsersTab
                   userSearch={userSearch}
@@ -1290,10 +1229,8 @@ export const AdminPanel: React.FC = () => {
                 />
               )}
 
-{/* ── AUDIT LOGS ── */}
-              {tab === 'audit' && <AdminAuditTab auditLogs={auditLogs} fetchAuditLogs={fetchAuditLogs} />}
+              {tab === 'audit' && <AdminAuditTab auditLogs={auditLogs} auditLoading={auditLoading} auditError={auditError} fetchAuditLogs={fetchAuditLogs} />}
 
-{/* ── MAINTENANCE ── */}
               {tab === 'maintenance' && (
                 <AdminMaintenanceTab
                   maintenanceOn={maintenanceOn}
@@ -1305,7 +1242,6 @@ export const AdminPanel: React.FC = () => {
                 />
               )}
 
-{/* ── ANNOUNCEMENTS ── */}
               {tab === 'announcements' && (
                 <AdminAnnouncementsTab
                   newAnn={newAnn}
@@ -1316,10 +1252,8 @@ export const AdminPanel: React.FC = () => {
                 />
               )}
 
-              {/* ── QUEST BUILDER ── */}
               {tab === 'quests' && (
                 <>
-                  {/* Sub-tab toggle */}
                   <div className="d-flex gap-2 mb-3">
                     <button className={`btn btn-sm ${questSubTab === 'create' ? 'btn-primary' : 'btn-outline-secondary'}`}
                       onClick={() => setQuestSubTab('create')}>+ Create / Edit Quest</button>
@@ -1329,10 +1263,8 @@ export const AdminPanel: React.FC = () => {
 
                   {questSubTab === 'create' && (
                     <div className="row">
-                      {/* ── Left: config ── */}
                       <div className="col-md-5">
 
-                        {/* Automated PDF generator */}
                         <div className="card mb-3">
                           <div className="card-header">
                             <div>
@@ -1365,7 +1297,6 @@ export const AdminPanel: React.FC = () => {
                           </div>
                         </div>
 
-                        {/* Basic Info */}
                         <div className="card mb-3">
                           <div className="card-header"><h3 className="card-title">Basic Info</h3></div>
                           <div className="card-body">
@@ -1462,7 +1393,6 @@ export const AdminPanel: React.FC = () => {
                           </div>
                         </div>
 
-                        {/* Learning Material */}
                         <div className="card mb-3">
                           <div className="card-header"><h3 className="card-title">Learning Material</h3></div>
                           <div className="card-body">
@@ -1520,7 +1450,6 @@ export const AdminPanel: React.FC = () => {
                                   </>
                                 ) : sec.type === 'table' ? (
                                   <div>
-                                    {/* Column headers */}
                                     <div className="d-flex align-items-center gap-1 mb-1" style={{ flexWrap: 'wrap' }}>
                                       {sec.table_headers.map((h, ci) => (
                                         <div key={ci} className="d-flex align-items-center gap-1">
@@ -1531,7 +1460,6 @@ export const AdminPanel: React.FC = () => {
                                       ))}
                                       <button className="btn btn-xs btn-outline-secondary" onClick={() => { const s = [...questForm.theory_sections]; s[i] = { ...s[i], table_headers: [...s[i].table_headers, ''], table_rows: s[i].table_rows.map(r => [...r, '']) }; qSet({ theory_sections: s }) }}>+ Col</button>
                                     </div>
-                                    {/* Data rows */}
                                     {sec.table_rows.map((row, ri) => (
                                       <div key={ri} className="d-flex align-items-center gap-1 mb-1" style={{ flexWrap: 'wrap' }}>
                                         {row.map((cell, ci) => (
@@ -1555,7 +1483,6 @@ export const AdminPanel: React.FC = () => {
                           </div>
                         </div>
 
-                        {/* Learning Objectives */}
                         <div className="card mb-3">
                           <div className="card-header d-flex justify-content-between align-items-center">
                             <h3 className="card-title mb-0">Learning Objectives</h3>
@@ -1583,7 +1510,6 @@ export const AdminPanel: React.FC = () => {
                           </div>
                         </div>
 
-                        {/* Quest Hints */}
                         <div className="card mb-3">
                           <div className="card-header d-flex justify-content-between align-items-center">
                             <h3 className="card-title mb-0">Quest Hints</h3>
@@ -1631,10 +1557,8 @@ export const AdminPanel: React.FC = () => {
                         </div>
                       </div>
 
-                      {/* ── Right: Activities ── */}
                       <div className="col-md-7">
 
-                        {/* Activity type selector */}
                         <div className="card mb-3">
                           <div className="card-header"><h3 className="card-title">Activity Types</h3></div>
                           <div className="card-body">
@@ -1659,7 +1583,6 @@ export const AdminPanel: React.FC = () => {
                           </div>
                         </div>
 
-                        {/* MC Questions */}
                         {questForm.act_mc && (
                           <div className="card mb-3">
                             <div className="card-header d-flex justify-content-between align-items-center">
@@ -1700,7 +1623,6 @@ export const AdminPanel: React.FC = () => {
                           </div>
                         )}
 
-                        {/* Drag & Drop */}
                         {questForm.act_drag && (
                           <div className="card mb-3">
                             <div className="card-header d-flex justify-content-between align-items-center">
@@ -1775,7 +1697,6 @@ export const AdminPanel: React.FC = () => {
                           </div>
                         )}
 
-                        {/* Balloon Pop */}
                         {questForm.act_balloon && (
                           <div className="card mb-3">
                             <div className="card-header d-flex justify-content-between align-items-center">
@@ -1826,7 +1747,6 @@ export const AdminPanel: React.FC = () => {
                           </div>
                         )}
 
-                        {/* Ordering */}
                         {questForm.act_ordering && (
                           <div className="card mb-3">
                             <div className="card-header d-flex justify-content-between align-items-center">
@@ -1874,7 +1794,6 @@ export const AdminPanel: React.FC = () => {
                           </div>
                         )}
 
-                        {/* Code Fill */}
                         {questForm.act_codefill && (
                           <div className="card mb-3">
                             <div className="card-header d-flex justify-content-between align-items-center">
@@ -1914,7 +1833,6 @@ export const AdminPanel: React.FC = () => {
                           </div>
                         )}
 
-                        {/* Save / Replace */}
                         <div className="card">
                           <div className="card-body">
                             {replaceTarget === null && (
@@ -1969,10 +1887,8 @@ export const AdminPanel: React.FC = () => {
                     </div>
                   )}
 
-                  {/* Manage tab */}
                   {questSubTab === 'manage' && (
                     <>
-                    {/* ── Data Tools ── */}
                     <div className="card mb-3">
                       <div className="card-header">
                         <div>

@@ -1,14 +1,4 @@
-// frontend/src/CampaignPage.tsx
-// Campaign mode entry — three level cards (Beginner / Intermediate / Advanced).
-//
-// Gating model: linear, driven by `mission_progress.first_completed_at`.
-//   • Level 1 is always unlocked.
-//   • Level 2 unlocks once every Level 1 quest has `first_completed_at` set.
-//   • Level 3 unlocks once every Level 2 quest has `first_completed_at` set.
-//
-// `first_completed_at` survives retakes (RPC uses COALESCE; trigger blocks
-// accidental NULLing — see migration_mission_progress_v2.sql), so playing
-// through the level once unlocks the next one and never gets undone.
+// Completing every quest in a phase unlocks the next; first_completed_at survives retakes.
 
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
@@ -17,7 +7,6 @@ import { supabase } from '@/services/supabase';
 import type { Phase } from '@/types/campaign';
 import { isCampaignPhase, levelForPhase, phaseForLevel } from '@/types/campaign';
 
-// ─── Visual config (level cards' look, not gameplay) ───────────────────────
 interface LevelCardConfig {
   id:        number;
   phase:     Phase;
@@ -49,7 +38,7 @@ const LEVELS: LevelCardConfig[] = [
 
 interface PhaseProgress {
   total:    number;
-  finished: number;  // count of quests with first_completed_at set
+  finished: number;
 }
 
 type LevelStatus = 'locked' | 'next' | 'in-progress' | 'complete';
@@ -62,7 +51,6 @@ const CORE_PROGRESS: Record<string, PhaseProgress> = {
 
 const emptyProgress = (): Record<string, PhaseProgress> => ({ ...CORE_PROGRESS });
 
-// ─── DB level info row ─────────────────────────────────────────────────────
 interface LevelInfoRow {
   phase:        string;
   title:        string;
@@ -77,7 +65,6 @@ function hexToRgba(hex: string, alpha: number): string {
   return `rgba(${parseInt(c.slice(0,2),16)},${parseInt(c.slice(2,4),16)},${parseInt(c.slice(4,6),16)},${alpha})`;
 }
 
-// ─── Page ──────────────────────────────────────────────────────────────────
 export const CampaignPage: React.FC = () => {
   const navigate = useNavigate();
   const { user } = useAuth();
@@ -153,7 +140,6 @@ export const CampaignPage: React.FC = () => {
     return Array.from(levels.values()).sort((a, b) => a.id - b.id);
   }, [levelInfo, progress]);
 
-  // ── Body styling: enable scrolling on this page ──────────────────────────
   useEffect(() => {
     const els = [document.documentElement, document.body, document.getElementById('root')];
     els.forEach(el => { if (el) { el.style.overflow = 'auto'; el.style.height = 'auto'; } });
@@ -164,7 +150,6 @@ export const CampaignPage: React.FC = () => {
     };
   }, []);
 
-  // ── Fetch quests + this user's progress to compute unlock state ──────────
   useEffect(() => {
     if (!user?.id) return;
     let cancelled = false;
@@ -230,7 +215,6 @@ export const CampaignPage: React.FC = () => {
     return () => { cancelled = true; };
   }, [user?.id]);
 
-  // ── Status derivation ───────────────────────────────────────────────────
   const isLevelComplete = useCallback((phase: Phase): boolean => {
     const p = progress[phase] ?? { total: 0, finished: 0 };
     return progressLoaded && p.total > 0 && p.finished >= p.total;
@@ -241,8 +225,6 @@ export const CampaignPage: React.FC = () => {
     return previous ? isLevelComplete(previous.phase) : false;
   }, [dynamicLevels, isLevelComplete]);
 
-  // The "next up" level is the first unlocked-but-not-complete level. It gets
-  // a subtle pulse-glow so the user can see at a glance where to continue.
   const nextLevelId: number | null = useMemo(() => {
     for (const lvl of dynamicLevels) {
       if (isLevelUnlocked(lvl.id) && !isLevelComplete(lvl.phase)) return lvl.id;
@@ -257,7 +239,6 @@ export const CampaignPage: React.FC = () => {
     return 'in-progress';
   };
 
-  // ── Click handlers ────────────────────────────────────────────────────────
   const handleLevelClick = (lvl: LevelCardConfig, el: HTMLElement) => {
     if (!isLevelUnlocked(lvl.id)) {
       // Replay the shake by reflowing — re-adding the class on an already-
@@ -270,7 +251,6 @@ export const CampaignPage: React.FC = () => {
     navigate(`/campaign/inside/${lvl.phase}`);
   };
 
-  // ── Render ────────────────────────────────────────────────────────────────
   return (
     <>
       <style>{STYLE_CSS}</style>
@@ -325,7 +305,6 @@ export const CampaignPage: React.FC = () => {
   );
 };
 
-// ─── Header ────────────────────────────────────────────────────────────────
 const Header: React.FC<{ userXP: number; onExit: () => void }> = ({ userXP, onExit }) => (
   <div className="campaign-header">
     <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
@@ -344,7 +323,6 @@ const Header: React.FC<{ userXP: number; onExit: () => void }> = ({ userXP, onEx
   </div>
 );
 
-// ─── Hero banner ───────────────────────────────────────────────────────────
 const HeroBanner: React.FC = () => (
   <div className="hero">
     <div className="hero-grid-overlay" />
@@ -357,7 +335,6 @@ const HeroBanner: React.FC = () => (
   </div>
 );
 
-// ─── Level card ────────────────────────────────────────────────────────────
 const LevelCard: React.FC<{
   config:   LevelCardConfig;
   index:    number;
@@ -369,7 +346,6 @@ const LevelCard: React.FC<{
   const unlocked = status !== 'locked';
   const accent   = status === 'complete' ? '#3fb950' : config.color;
 
-  // ── Hover tilt: soft 3D effect on unlocked cards (resets on leave) ──────
   const handleMouseMove = (e: React.MouseEvent<HTMLDivElement>) => {
     if (!unlocked) return;
     const rect = e.currentTarget.getBoundingClientRect();
@@ -401,8 +377,6 @@ const LevelCard: React.FC<{
     <div
       className={`level-card status-${status}`}
       style={{
-        // CSS variable lets the keyframes / hover effects pick up the level's
-        // accent without prop-drilling colors into every selector.
         ['--accent' as any]: accent,
         ['--glow' as any]:   config.glowColor,
         animationDelay: `${index * 80}ms`,
@@ -414,15 +388,12 @@ const LevelCard: React.FC<{
       aria-disabled={!unlocked}
       aria-label={`${config.title} — ${config.subtitle}, ${badge[status].label.replace(/^[^\w]+/, '').trim()}`}
     >
-      {/* Top accent stripe */}
       <div className="level-card-accent" />
 
-      {/* Status badge */}
       <div className="level-card-badge" style={{ background: badge[status].bg, color: badge[status].fg }}>
         {badge[status].label}
       </div>
 
-      {/* Header row: title + icon */}
       <div className="level-card-head">
         <div>
           <div className="level-card-title">
@@ -435,7 +406,6 @@ const LevelCard: React.FC<{
         <div className="level-card-icon-slot" aria-hidden>{unlocked ? config.icon : '🔒'}</div>
       </div>
 
-      {/* Footer: quest count + CTA */}
       <div className="level-card-foot">
         <div className="level-card-quest-count">
           {isProgressLoading ? (
@@ -460,7 +430,6 @@ const LevelCard: React.FC<{
   );
 };
 
-// ─── Page styles (kept inline so the page is self-contained) ──────────────
 const STYLE_CSS = `
   @import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;600;700&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap');
 
@@ -473,7 +442,6 @@ const STYLE_CSS = `
     50%     { box-shadow: 0 4px 16px rgba(0,0,0,0.35), 0 0 0 10px transparent; }
   }
 
-  /* ── Layout ───────────────────────────────────────────────────────────── */
   .campaign-root {
     position: relative; z-index: 1; min-height: 100vh; width: 100%;
     background: transparent; font-family: 'IBM Plex Sans', system-ui, sans-serif;
@@ -500,7 +468,6 @@ const STYLE_CSS = `
     padding: 28px clamp(16px, 4vw, 48px) 60px;
   }
 
-  /* ── Header ──────────────────────────────────────────────────────────── */
   .campaign-header {
     height: 58px; background: rgba(8,11,16,0.65); backdrop-filter: blur(12px);
     border-bottom: 1px solid #2d333b;
@@ -522,7 +489,6 @@ const STYLE_CSS = `
   }
   .exit-btn:hover { border-color: #f85149; color: #f85149; }
 
-  /* ── Hero banner ─────────────────────────────────────────────────────── */
   .hero {
     position: relative; border-radius: 16px; overflow: hidden;
     margin-bottom: 28px; padding: 28px clamp(20px, 3vw, 36px);
@@ -554,14 +520,12 @@ const STYLE_CSS = `
   }
   .hero-title--accent { color: #e3b341; font-style: italic; margin-top: 4px; }
 
-  /* ── Level grid ──────────────────────────────────────────────────────── */
   .level-grid {
     display: grid;
     grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
     gap: 20px;
   }
 
-  /* ── Level card ──────────────────────────────────────────────────────── */
   .level-card {
     --accent: #3fb950;
     --glow:   rgba(63,185,80,0.35);
@@ -664,7 +628,6 @@ const STYLE_CSS = `
   }
   .level-card:not(.status-locked):hover .level-card-cta { transform: translateX(3px); }
 
-  /* ── Mobile ──────────────────────────────────────────────────────────── */
   @media (max-width: 768px) {
     .campaign-header {
       height: auto !important;

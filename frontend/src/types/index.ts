@@ -1,12 +1,4 @@
-/**
- * CodeSense Shared Type Definitions
- * * These types are used across both frontend and backend to ensure
- * type safety and consistent data structures.
- */
-
-// ============================================================================
 // AST (Abstract Syntax Tree) Node Types
-// ============================================================================
 
 export type ASTNode =
   | ProgramNode | FunctionDeclNode | FunctionPrototypeNode | VariableDeclNode | ParameterNode
@@ -30,13 +22,11 @@ export interface BaseNode {
 
 export interface ProgramNode extends BaseNode {
   type: 'Program';
-  directives: PreprocessorNode[]; // Fixed: Added directives
+  directives: PreprocessorNode[];
   body: ASTNode[];
 }
 
-// ============================================================================
-// Preprocessor Types (UPDATED: Full support)
-// ============================================================================
+// Preprocessor types
 
 export type PreprocessorNode = 
   | IncludeNode | DefineNode | UndefNode
@@ -125,9 +115,7 @@ export type PragmaDirectiveNode =
   | { type: 'PragmaPack'; value: number }
   | { type: 'PragmaGeneric'; value: string };
 
-// ============================================================================
 // Structural Nodes
-// ============================================================================
 
 export interface BlockNode extends BaseNode {
   type: 'Block';
@@ -146,13 +134,13 @@ export interface VariableDeclNode extends BaseNode {
   type: 'VariableDecl';
   varType: string;
   name: string;
-  // FIX: Valid AST uses Nodes (e.g., [5] is an IntegerNode), not raw numbers
+  // Dimensions are AST nodes; a constant size uses an IntegerNode.
   dimensions?: ASTNode[]; 
   value?: ASTNode;
   modifiers?: string[];
 }
 
-// New: Distinct from VariableDecl to handle default values in function headers
+// Parameters can include default values in function declarations.
 export interface ParameterNode extends BaseNode {
   type: 'Parameter';
   varType: string;
@@ -172,9 +160,7 @@ export interface InitializerListNode extends BaseNode {
   values: ASTNode[]; 
 }
 
-// ============================================================================
 // Literals
-// ============================================================================
 
 export interface IntegerNode extends BaseNode {
   type: 'Integer';
@@ -201,9 +187,7 @@ export interface IdentifierNode extends BaseNode {
   name: string;
 }
 
-// ============================================================================
 // Statements & Control Flow
-// ============================================================================
 
 export interface FunctionCallNode extends BaseNode {
   type: 'FunctionCall';
@@ -223,7 +207,7 @@ export interface LoopControlNode extends BaseNode {
 
 export interface BinaryOpNode extends BaseNode {
   type: 'BinaryOp';
-  operator: string; // generalized to string to support bitwise if needed
+  operator: string;
   left: ASTNode;
   right: ASTNode;
 }
@@ -275,7 +259,7 @@ export interface ReturnStatementNode extends BaseNode {
 export interface AssignmentNode extends BaseNode {
   type: 'Assignment';
   operator: string;
-  // FIXED: Target can be a simple name (string) OR an array access (ASTNode)
+  // Targets can be identifiers or array-access nodes.
   target: string | ASTNode; 
   value: ASTNode;
 }
@@ -296,9 +280,7 @@ export interface StreamStatementNode extends BaseNode {
   target?: string;
 }
 
-// ============================================================================
-// Advanced Expressions (NEW)
-// ============================================================================
+// Advanced expressions
 
 export interface UnaryOpNode extends BaseNode {
   type: 'PreIncrement' | 'PostIncrement' | 'PreDecrement' | 'PostDecrement' | 'AddressOf' | 'Dereference';
@@ -329,9 +311,7 @@ export interface LambdaExpressionNode extends BaseNode {
   body: ASTNode[];
 }
 
-// ============================================================================
 // Lexical Tokens
-// ============================================================================
 
 export interface Token {
   type: 'Keyword' | 'Identifier' | 'Separator' | 'Operator' | 'Literal' | 'Comment';
@@ -340,9 +320,7 @@ export interface Token {
   column?: number;
 }
 
-// ============================================================================
 // Symbol Table
-// ============================================================================
 
 export interface SymbolInfo {
   name: string;
@@ -359,15 +337,13 @@ export interface SymbolTable {
   [varName: string]: SymbolInfo;
 }
 
-// ============================================================================
-// Analysis Results (UPDATED FOR FRONTEND INTEGRATION)
-// ============================================================================
+// Analysis results
 
 export interface SafetyCheck {
   line: number;
   operation: string;
   status: 'SAFE' | 'UNSAFE' | 'WARNING';
-  message: string; // Removed '?' to ensure strictness in Table
+  message: string;
   variable?: string;
 }
 
@@ -417,9 +393,7 @@ export interface AnalysisError {
   severity: 'error' | 'warning';
 }
 
-// ============================================================================
 // Control Flow Graph
-// ============================================================================
 
 export interface ControlFlowNode {
   id: string;
@@ -429,14 +403,12 @@ export interface ControlFlowNode {
   line?: number;
   children: string[]; 
   tutorExplanation?: string;
-  x: number; // FIXED: Made mandatory for Visualizer
-  y: number; // FIXED: Made mandatory for Visualizer
+  x: number;
+  y: number;
   [key: string]: any;
 }
 
-// ============================================================================
 // Gamification System
-// ============================================================================
 
 export interface ExplorerProfile {
   id: string;
@@ -483,9 +455,7 @@ export interface LeaderboardEntry {
   rank: number;
 }
 
-// ============================================================================
 // XP System Helpers
-// ============================================================================
 
 export const XP_LEVELS = {
   1: { name: 'Squire', minXP: 0,       maxXP: 4999      },
@@ -523,11 +493,7 @@ export function calculateLevel(totalXP: number): 1 | 2 | 3 | 4 | 5 {
   return 1
 }
 
-// ─── Rank: single source of truth ────────────────────────────────────────────
-// Derive everything from XP, not from the persisted `currentlevel` column.
-// `currentlevel` may be stale on legacy rows (the old RPC used `1 + xp/500`
-// which produced level=3 at just 1000 XP, mapping to "Lord" instead of
-// "Knight"). Using XP avoids that drift entirely.
+// Derive rank from XP because persisted currentlevel values can be stale.
 export interface RankInfo {
   level: 1 | 2 | 3 | 4 | 5
   name:  'Squire' | 'Knight' | 'Lord' | 'Duke' | 'King'
@@ -549,14 +515,11 @@ export function getRank(totalXP: number): RankInfo {
   return RANK_TABLE[calculateLevel(totalXP)]
 }
 
-/** Convenience accessor when you already have a level number. */
 export function getRankByLevel(level: 1 | 2 | 3 | 4 | 5): RankInfo {
   return RANK_TABLE[level]
 }
 
-// ============================================================================
 // API Request/Response Types
-// ============================================================================
 
 export interface AnalyzeCodeRequest {
   sourceCode: string;
@@ -595,9 +558,7 @@ export interface SignupRequest {
   secretCode: string;
 }
 
-// ============================================================================
 // Cognitive Complexity Metric
-// ============================================================================
 
 export interface ComplexityMetrics {
   totalScore: number;
@@ -607,9 +568,7 @@ export interface ComplexityMetrics {
   suggestions: string[];
 }
 
-// ============================================================================
 // CFG Layout (Sugiyama Framework)
-// ============================================================================
 
 
 
@@ -620,9 +579,7 @@ export interface LayeredGraph {
   height: number;
 }
 
-// ============================================================================
 // Cyclomatic Complexity
-// ============================================================================
 
 export interface CyclomaticMetrics {
   score: number;
@@ -632,9 +589,7 @@ export interface CyclomaticMetrics {
   interpretation: string;
 }
 
-// ============================================================================
-// AST Node Types (Phase 2 — matches backend grammar extensions)
-// ============================================================================
+// Additional AST node types
 
 export interface FunctionPrototypeNode extends BaseNode {
   type: 'FunctionPrototype';

@@ -1,14 +1,3 @@
-// ============================================================================
-// frontend/src/types/campaign.ts
-// Single source of truth for all campaign-mode types.
-// Replaces the duplicated/divergent interfaces previously in:
-//   • CampaignPage.tsx
-//   • CampaignInside.tsx
-//   • levelonedashboard.tsx
-//   • lessonactivity.tsx
-// ============================================================================
-
-// ─── Phase / Level ──────────────────────────────────────────────────────────
 export type CorePhase = 'beginner' | 'intermediate' | 'advanced';
 export type Phase = CorePhase | `level_${number}`;
 
@@ -46,10 +35,8 @@ export function isCampaignPhase(value: string | null | undefined): value is Phas
     /^level_[1-9][0-9]*$/.test(value ?? '');
 }
 
-// ─── Activity tabs (mini-games inside a quest) ──────────────────────────────
 export type ActivityTab = 'drag' | 'code_fill' | 'balloon' | 'ordering' | 'mc';
 
-// ─── Hint (per-activity guidance shown in the side panel) ──────────────────
 export interface HintItem {
   icon?: string;
   title: string;
@@ -60,7 +47,6 @@ export interface HintItem {
   activity?: ActivityTab;
 }
 
-// ─── Mini-game data shapes (one per ActivityTab) ───────────────────────────
 export interface GameItem  { id: string; label: string; color: string; }
 export interface DropZone  { id: string; label: string; accepted: string; }
 export interface OrderItem { id: string; label: string; description?: string; correct_order: number; /** Optional per-item hint shown in the side panel when this item is the active one. */ hint?: string; }
@@ -77,7 +63,6 @@ export interface CodeFillItem {
   caption?: string;
 }
 
-// ─── Theory (the lesson's reading material before the games) ───────────────
 export interface TheorySection {
   type?: 'default' | 'code' | 'did_you_know' | 'mistake' | 'diagram' | 'tip' | 'summary' | 'table';
   heading?: string;
@@ -95,7 +80,6 @@ export interface TheorySection {
   table_rows?: string[][];
 }
 
-// ─── Quest (one row from the `quests` table) ───────────────────────────────
 /** Mirrors the `quests` table's columns. Activity-content fields are nullable
  *  because quizzes only have mc_questions, lessons have several at once, etc. */
 export interface Quest {
@@ -130,11 +114,7 @@ export interface Quest {
   theory_sections: TheorySection[] | null;
 }
 
-// ─── Mission progress (one row per (userid, questid)) ──────────────────────
-/** Mirrors the `mission_progress` table after migration v2.
- *  `first_completed_at` is the durable "ever-finished" stamp — it is set
- *  ONCE on the user's first full completion of a quest and is preserved
- *  across retakes by both the RPC's COALESCE and a DB trigger. */
+/** `first_completed_at` records the first full completion and survives retakes. */
 export interface MissionProgress {
   id:                   string;
   userid:               string;
@@ -151,7 +131,6 @@ export interface MissionProgress {
   completion_time_seconds?: number | null;
 }
 
-// ─── Computed UI state for the dashboard ───────────────────────────────────
 /** Status of a quest as shown on the dashboard.
  *   completed → finished (green; offers Review/Retake)
  *   active    → unlocked, not yet finished (yellow; offers Start)
@@ -170,7 +149,6 @@ export interface QuestRow extends Quest {
   currentlyCompleted: boolean;
 }
 
-// ─── Phase-level metadata (banner copy / colors) ───────────────────────────
 export interface LevelInfo {
   title:        string;
   subtitle:     string;
@@ -217,7 +195,6 @@ export function defaultLevelInfoForPhase(phase: Phase): LevelInfo {
   };
 }
 
-// ─── Aggregate stats shown in the level dashboard sidebar ──────────────────
 export interface LevelStats {
   finished: number;
   total:    number;

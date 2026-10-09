@@ -1,12 +1,4 @@
-/**
- * CodeSense Shared Type Definitions
- * * These types are used across both frontend and backend to ensure
- * type safety and consistent data structures.
- */
 
-// ============================================================================
-// AST (Abstract Syntax Tree) Node Types
-// ============================================================================
 
 export type ASTNode =
   | ProgramNode | FunctionDeclNode | VariableDeclNode | ParameterNode | FunctionPrototypeNode
@@ -28,7 +20,6 @@ export interface FunctionPrototypeNode extends BaseNode {
   returnType: string;
   name: string;
   params: ParameterNode[];
-  // Note: No body here, just like the C++ syntax
 }
 
 export interface BaseNode {
@@ -39,13 +30,10 @@ export interface BaseNode {
 
 export interface ProgramNode extends BaseNode {
   type: 'Program';
-  directives: PreprocessorNode[]; // Fixed: Added directives
+  directives: PreprocessorNode[];
   body: ASTNode[];
 }
 
-// ============================================================================
-// Preprocessor Types (UPDATED: Full support)
-// ============================================================================
 
 export type PreprocessorNode = 
   | IncludeNode | DefineNode | UndefNode
@@ -146,9 +134,6 @@ export type PragmaDirectiveNode =
   | { type: 'PragmaPack'; value: number }
   | { type: 'PragmaGeneric'; value: string };
 
-// ============================================================================
-// Structural Nodes
-// ============================================================================
 
 export interface BlockNode extends BaseNode {
   type: 'Block';
@@ -167,13 +152,11 @@ export interface VariableDeclNode extends BaseNode {
   type: 'VariableDecl';
   varType: string;
   name: string;
-  // FIX: Valid AST uses Nodes (e.g., [5] is an IntegerNode), not raw numbers
   dimensions?: ASTNode[]; 
   value?: ASTNode;
   modifiers?: string[];
 }
 
-// New: Distinct from VariableDecl to handle default values in function headers
 export interface ParameterNode extends BaseNode {
   type: 'Parameter';
   varType: string;
@@ -193,9 +176,6 @@ export interface InitializerListNode extends BaseNode {
   values: ASTNode[]; 
 }
 
-// ============================================================================
-// Literals
-// ============================================================================
 
 export interface IntegerNode extends BaseNode {
   type: 'Integer';
@@ -222,9 +202,6 @@ export interface IdentifierNode extends BaseNode {
   name: string;
 }
 
-// ============================================================================
-// Statements & Control Flow
-// ============================================================================
 
 export interface FunctionCallNode extends BaseNode {
   type: 'FunctionCall';
@@ -307,7 +284,6 @@ export interface ReturnStatementNode extends BaseNode {
 export interface AssignmentNode extends BaseNode {
   type: 'Assignment';
   operator: string;
-  // FIXED: Target can be a simple name (string) OR an array access (ASTNode)
   target: string | ASTNode; 
   value: ASTNode;
 }
@@ -319,17 +295,13 @@ export interface ExpressionStatementNode extends BaseNode {
 
 export interface StreamStatementNode extends BaseNode {
   type: 'CoutStatement' | 'CinStatement';
-  // UPDATED: Support for chaining multiple items
   values?: ASTNode[];  // For cout: array of expressions (cout << a << b << c)
   targets?: (string | ASTNode)[]; // For cin: array of identifiers or ArrayAccess nodes (cin >> x >> arr[i])
-  // DEPRECATED (kept for backward compatibility)
+  // Legacy single-item fields.
   value?: ASTNode; 
   target?: string; 
 }
 
-// ============================================================================
-// Advanced Expressions (NEW)
-// ============================================================================
 
 export interface UnaryOpNode extends BaseNode {
   type: 'PreIncrement' | 'PostIncrement' | 'PreDecrement' | 'PostDecrement' | 'AddressOf' | 'Dereference';
@@ -360,9 +332,6 @@ export interface LambdaExpressionNode extends BaseNode {
   body: ASTNode[];
 }
 
-// ============================================================================
-// Lexical Tokens
-// ============================================================================
 
 export interface Token {
   type: 'Keyword' | 'Identifier' | 'Separator' | 'Operator' | 'Literal' | 'Comment';
@@ -371,9 +340,6 @@ export interface Token {
   column?: number;
 }
 
-// ============================================================================
-// Symbol Table
-// ============================================================================
 
 export interface SymbolInfo {
  name: string;
@@ -390,9 +356,6 @@ export interface SymbolTable {
   [varName: string]: SymbolInfo;
 }
 
-// ============================================================================
-// Analysis Results (UPDATED FOR FRONTEND INTEGRATION)
-// ============================================================================
 
 export interface SafetyCheck {
   line: number;
@@ -421,25 +384,20 @@ export interface SymbolicEntry {
 export interface AnalysisResult {
   success: boolean;
   
-  // Phase 1
   tokens: Token[];
   ast: ASTNode | null;
   
-  // Phase 2
   symbolTable?: SymbolInfo[] | Record<string, SymbolInfo>;
   safetyChecks: SafetyCheck[];
   explanations: string[]; 
   errors: AnalysisError[];
   
-  // Phase 3
   cfg: CFG; 
   cognitiveComplexity: number;
   cyclomaticComplexity?: CyclomaticMetrics;
 
-  // Phase 4: ADDED FOR MATH TAB
   symbolicExecution?: SymbolicEntry[];
   
-  // Phase 5: Gamification
   gamification?: {
     xpEarned: number;
     levelTitle: string;
@@ -455,9 +413,6 @@ export interface AnalysisError {
   severity: 'error' | 'warning';
 }
 
-// ============================================================================
-// Control Flow Graph
-// ============================================================================
 
 export interface ControlFlowNode {
   id: string;
@@ -467,14 +422,11 @@ export interface ControlFlowNode {
   line?: number;
   children: string[]; 
   tutorExplanation?: string;
-  x: number; // FIXED: Made mandatory for Visualizer
-  y: number; // FIXED: Made mandatory for Visualizer
+  x: number;
+  y: number;
   [key: string]: any;
 }
 
-// ============================================================================
-// Gamification System
-// ============================================================================
 
 export interface ExplorerProfile {
   id: string;
@@ -523,9 +475,6 @@ export interface LeaderboardEntry {
   rank: number;
 }
 
-// ============================================================================
-// API Request/Response Types
-// ============================================================================
 
 export interface AnalyzeCodeRequest {
   sourceCode: string;
@@ -565,9 +514,6 @@ export interface SignupRequest {
   characterType: 'squire' | 'knight' | 'duke' | 'lord';
 }
 
-// ============================================================================
-// Cognitive Complexity Metric
-// ============================================================================
 
 export interface ComplexityMetrics {
   totalScore: number;
@@ -577,9 +523,6 @@ export interface ComplexityMetrics {
   suggestions: string[];
 }
 
-// ============================================================================
-// CFG Layout (Sugiyama Framework)
-// ============================================================================
 
 
 
@@ -590,9 +533,6 @@ export interface LayeredGraph {
   height: number;
 }
 
-// ============================================================================
-// NEW AST Node Types (Phase 2 grammar extensions)
-// ============================================================================
 
 export interface RangeBasedForNode extends BaseNode {
   type: 'RangeBasedFor';
@@ -629,9 +569,6 @@ export interface ThrowStatementNode extends BaseNode {
   value?: ASTNode;
 }
 
-// ============================================================================
-// Cyclomatic Complexity (added to AnalysisResult)
-// ============================================================================
 export interface CyclomaticMetrics {
   score: number;           // V(G) = edges - nodes + 2*connected_components
   edges: number;

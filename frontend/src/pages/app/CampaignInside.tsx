@@ -1,19 +1,4 @@
-// frontend/src/CampaignInside.tsx
-// Per-level dashboard. One screen handles all three phases (beginner /
-// intermediate / advanced) — replaces the old per-level dashboards.
-//
-// Gating model (linear, exploit-proof):
-//   • A quest is `completed` when mission_progress.status === 'completed'.
-//   • A quest is `active` when the previous quest in sortorder has been
-//     finished at least once (mission_progress.first_completed_at IS NOT NULL).
-//   • Otherwise `locked`.
-//
-// `first_completed_at` survives retakes (RPC uses COALESCE, trigger blocks
-// NULLing — see migration_mission_progress_v2.sql), so retaking never closes
-// the gate on later quests.
-//
-// Replay XP cannot grind unlocks because gating is decoupled from XP — only
-// real "first finish" timestamps move the gate.
+// Quest access depends on the previous quest's first_completed_at, which survives retakes.
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
@@ -27,7 +12,6 @@ import { defaultLevelInfoForPhase, isCampaignPhase, levelForPhase, phaseForLevel
 import { buildQuests } from '@/campaign/buildQuests';
 import { FIRST_COMPLETION_XP, RETAKE_COMPLETION_XP, levelXpCapForPhase } from '@/campaign/retakeXp';
 
-// ─── Visual constants ──────────────────────────────────────────────────────
 const ACTIVITY_ICON: Record<string, string> = {
   drag_drop:       '🃏',
   code_fill:       '💻',
@@ -79,7 +63,6 @@ const activityTypesForQuest = (q: QuestRow): string[] => {
 
 const lessonPathForQuest = (quest: QuestRow): string => `/lesson/${quest.id}`;
 
-// ─── Small UI bits ─────────────────────────────────────────────────────────
 const StatBar: React.FC<{
   icon: string; label: string; current: number; total: number; color: string; maxed?: boolean;
 }> = ({ icon, label, current, total, color, maxed }) => {
@@ -124,7 +107,6 @@ const SubTopicItem: React.FC<{ title: string; isDone: boolean }> = ({ title, isD
   </div>
 );
 
-// ─── Quest card ────────────────────────────────────────────────────────────
 const QuestCard: React.FC<{
   quest: QuestRow; index: number; onClick: () => void;
 }> = ({ quest, index, onClick }) => {
@@ -194,7 +176,6 @@ const QuestCard: React.FC<{
   );
 };
 
-// ─── Sidebar panels ───────────────────────────────────────────────────────
 const ProgressPanel: React.FC<{ stats: LevelStats; hasNextLevel: boolean }> = ({ stats, hasNextLevel }) => {
   const xpMaxed = stats.xpTotal > 0 && stats.xpEarned >= stats.xpTotal;
   return (
@@ -276,9 +257,6 @@ const QuestMixPanel: React.FC<{ quests: QuestRow[] }> = ({ quests }) => {
   );
 };
 
-// ─── Page ──────────────────────────────────────────────────────────────────
-// Note: pure gating logic (buildQuests) lives in ./campaign/buildQuests.ts so
-// it can be unit-tested without mounting this component.
 export const CampaignInside: React.FC = () => {
   const { phase: phaseParam } = useParams<{ phase: string }>();
   const navigate = useNavigate();
@@ -298,7 +276,6 @@ export const CampaignInside: React.FC = () => {
 
   const fetchIdRef = useRef(0);
 
-  // ── Fetch everything ────────────────────────────────────────────────────
   const fetchAll = useCallback(async () => {
     if (!user?.id) return;
     const fetchId = ++fetchIdRef.current;
@@ -340,7 +317,6 @@ export const CampaignInside: React.FC = () => {
         }
       }
 
-      // 1. User XP (header)
       const { data: ud, error: userError } = await supabase
         .from('users')
         .select('totalxp')
@@ -350,7 +326,6 @@ export const CampaignInside: React.FC = () => {
       if (userError) throw userError;
       if (ud?.totalxp !== undefined) setUserXP(ud.totalxp ?? 0);
 
-      // 2. Phase banner copy
       const { data: lm, error: levelInfoError } = await supabase
         .from('level_info')
         .select('*')
@@ -383,7 +358,6 @@ export const CampaignInside: React.FC = () => {
       if (nextQuestError) throw nextQuestError;
       if (!nextQuests) throw new Error('The next level quest query returned no data.');
 
-      // 3. Quests for this phase
       const { data: qData, error: qErr } = await supabase
         .from('quests')
         .select('id,title,description,difficulty,level,phase,basexp,requiredxp,sortorder,isactive,question_type,objectives,hints,game_items,drop_zones,ordering_items,mc_questions,code_fill_items,tutorial_title,tutorial_body,tutorial_image,theory_sections')
@@ -397,7 +371,6 @@ export const CampaignInside: React.FC = () => {
       if (!qData) throw new Error('The current level quest query returned no data.');
       const qList = qData as unknown as Quest[];
 
-      // 4. This user's mission_progress for those quests
       let mp: MissionProgress[] = [];
       if (qList.length > 0) {
         const { data: pData, error: pErr } = await supabase
@@ -427,7 +400,6 @@ export const CampaignInside: React.FC = () => {
 
   useEffect(() => { fetchAll(); }, [fetchAll]);
 
-  // ── Real-time: re-fetch on mission_progress changes for this user ──────
   useEffect(() => {
     if (!user?.id) return;
     const ch = supabase
@@ -447,12 +419,10 @@ export const CampaignInside: React.FC = () => {
     return () => { supabase.removeChannel(ch); };
   }, [user?.id, phase, fetchAll]);
 
-  // ── Derived ─────────────────────────────────────────────────────────────
   const accent      = levelInfo.accent_color;
   const levelNumber = levelForPhase(phase);
   const pctDone     = stats.total > 0 ? Math.round((stats.finished / stats.total) * 100) : 0;
 
-  // First active quest = "Continue" CTA target.
   const nextQuest = useMemo(
     () => quests.find(q => q.uiStatus === 'active'),
     [quests]
@@ -471,7 +441,6 @@ export const CampaignInside: React.FC = () => {
       <style>{STYLE_CSS}</style>
 
       <div className="ci-root">
-        {/* Header */}
         <header className="ci-header" style={{ height: 56, background: 'rgba(13,17,23,0.97)', borderBottom: '1px solid rgba(255,255,255,0.05)', display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '0 28px', position: 'sticky', top: 0, zIndex: 100, backdropFilter: 'blur(14px)' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 10, minWidth: 0 }}>
             <span className="ci-header-logo" style={{ fontSize: 17, flexShrink: 0 }}>🗺️</span>
@@ -503,7 +472,6 @@ export const CampaignInside: React.FC = () => {
             </div>
           )}
 
-          {/* Hero */}
           <div className="ci-hero" style={{ position: 'relative', borderRadius: 16, overflow: 'hidden', height: 162, marginBottom: 26, background: levelInfo.banner_url ? `url(${levelInfo.banner_url}) center/cover no-repeat` : `linear-gradient(135deg,${accent}18 0%, #101d28 55%, #0d1117 100%)`, border: '1px solid rgba(255,255,255,0.07)', boxShadow: '0 12px 48px rgba(0,0,0,.55)', animation: 'heroIn 0.5s ease' }}>
             <div style={{ position: 'absolute', inset: 0, opacity: 0.055, backgroundImage: `linear-gradient(${accent}99 1px,transparent 1px),linear-gradient(90deg,${accent}99 1px,transparent 1px)`, backgroundSize: '38px 38px' }} />
             <div style={{ position: 'absolute', left: 0, right: 0, height: '30%', opacity: 0.08, background: `linear-gradient(transparent,${accent}80,transparent)`, animation: 'scan 5s ease-in-out infinite', pointerEvents: 'none' }} />
@@ -515,7 +483,6 @@ export const CampaignInside: React.FC = () => {
             </div>
             <div style={{ position: 'absolute', top: 16, right: 16, zIndex: 2, display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 8 }}>
               <div style={{ position: 'relative', height: 32, display: 'flex', alignItems: 'center' }}>
-  {/* Locked badge — fades out when allDone */}
   <div style={{
     position: 'absolute', right: 0,
     padding: '7px 16px', borderRadius: 7,
@@ -532,7 +499,6 @@ export const CampaignInside: React.FC = () => {
     🔒 Finish all quests to advance
   </div>
 
-  {/* Next Level button — fades in when allDone */}
   <button
     onClick={goToNextLevel}
     style={{
@@ -561,9 +527,7 @@ export const CampaignInside: React.FC = () => {
             </div>
           </div>
 
-          {/* 2-col layout */}
           <div className="ci-two-col" style={{ display: 'grid', gridTemplateColumns: '1fr 252px', gap: 18, alignItems: 'start' }}>
-            {/* Quest list */}
             <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
                 <span style={{ fontSize: 11, color: '#484f58', fontFamily: "'JetBrains Mono',monospace", letterSpacing: '1px', textTransform: 'uppercase' }}>Lessons</span>
@@ -592,13 +556,11 @@ export const CampaignInside: React.FC = () => {
               }
             </div>
 
-            {/* Sidebar */}
             <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
               <ProgressPanel      stats={stats} hasNextLevel={hasNextLevel} />
               <ActivityTypesPanel quests={quests} />
               <QuestMixPanel      quests={quests} />
 
-              {/* Continue CTA */}
               {!loading && !error && nextQuest && (
                 <button onClick={() => navigate(lessonPathForQuest(nextQuest))} style={{ width: '100%', padding: 12, borderRadius: 10, border: 'none', background: `linear-gradient(135deg,${accent},${accent}cc)`, color: '#080c11', fontSize: 12, fontWeight: 900, cursor: 'pointer', letterSpacing: '.3px', fontFamily: "'Syne',sans-serif", boxShadow: `0 4px 18px ${accent}40`, transition: 'all .2s', animation: 'questIn .5s ease .38s both', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6 }}
                   onMouseEnter={e => { e.currentTarget.style.transform = 'translateY(-2px)'; e.currentTarget.style.boxShadow = `0 8px 26px ${accent}55`; }}
@@ -608,7 +570,6 @@ export const CampaignInside: React.FC = () => {
                 </button>
               )}
 
-              {/* Completion celebration */}
               {!loading && allDone && (
                 <div style={{ padding: '14px 14px 12px', borderRadius: 10, textAlign: 'center', background: 'rgba(63,185,80,.08)', border: '1px solid rgba(63,185,80,.3)', animation: 'questIn .5s ease .38s both' }}>
                   <div style={{ fontSize: 22, marginBottom: 6 }}>🏆</div>
@@ -627,7 +588,6 @@ export const CampaignInside: React.FC = () => {
   );
 };
 
-// ─── Page styles ───────────────────────────────────────────────────────────
 const STYLE_CSS = `
   @import url('https://fonts.googleapis.com/css2?family=Syne:wght@400;600;700;800;900&family=JetBrains+Mono:wght@400;600;700&display=swap');
   @keyframes questIn   { from { opacity: 0; transform: translateX(-10px); } to { opacity: 1; transform: translateX(0); } }
@@ -641,38 +601,31 @@ const STYLE_CSS = `
   ::-webkit-scrollbar-thumb { background: #21262d; border-radius: 3px; }
 
   @media (max-width: 768px) {
-    /* Header — collapse to compact single row */
     .ci-header {
       height: auto !important;
       padding: 10px 14px !important;
       flex-wrap: wrap !important;
       gap: 8px !important;
     }
-    /* Hide "CodeSense Journey ›" — keep level badge and back button */
     .ci-header-brand, .ci-header-sep { display: none !important; }
-    /* XP pill compact */
     .ci-xp-pill { padding: 5px 10px !important; }
     .ci-xp-pill span:last-child { font-size: 12px !important; }
 
-    /* Main content breathing room */
     .ci-root main {
       padding: 14px 12px 48px !important;
     }
 
-    /* Hero banner shorter on mobile */
     .ci-hero {
       height: 110px !important;
       margin-bottom: 14px !important;
     }
     .ci-hero h1 { font-size: clamp(16px, 4vw, 22px) !important; }
 
-    /* Quest list + sidebar stack vertically */
     .ci-two-col {
       grid-template-columns: 1fr !important;
       gap: 14px !important;
     }
 
-    /* Quest card — comfortable tap target, no side overflow */
     .ci-root .ci-two-col > div:first-child > div {
       margin-bottom: 10px !important;
     }

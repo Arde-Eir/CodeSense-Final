@@ -1,4 +1,3 @@
-// src/LeaderboardPage.tsx
 import React, { useCallback, useEffect, useState, useRef, useMemo } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useAuth } from '@/components/AuthContext'
@@ -67,7 +66,6 @@ const FILTER_OPTIONS: { key: FilterKey; label: string; icon: string }[] = [
   { key: 'professional', label: 'Professionals', icon: '💼' },
 ]
 
-// ─── Relative time helper ────────────────────────────────────────────────────
 const validActivityTime = (iso: string | null | undefined): number | null => {
   const raw = iso
   if (!raw) return null
@@ -139,7 +137,6 @@ const PlayerAvatar: React.FC<{
   </div>
 )
 
-// ─── Main Leaderboard Page ───────────────────────────────────────────────────
 export const LeaderboardPage: React.FC = () => {
   const navigate = useNavigate()
   const { user } = useAuth()
@@ -162,7 +159,7 @@ export const LeaderboardPage: React.FC = () => {
   const [speedView, setSpeedView] = useState<'all' | 'best'>('best')
   const searchTimeout = useRef<ReturnType<typeof setTimeout> | null>(null)
 
-  // Override overflow:hidden from layout.css
+  // Allow page scrolling despite the sandbox layout's overflow:hidden.
   useEffect(() => {
     const els = [document.documentElement, document.body, document.getElementById('root')]
     els.forEach(el => { if (el) el.style.overflow = 'auto' })
@@ -359,7 +356,7 @@ export const LeaderboardPage: React.FC = () => {
   const rankColor = (rank: number) =>
     rank === 1 ? '#ffd700' : rank === 2 ? '#c0c0c0' : rank === 3 ? '#cd7f32' : '#8b949e'
 
-  // When sorting by something other than XP, we don't show a global rank number
+  // Global rank applies only to XP ordering.
   const globalRank = (i: number) => (searchQuery || sortKey !== 'xp') ? null : page * PAGE_SIZE + i + 1
 
   const shareMyRank = () => {
@@ -371,10 +368,8 @@ export const LeaderboardPage: React.FC = () => {
     })
   }
 
-  // Memo: show podium only for XP-sort, first page, no search
   const showPodium = !searchQuery && page === 0 && sortKey === 'xp' && filterKey === 'all' && players.length >= 3
 
-  // "Best per quest" view: one entry per quest — the fastest time (data already sorted ASC).
   const speedByQuest = useMemo(() => {
     const seen = new Set<string>()
     return speedRecords.filter(r => {
@@ -431,7 +426,6 @@ export const LeaderboardPage: React.FC = () => {
         }
       `}</style>
 
-      {/* Header */}
       <header className="lb-header" style={{
         display: 'flex', justifyContent: 'space-between', alignItems: 'center',
         padding: '16px 32px', background: 'rgba(22,27,34,0.95)',
@@ -452,7 +446,6 @@ export const LeaderboardPage: React.FC = () => {
 
       <div className="lb-content" style={{ maxWidth: '960px', margin: '0 auto', padding: '28px 24px', boxSizing: 'border-box' as const }}>
 
-        {/* ── Stats summary strip ── */}
         <div className="lb-stats-grid" style={{
           display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '10px',
           marginBottom: '22px',
@@ -473,7 +466,6 @@ export const LeaderboardPage: React.FC = () => {
           ))}
         </div>
 
-        {/* My rank banner */}
         {myPlayer && myRank && !searchQuery && (
           <div style={{
             background: 'rgba(76,175,80,0.08)', border: '1px solid rgba(76,175,80,0.3)',
@@ -518,10 +510,8 @@ export const LeaderboardPage: React.FC = () => {
           </div>
         )}
 
-        {/* Top 3 podium */}
         {showPodium && (
           <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'flex-end', gap: '16px', marginBottom: '32px' }}>
-            {/* 2nd */}
             <div onClick={() => setDetailPlayer(players[1])} style={{ textAlign: 'center', flex: 1, cursor: 'pointer' }}>
               <div style={{ fontSize: '28px', marginBottom: '8px' }}>🥈</div>
               <div style={{ margin: '0 auto 8px', width: 56 }}>
@@ -531,7 +521,6 @@ export const LeaderboardPage: React.FC = () => {
               <div style={{ color: '#ffc107', fontSize: '12px', fontWeight: '700' }}>{players[1].totalxp.toLocaleString()} XP</div>
               <div style={{ height: '60px', background: 'rgba(192,192,192,0.15)', border: '1px solid rgba(192,192,192,0.3)', borderRadius: '8px 8px 0 0', marginTop: '8px' }} />
             </div>
-            {/* 1st */}
             <div onClick={() => setDetailPlayer(players[0])} style={{ textAlign: 'center', flex: 1, cursor: 'pointer' }}>
               <div style={{ fontSize: '32px', marginBottom: '8px' }}>🥇</div>
               <div style={{ margin: '0 auto 8px', width: 68, filter: 'drop-shadow(0 0 20px rgba(255,193,7,0.4))' }}>
@@ -541,7 +530,6 @@ export const LeaderboardPage: React.FC = () => {
               <div style={{ color: '#ffc107', fontSize: '13px', fontWeight: '700' }}>{players[0].totalxp.toLocaleString()} XP</div>
               <div style={{ height: '80px', background: 'rgba(255,193,7,0.1)', border: '1px solid rgba(255,193,7,0.3)', borderRadius: '8px 8px 0 0', marginTop: '8px' }} />
             </div>
-            {/* 3rd */}
             <div onClick={() => setDetailPlayer(players[2])} style={{ textAlign: 'center', flex: 1, cursor: 'pointer' }}>
               <div style={{ fontSize: '28px', marginBottom: '8px' }}>🥉</div>
               <div style={{ margin: '0 auto 8px', width: 56 }}>
@@ -554,9 +542,7 @@ export const LeaderboardPage: React.FC = () => {
           </div>
         )}
 
-        {/* Search + Sort + Filter controls */}
         <div style={{ display: 'flex', flexWrap: 'wrap', gap: '10px', marginBottom: '16px' }}>
-          {/* Search */}
           <div style={{
             flex: 1, minWidth: '220px',
             background: 'rgba(22,27,34,0.9)', border: '1px solid #21262d',
@@ -579,7 +565,6 @@ export const LeaderboardPage: React.FC = () => {
             )}
           </div>
 
-          {/* Sort dropdown */}
           <select
             value={sortKey}
             onChange={e => { setSortKey(e.target.value as SortKey); setPage(0) }}
@@ -599,7 +584,6 @@ export const LeaderboardPage: React.FC = () => {
           </select>
         </div>
 
-        {/* Filter chips */}
         <div style={{ display: 'flex', gap: '6px', marginBottom: '16px', flexWrap: 'wrap' }}>
           {FILTER_OPTIONS.map(f => {
             const active = filterKey === f.key
@@ -630,9 +614,7 @@ export const LeaderboardPage: React.FC = () => {
           </div>
         )}
 
-        {/* Players table */}
         <div style={{ background: 'rgba(22,27,34,0.9)', border: '1px solid #21262d', borderRadius: '14px', overflow: 'hidden' }}>
-          {/* Table header */}
           <div className="lb-thead" style={{
             display: 'grid', gridTemplateColumns: '52px 1fr 110px 110px 90px 110px',
             padding: '10px 20px', borderBottom: '1px solid #21262d',
@@ -676,7 +658,6 @@ export const LeaderboardPage: React.FC = () => {
                   onMouseEnter={e => { if (!isMe) (e.currentTarget as HTMLElement).style.background = 'rgba(255,255,255,0.04)' }}
                   onMouseLeave={e => { if (!isMe) (e.currentTarget as HTMLElement).style.background = i % 2 === 0 ? 'transparent' : 'rgba(255,255,255,0.01)' }}
                 >
-                  {/* Rank */}
                   <div style={{ display: 'flex', alignItems: 'center' }}>
                     {rank ? (
                       <span style={{ fontSize: rank <= 3 ? '18px' : '13px', fontWeight: '700', color: rankColor(rank) }}>
@@ -687,7 +668,6 @@ export const LeaderboardPage: React.FC = () => {
                     )}
                   </div>
 
-                  {/* Player */}
                   <div style={{ display: 'flex', alignItems: 'center', gap: '10px', minWidth: 0 }}>
                     <PlayerAvatar
                       player={player}
@@ -714,25 +694,21 @@ export const LeaderboardPage: React.FC = () => {
                     </div>
                   </div>
 
-                  {/* Level */}
                   <div className="lb-col-level" style={{ display: 'flex', alignItems: 'center' }}>
                     <span style={{ color: '#64b5f6', fontSize: '12px', fontWeight: '600' }}>
                       {getRank(player.totalxp ?? 0).name}
                     </span>
                   </div>
 
-                  {/* XP */}
                   <div style={{ display: 'flex', alignItems: 'center' }}>
                     <span style={{ color: '#ffc107', fontSize: '13px', fontWeight: '700' }}>{player.totalxp.toLocaleString()}</span>
                     <span style={{ color: '#484f58', fontSize: '10px', marginLeft: '3px' }}>XP</span>
                   </div>
 
-                  {/* Sandbox runs */}
                   <div className="lb-col-runs" style={{ display: 'flex', alignItems: 'center' }}>
                     <span style={{ color: '#4caf50', fontSize: '12px', fontWeight: '600' }}>{player.sandbox_runs}</span>
                   </div>
 
-                  {/* Last active */}
                   <div style={{ display: 'flex', alignItems: 'center' }}>
                     <span style={{ color: online ? '#4caf50' : '#8b949e', fontSize: '11px', fontWeight: online ? '700' : '400' }}>
                       {timeAgo(player.lastactive)}
@@ -744,7 +720,6 @@ export const LeaderboardPage: React.FC = () => {
           )}
         </div>
 
-        {/* Pagination — only when not searching */}
         {!searchQuery && totalPages > 1 && (
           <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', gap: '8px', marginTop: '20px' }}>
             <button
@@ -781,9 +756,7 @@ export const LeaderboardPage: React.FC = () => {
           </div>
         )}
 
-        {/* ── Speed Records ── */}
         <div style={{ marginTop: '36px' }}>
-          {/* Header row */}
           <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '16px', flexWrap: 'wrap' }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flex: 1 }}>
               <span style={{ fontSize: '22px' }}>⚡</span>
@@ -792,7 +765,6 @@ export const LeaderboardPage: React.FC = () => {
                 <span style={{ fontSize: '12px', color: '#484f58' }}>· {speedView === 'best' ? `${speedByQuest.length} quests` : `${speedRecords.length} runs`}</span>
               )}
             </div>
-            {/* View toggle */}
             <div style={{ display: 'flex', background: 'rgba(22,27,34,0.9)', border: '1px solid #21262d', borderRadius: '10px', padding: '3px', gap: '2px' }}>
               {([{ key: 'best', label: '🏅 Best Per Quest' }, { key: 'all', label: '📋 All Runs' }] as const).map(v => {
                 const active = speedView === v.key
@@ -841,14 +813,12 @@ export const LeaderboardPage: React.FC = () => {
                     onMouseEnter={e => { if (p) (e.currentTarget as HTMLElement).style.background = isMe ? 'rgba(63,185,80,0.13)' : 'rgba(255,255,255,0.05)' }}
                     onMouseLeave={e => { (e.currentTarget as HTMLElement).style.background = isMe ? 'rgba(63,185,80,0.07)' : 'rgba(22,27,34,0.9)' }}
                   >
-                    {/* Rank */}
                     <div style={{ minWidth: 34, textAlign: 'center', flexShrink: 0 }}>
                       {i < 3
                         ? <span style={{ fontSize: '22px' }}>{(['🥇', '🥈', '🥉'] as const)[i]}</span>
                         : <span style={{ fontSize: '13px', fontWeight: 700, color: '#484f58', fontFamily: "'JetBrains Mono',monospace" }}>#{i + 1}</span>}
                     </div>
 
-                    {/* Avatar */}
                     <PlayerAvatar
                       player={p}
                       size={38}
@@ -858,7 +828,6 @@ export const LeaderboardPage: React.FC = () => {
                       fontSize={15}
                     />
 
-                    {/* Player + Quest info */}
                     <div style={{ flex: 1, minWidth: 0 }}>
                       <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '3px' }}>
                         <span style={{ color: isMe ? '#4caf50' : '#e6edf3', fontSize: '13px', fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
@@ -872,7 +841,6 @@ export const LeaderboardPage: React.FC = () => {
                       </div>
                     </div>
 
-                    {/* Time */}
                     <div style={{ textAlign: 'right', flexShrink: 0 }}>
                       <div style={{ fontSize: '18px', fontFamily: "'JetBrains Mono',monospace", color: timeColor, fontWeight: 800, letterSpacing: '-0.5px' }}>
                         {formatTime(record.completion_time_seconds)}

@@ -5,7 +5,6 @@ import { supabase } from '@/services/supabase'
 import { getProfileImageUrls } from '@/services/ProfileImages'
 import { getLevelProgress, getXPToNextLevel, getLevelName, XP_LEVELS, calculateLevel } from '@/types'
 
-// ─── Types ────────────────────────────────────────────────────────────────────
 
 interface ProfileData {
   playername: string
@@ -95,7 +94,6 @@ function isUserType(value: string | null): value is 'student' | 'professional' {
   return value === 'student' || value === 'professional'
 }
 
-// ─── Achievements definition ──────────────────────────────────────────────────
 
 interface Achievement {
   id: string
@@ -146,7 +144,6 @@ const MODE_COLOR: Record<string, string> = {
   sandbox: '#4caf50', campaign: '#ffa726',
 }
 
-// ─── Global animation styles ─────────────────────────────────────────────────
 
 const PROFILE_STYLES = `
   @keyframes profileFadeUp { from{opacity:0;transform:translateY(14px)}to{opacity:1;transform:translateY(0)} }
@@ -166,13 +163,11 @@ const PROFILE_STYLES = `
   .prof-danger-btn:hover { background:rgba(248,81,73,0.15) !important; border-color:#f85149 !important; }
 `
 
-// ─── Main Component ───────────────────────────────────────────────────────────
 
 export const ProfileSettings: React.FC = () => {
   const navigate = useNavigate()
   const { user, setUser } = useAuth()
 
-  // Core profile state
   const [profile, setProfile] = useState<ProfileData | null>(null)
   const [leaderboard, setLeaderboard] = useState<LeaderboardEntry[]>([])
   const [myRank, setMyRank] = useState<number | null>(null)
@@ -182,7 +177,6 @@ export const ProfileSettings: React.FC = () => {
   const [activityLog, setActivityLog] = useState<ActivityLogEntry[]>([])
   const [fastestQuests, setFastestQuests] = useState<FastQuestEntry[]>([])
 
-  // Image state
   const [avatarUrl, setAvatarUrl] = useState<string | null>(null)
   const [bannerUrl, setBannerUrl] = useState<string | null>(null)
   const [cropModalOpen, setCropModalOpen] = useState(false)
@@ -194,7 +188,6 @@ export const ProfileSettings: React.FC = () => {
   const isDragging = useRef(false)
   const dragStart = useRef({ x: 0, y: 0 })
 
-  // UI state
   const [activeTab, setActiveTab] = useState<'overview' | 'achievements' | 'activity' | 'settings' | 'learn'>('overview')
   const [isEditing, setIsEditing] = useState(false)
   const [editName, setEditName] = useState('')
@@ -204,7 +197,6 @@ export const ProfileSettings: React.FC = () => {
   const [saveMsg, setSaveMsg] = useState<{ text: string; ok: boolean } | null>(null)
   const [loading, setLoading] = useState(true)
 
-  // Settings tab state
   const [editCharType, setEditCharType] = useState<CharacterType>('squire')
   const [editUserType, setEditUserType] = useState<'student' | 'professional'>('student')
   const [pwCurrent, setPwCurrent] = useState('')
@@ -222,7 +214,7 @@ export const ProfileSettings: React.FC = () => {
     return () => { els.forEach(el => { if (el) el.style.overflow = '' }) }
   }, [])
 
-  // Fix crop drag-stuck bug when mouse leaves window
+  // End crop dragging when the pointer leaves the window.
   useEffect(() => {
     if (!cropModalOpen) return
     const stop = () => { isDragging.current = false }
@@ -230,7 +222,6 @@ export const ProfileSettings: React.FC = () => {
     return () => window.removeEventListener('mouseup', stop)
   }, [cropModalOpen])
 
-  // Inject styles
   useEffect(() => {
     const id = 'profile-styles'
     if (!document.getElementById(id)) {
@@ -242,7 +233,6 @@ export const ProfileSettings: React.FC = () => {
   const fetchAll = useCallback(async () => {
     if (!user) return
     try {
-      // Profile
       const { data: prof, error: profileError } = await supabase
         .from('users')
         .select('playername, email, totalxp, sandbox_runs, charactertype, user_type, createdat')
@@ -255,7 +245,6 @@ export const ProfileSettings: React.FC = () => {
         setEditUserType(isUserType(prof.user_type) ? prof.user_type : 'student')
       }
 
-      // Leaderboard
       const { data: lb, error: leaderboardError } = await supabase
         .from('users').select('id, playername, totalxp')
         .eq('isactive', true).eq('is_banned', false).order('totalxp', { ascending: false }).limit(10)
@@ -280,7 +269,6 @@ export const ProfileSettings: React.FC = () => {
       if (progressError) throw new Error(`Mission progress lookup failed: ${progressError.message}`)
       setQuestsCompleted(countUniqueCompletedQuests(progressRows ?? []))
 
-      // Recent completed quests for activity
       const { data: cq, error: completedError } = await supabase.from('mission_progress')
         .select('questid, status, completedat, first_completed_at, updatedat, hintsused, quests(title)')
         .eq('userid', user.id)
@@ -291,7 +279,6 @@ export const ProfileSettings: React.FC = () => {
         .slice(0, 15)
       setCompletedQuests(recentCompleted)
 
-      // Fastest quest completions
       const { data: fq, error: fastestError } = await supabase
         .from('mission_progress')
         .select('questid, completion_time_seconds, quests(title)')
@@ -302,14 +289,12 @@ export const ProfileSettings: React.FC = () => {
       if (fastestError) throw new Error(`Fastest quest lookup failed: ${fastestError.message}`)
       setFastestQuests((fq ?? []) as unknown as FastQuestEntry[])
 
-      // Recent reports (kept for stats counters)
       const { data: reps, error: reportsError } = await supabase.from('reports')
         .select('id, type, createdat, mode_context, cognitive_complexity')
         .eq('userid', user.id).order('createdat', { ascending: false }).limit(20)
       if (reportsError) throw new Error(`Reports lookup failed: ${reportsError.message}`)
       setReports((reps ?? []) as ReportEntry[])
 
-      // Activity log — primary feed source
       const { data: al, error: activityError } = await supabase
         .from('activity_log')
         .select('id, type, title, description, xp_gained, createdat, meta')
@@ -331,7 +316,6 @@ export const ProfileSettings: React.FC = () => {
     fetchAll()
   }, [fetchAll, navigate, user])
 
-  // ── Image handling ────────────────────────────────────────────────────────
 
   const handleAvatarUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0]; if (!file || !user) return
@@ -391,7 +375,6 @@ export const ProfileSettings: React.FC = () => {
     finally { setUploadingBanner(false) }
   }
 
-  // ── Save profile ──────────────────────────────────────────────────────────
 
   const handleSaveProfile = async () => {
     if (!user) return; setSaving(true)
@@ -478,7 +461,6 @@ export const ProfileSettings: React.FC = () => {
 
   const flashSave = (text: string, ok = true) => { setSaveMsg({ text, ok }); setTimeout(() => setSaveMsg(null), 3500) }
 
-  // ── Derived values ────────────────────────────────────────────────────────
 
   if (loading) return (
     <div style={{ minHeight: '100vh', background: '#0d1117', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#8b949e' }}>
@@ -531,7 +513,6 @@ export const ProfileSettings: React.FC = () => {
         sub:   e.description || (e.xp_gained > 0 ? `+${e.xp_gained} XP` : ''),
         color: TYPE_COLOR[e.type] ?? '#8b949e',
       }))
-    // Fallback: derive feed from reports + mission_progress while activity_log is empty
     : [
         ...reports.map(r => ({
           key: `r-${r.id}`, date: r.createdat, icon: '🔬',
@@ -587,7 +568,6 @@ export const ProfileSettings: React.FC = () => {
       <input ref={avatarInputRef} type="file" accept="image/png,image/jpeg,image/webp" style={{ display: 'none' }} onChange={handleAvatarUpload} />
       <input ref={bannerInputRef} type="file" accept="image/png,image/jpeg,image/webp" style={{ display: 'none' }} onChange={handleBannerUpload} />
 
-      {/* ── Crop Modal ── */}
       {cropModalOpen && cropImageSrc && (
         <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.85)', zIndex: 9999, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
           <div style={{ background: '#161b22', border: '1px solid #30363d', borderRadius: '16px', padding: '28px', width: '360px', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '16px' }}>
@@ -617,7 +597,6 @@ export const ProfileSettings: React.FC = () => {
         </div>
       )}
 
-      {/* ── Nav ── */}
       <header className="ps-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '14px 24px', background: 'rgba(22,27,34,0.95)', borderBottom: '1px solid #21262d', position: 'sticky', top: 0, zIndex: 100, backdropFilter: 'blur(8px)' }}>
         <button onClick={() => navigate('/home')} style={{ background: 'transparent', border: 'none', color: '#8b949e', cursor: 'pointer', fontSize: '14px', display: 'flex', alignItems: 'center', gap: '6px' }}>
           ← Dashboard
@@ -634,11 +613,9 @@ export const ProfileSettings: React.FC = () => {
 
       <div className="ps-main-grid" style={{ display: 'grid', gridTemplateColumns: '1fr 300px', gap: '20px', padding: '24px', maxWidth: '1100px', margin: '0 auto', boxSizing: 'border-box' }}>
 
-        {/* ── LEFT ── */}
         <div style={{ minWidth: 0 }}>
           <div style={{ background: 'rgba(22,27,34,0.9)', border: '1px solid #21262d', borderRadius: '16px', overflow: 'hidden', animation: 'profileFadeUp 0.4s ease' }}>
 
-            {/* Banner */}
             <div onClick={() => bannerInputRef.current?.click()} style={{ height: '160px', position: 'relative', cursor: 'pointer', background: bannerUrl ? `url(${bannerUrl}) center/cover no-repeat` : 'linear-gradient(135deg, #0d2a0d 0%, #1a3a1a 40%, #0d1a2a 100%)' }}>
               {!bannerUrl && <div style={{ position: 'absolute', inset: 0, opacity: 0.15, backgroundImage: 'linear-gradient(rgba(76,175,80,0.3) 1px, transparent 1px), linear-gradient(90deg, rgba(76,175,80,0.3) 1px, transparent 1px)', backgroundSize: '40px 40px' }} />}
               <div style={{ position: 'absolute', inset: 0, background: 'rgba(0,0,0,0.45)', display: 'flex', alignItems: 'center', justifyContent: 'center', opacity: 0, transition: 'opacity 0.2s' }} onMouseEnter={e => (e.currentTarget.style.opacity = '1')} onMouseLeave={e => (e.currentTarget.style.opacity = '0')}>
@@ -646,9 +623,7 @@ export const ProfileSettings: React.FC = () => {
               </div>
             </div>
 
-            {/* Profile header */}
             <div style={{ padding: '0 24px 24px', position: 'relative' }}>
-              {/* Avatar */}
               <div style={{ display: 'flex', alignItems: 'flex-end', gap: '16px', marginTop: '-48px', marginBottom: '18px' }}>
                 <div onClick={() => avatarInputRef.current?.click()} style={{ width: '96px', height: '96px', borderRadius: '50%', cursor: 'pointer', border: '4px solid #161b22', overflow: 'hidden', position: 'relative', background: avatarUrl ? 'transparent' : 'linear-gradient(135deg, #4caf50, #2d7a2d)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
                   {avatarUrl ? <img src={avatarUrl} alt="avatar" style={{ width: '100%', height: '100%', objectFit: 'cover' }} /> : <span style={{ fontSize: '36px', fontWeight: '700', color: 'white' }}>{profile.playername.charAt(0).toUpperCase()}</span>}
@@ -675,7 +650,6 @@ export const ProfileSettings: React.FC = () => {
                 </div>
               </div>
 
-              {/* Badge strip */}
               <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap', marginBottom: '18px' }}>
                 <span style={{ background: 'rgba(76,175,80,0.12)', border: '1px solid rgba(76,175,80,0.3)', color: '#4caf50', padding: '3px 10px', borderRadius: '20px', fontSize: '11px', fontWeight: '700' }}>
                   {CHAR_META[displayedTitle].icon} {displayedTitle}
@@ -691,7 +665,6 @@ export const ProfileSettings: React.FC = () => {
                 </span>
               </div>
 
-              {/* Tabs */}
               <div style={{ display: 'flex', borderBottom: '1px solid #21262d', marginBottom: '20px', gap: '2px', overflowX: 'auto' }}>
                 {TABS.map(t => (
                   <button key={t.id} className="prof-tab" onClick={() => setActiveTab(t.id)}
@@ -701,11 +674,9 @@ export const ProfileSettings: React.FC = () => {
                 ))}
               </div>
 
-              {/* ── OVERVIEW TAB ── */}
               {activeTab === 'overview' && (
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '16px', animation: 'profileFadeUp 0.3s ease' }}>
 
-                  {/* XP Progress bar */}
                   <div style={{ background: '#0d1117', border: '1px solid #21262d', borderRadius: '12px', padding: '18px' }}>
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' }}>
                       <span style={{ color: '#e6edf3', fontSize: '13px', fontWeight: '700' }}>Rank Progress</span>
@@ -720,7 +691,6 @@ export const ProfileSettings: React.FC = () => {
                     </div>
                   </div>
 
-                  {/* Stats grid */}
                   <div className="prof-stats-grid" style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '10px' }}>
                     {[
                       { icon: '⭐', value: profile.totalxp,    label: 'Total XP',   color: '#ffc107' },
@@ -736,7 +706,6 @@ export const ProfileSettings: React.FC = () => {
                     ))}
                   </div>
 
-                  {/* About — only fields not shown in the badge strip above */}
                   <div style={{ background: '#0d1117', border: '1px solid #21262d', borderRadius: '12px', padding: '18px' }}>
                     <div style={{ color: '#8b949e', fontSize: '10px', fontWeight: '700', letterSpacing: '1.5px', textTransform: 'uppercase', marginBottom: '12px' }}>About</div>
                     {[
@@ -750,7 +719,6 @@ export const ProfileSettings: React.FC = () => {
                     ))}
                   </div>
 
-                  {/* Fastest completions */}
                   {fastestQuests.length > 0 && (
                     <div style={{ background: '#0d1117', border: '1px solid #21262d', borderRadius: '12px', padding: '18px' }}>
                       <div style={{ color: '#8b949e', fontSize: '10px', fontWeight: '700', letterSpacing: '1.5px', textTransform: 'uppercase', marginBottom: '12px' }}>⚡ Fastest Completions</div>
@@ -770,7 +738,6 @@ export const ProfileSettings: React.FC = () => {
                 </div>
               )}
 
-              {/* ── ACHIEVEMENTS TAB ── */}
               {activeTab === 'achievements' && (
                 <div style={{ animation: 'profileFadeUp 0.3s ease' }}>
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
@@ -781,7 +748,6 @@ export const ProfileSettings: React.FC = () => {
                       <span style={{ color: '#4caf50', fontSize: '11px', fontWeight: '700' }}>{Math.round((unlockedCount / ACHIEVEMENTS.length) * 100)}% complete</span>
                     </div>
                   </div>
-                  {/* Overall progress bar */}
                   <div style={{ background: 'rgba(255,255,255,0.05)', borderRadius: '6px', height: '6px', marginBottom: '20px', overflow: 'hidden' }}>
                     <div style={{ width: `${(unlockedCount / ACHIEVEMENTS.length) * 100}%`, height: '100%', background: 'linear-gradient(90deg, #4caf50, #ffc107)', borderRadius: '6px', transition: 'width 1s ease' }} />
                   </div>
@@ -819,7 +785,6 @@ export const ProfileSettings: React.FC = () => {
                 </div>
               )}
 
-              {/* ── ACTIVITY TAB ── */}
               {activeTab === 'activity' && (
                 <div style={{ animation: 'profileFadeUp 0.3s ease' }}>
                   <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '16px' }}>
@@ -837,7 +802,6 @@ export const ProfileSettings: React.FC = () => {
                     </div>
                   ) : (
                     <div style={{ position: 'relative' }}>
-                      {/* Timeline line */}
                       <div style={{ position: 'absolute', left: '19px', top: 0, bottom: 0, width: '2px', background: 'rgba(255,255,255,0.06)' }} />
                       <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
                         {activityFeed.map((item, i) => (
@@ -860,11 +824,9 @@ export const ProfileSettings: React.FC = () => {
                 </div>
               )}
 
-              {/* ── SETTINGS TAB ── */}
               {activeTab === 'settings' && (
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '18px', animation: 'profileFadeUp 0.3s ease' }}>
 
-                  {/* Displayed Title */}
                   <div style={{ background: '#0d1117', border: '1px solid #21262d', borderRadius: '12px', padding: '18px' }}>
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: '6px' }}>
                       <div style={{ color: '#8b949e', fontSize: '10px', fontWeight: '700', letterSpacing: '1.5px', textTransform: 'uppercase' }}>Displayed Title</div>
@@ -919,7 +881,6 @@ export const ProfileSettings: React.FC = () => {
                     </button>
                   </div>
 
-                  {/* Change password */}
                   <div style={{ background: '#0d1117', border: '1px solid #21262d', borderRadius: '12px', padding: '18px' }}>
                     <div style={{ color: '#8b949e', fontSize: '10px', fontWeight: '700', letterSpacing: '1.5px', textTransform: 'uppercase', marginBottom: '14px' }}>Change Password</div>
                     {[
@@ -939,7 +900,6 @@ export const ProfileSettings: React.FC = () => {
                     </button>
                   </div>
 
-                  {/* Account session */}
                   <div style={{ background: 'rgba(248,81,73,0.04)', border: '1px solid rgba(248,81,73,0.25)', borderRadius: '12px', padding: '18px' }}>
                     <div style={{ color: '#f85149', fontSize: '10px', fontWeight: '700', letterSpacing: '1.5px', textTransform: 'uppercase', marginBottom: '10px' }}>Account Session</div>
                     <p style={{ color: '#8b949e', fontSize: '12px', marginBottom: '12px', lineHeight: 1.6 }}>
@@ -952,7 +912,6 @@ export const ProfileSettings: React.FC = () => {
                 </div>
               )}
 
-              {/* ── LEARN TAB ── */}
               {activeTab === 'learn' && (
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '14px', animation: 'profileFadeUp 0.3s ease' }}>
                   <div style={{ background: '#0d1117', border: '1px solid #21262d', borderRadius: '12px', padding: '18px' }}>
@@ -996,10 +955,8 @@ export const ProfileSettings: React.FC = () => {
           </div>
         </div>
 
-        {/* ── RIGHT SIDEBAR ── */}
         <div className="ps-sidebar" style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
 
-          {/* Share stats card */}
           <div style={{ background: 'linear-gradient(135deg, rgba(76,175,80,0.12), rgba(100,181,246,0.08))', border: '1px solid rgba(76,175,80,0.25)', borderRadius: '14px', padding: '16px' }}>
             <div style={{ color: '#4caf50', fontSize: '12px', fontWeight: '700', marginBottom: '10px', textTransform: 'uppercase', letterSpacing: '1px' }}>📣 My Stats</div>
             <div style={{ color: '#e6edf3', fontSize: '12px', lineHeight: 1.7, fontFamily: 'monospace', background: 'rgba(0,0,0,0.2)', borderRadius: '8px', padding: '10px' }}>
@@ -1014,7 +971,6 @@ export const ProfileSettings: React.FC = () => {
             </button>
           </div>
 
-          {/* Leaderboard */}
           <div style={{ background: 'rgba(22,27,34,0.9)', border: '1px solid #21262d', borderRadius: '14px', padding: '18px' }}>
             <h3 style={{ color: '#e6edf3', fontSize: '12px', fontWeight: '700', margin: '0 0 12px', letterSpacing: '1px', textTransform: 'uppercase' }}>🏆 Leaderboard</h3>
             <div style={{ display: 'flex', flexDirection: 'column', gap: '3px' }}>

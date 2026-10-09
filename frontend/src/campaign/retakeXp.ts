@@ -1,15 +1,3 @@
-// frontend/src/campaign/retakeXp.ts
-// Pure XP-accounting for campaign quests.
-//
-// Contract:
-//   • First full quest completion: 200 XP.
-//   • Retake full quest completion: 20 XP.
-//   • Hints cost 25 XP each, capped at half the completion reward.
-//   • Partial activity completion: 0 XP. This prevents tab-by-tab farming.
-//   • Phase XP caps are fixed per tier and clamp rewards to 0 once full.
-//   • `isCompleted` is the durable "has this quest ever been completed"
-//     flag. In the DB-backed UI it is derived from first_completed_at.
-
 import type { ActivityTab, CorePhase, Phase } from '@/types/campaign';
 import { levelForPhase } from '@/types/campaign';
 
@@ -35,7 +23,7 @@ export function levelXpCapForPhase(phase: Phase | null | undefined): number {
 export interface RetakeXpInputs {
   /** Durable quest completion flag. true means this completion is a retake. */
   isCompleted:      boolean;
-  /** True only when all required quest activities are now complete. */
+  /** True when all required quest activities are complete. */
   isFullCompletion: boolean;
   /** Remaining headroom on the phase's XP cap. 0 means cap is hit. */
   levelRemaining:   number;
@@ -72,7 +60,7 @@ export function computeActivityXP(inp: RetakeXpInputs): number {
 export interface PersistXpInputs {
   /** Max campaign XP that can be credited within the phase. */
   levelCap:         number;
-  /** mission_progress.xp_gained for this quest, BEFORE this completion. */
+  /** mission_progress.xp_gained for this quest before this completion. */
   priorXpGained:    number;
   /** XP credited by this completion event. */
   xpDelta:          number;

@@ -8,9 +8,7 @@ import type { ExtendedNodeData, FlowNodeType } from './flowGraphTypes'
 let _nodeIdCounter = 1000;
 export const newNodeId = () => `user-node-${++_nodeIdCounter}`;
 
-// FIX: stable empty array — never re-creates a new reference on each render,
-// which would cause the useEffect([cfg, safetyChecks]) to fire every render
-// and produce an infinite setEdges → re-render loop.
+// Stable identity prevents effects from rerunning when safety checks are absent.
 export const EMPTY_SAFETY_CHECKS: SafetyCheck[] = [];
 
 export const NODE_COLORS: Record<FlowNodeType, string> = {
@@ -335,9 +333,6 @@ export function flowEdge(source: string, target: string, label?: string): Edge {
   };
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// §3  SHARED NODE HELPERS
-// ─────────────────────────────────────────────────────────────────────────────
 
 export function useNodeAppearance(type: FlowNodeType, data: ExtendedNodeData) {
   const color = data.violation ? '#ff4444'

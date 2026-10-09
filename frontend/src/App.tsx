@@ -40,10 +40,7 @@ const RouteLoading: React.FC = () => (
   </main>
 );
 
-// ── Tour controller — lives outside <Routes> so the overlay persists across ──
-// all page navigations. Auto-shows for new accounts; responds to the global
-// 'cs-replay-tour' event dispatched by the profile-menu "Replay Welcome Tour"
-// button. Guests can start the tour manually from the same menu.
+// Keep the tour outside Routes so it persists across navigation.
 const TourController: React.FC = () => {
   const { user, isGuest, isAdmin } = useAuth();
   const [tourSession, setTourSession] = useState(0);
@@ -55,7 +52,6 @@ const TourController: React.FC = () => {
     }
   });
 
-  // Auto-trigger for new users (localStorage key not yet set).
   useEffect(() => {
     if (!user || isGuest) return;
     try {
@@ -84,7 +80,6 @@ const TourController: React.FC = () => {
     };
   }, [isGuest]);
 
-  // Allow any page to trigger a replay via a custom event.
   useEffect(() => {
     const handler = () => {
       try {
@@ -118,7 +113,6 @@ export const App: React.FC = () => {
         <div style={{ minHeight: '100vh' }}>
           <Suspense fallback={<RouteLoading />}>
             <Routes>
-              {/* Public Routes */}
               <Route path="/" element={<LandingPage />} />
               <Route path="/signup" element={<SignupPage />} />
               <Route path="/login" element={<LoginPage />} />
@@ -128,26 +122,20 @@ export const App: React.FC = () => {
               <Route path="/tutorials" element={<TutorialsPage />} />
               <Route path="/patch-notes" element={<PatchNotesPage />} />
 
-              {/* Protected Routes — guests allowed */}
               <Route path="/home" element={<ProtectedRoute><HomeDashboard /></ProtectedRoute>} />
               <Route path="/sandbox" element={<ProtectedRoute><SandboxPage /></ProtectedRoute>} />
 
-              {/* Account-only Routes — guests are redirected to sign up */}
               <Route path="/progress" element={<AccountRoute><ProgressPage /></AccountRoute>} />
               <Route path="/profile" element={<AccountRoute><ProfileSettings /></AccountRoute>} />
 
-              {/* Campaign Routes — account required to track progress */}
               <Route path="/campaign" element={<AccountRoute><CampaignPage /></AccountRoute>} />
               <Route path="/campaign/inside/:phase" element={<AccountRoute><CampaignInside /></AccountRoute>} />
               <Route path="/lesson/:questId" element={<AccountRoute><LessonActivity /></AccountRoute>} />
 
-              {/* Admin Route — only accessible to users with is_admin = true */}
               <Route path="/admin" element={<AdminRoute><AdminPanel /></AdminRoute>} />
 
-              {/* Redirects */}
               <Route path="/settings" element={<Navigate to="/home" replace />} />
 
-              {/* Catch-all */}
               <Route path="*" element={<Navigate to="/" replace />} />
             </Routes>
           </Suspense>

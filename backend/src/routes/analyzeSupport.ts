@@ -9,9 +9,6 @@ import type {
 } from '../types'
 
 
-// ---------------------------------------------------------------------------
-// Helper: strip stdlib pre-registered symbols, keep only user-declared ones
-// ---------------------------------------------------------------------------
 const STDLIB_NAMES = new Set([
   'cout','cin','cerr','clog','endl','setw','setprecision','setfill',
   'fixed','showpoint','left','right','boolalpha','noboolalpha',
@@ -26,7 +23,7 @@ export function filterUserSymbols(symbolTable: SymbolTable): SymbolTable {
   const result: SymbolTable = {};
   for (const [key, sym] of Object.entries(symbolTable)) {
     const shortName = (key.split('::').pop() ?? key) as string;
-    // Only skip if BOTH line is 0 AND it's a known stdlib name
+    // Exclude only known standard-library symbols registered at line zero.
     if ((sym.line ?? 0) === 0 && STDLIB_NAMES.has(shortName)) continue;
     if (STDLIB_NAMES.has(shortName) && sym.scope === 'global') continue;
     result[key] = sym;
@@ -35,15 +32,12 @@ export function filterUserSymbols(symbolTable: SymbolTable): SymbolTable {
 }
 
 
-// ---------------------------------------------------------------------------
-// Helper: convert the symbol table into SymbolicEntry[] for the Math tab
-// ---------------------------------------------------------------------------
 export function buildSymbolicTrace(
   symbolTable: SymbolTable,
 ): SymbolicEntry[] {
   const entries: SymbolicEntry[] = [];
   for (const [key, sym] of Object.entries(symbolTable)) {
-    if ((sym.line ?? 0) === 0) continue;      // skip stdlib
+    if ((sym.line ?? 0) === 0) continue;
     if (sym.kind === 'function') continue;
     const label = key.split('::').slice(1).join('::') || sym.name;
     const dimensions = Array.isArray(sym.dimensions) && sym.dimensions.length

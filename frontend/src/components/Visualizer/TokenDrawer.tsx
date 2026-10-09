@@ -13,7 +13,6 @@ export const TokenDrawer: React.FC<TokenDrawerProps> = ({ tokens, isOpen, onClos
   if (!isOpen) return null;
   const drawerZIndex = 5001;
 
-  // --- 1. DOWNLOAD LOGIC ---
   const handleExportJSON = () => {
     if (!tokens || tokens.length === 0) return;
     const jsonString = JSON.stringify(tokens, null, 2);
@@ -28,7 +27,6 @@ export const TokenDrawer: React.FC<TokenDrawerProps> = ({ tokens, isOpen, onClos
     URL.revokeObjectURL(url);
   };
 
-  // --- 2. FILTER & GROUPING LOGIC ---
   const filteredTokens = tokens.filter(t => {
     if (!t) return false;
     const val = (t.value || '').toLowerCase();
@@ -77,7 +75,6 @@ export const TokenDrawer: React.FC<TokenDrawerProps> = ({ tokens, isOpen, onClos
 
   return (
     <>
-      {/* Backdrop Overlay */}
       <div 
         onClick={onClose}
         style={{ 
@@ -86,7 +83,6 @@ export const TokenDrawer: React.FC<TokenDrawerProps> = ({ tokens, isOpen, onClos
         }} 
       />
 
-      {/* Slide-out Panel */}
       <div role="dialog" aria-modal="true" aria-label="Lexical analysis token drawer" style={{ 
         position: 'fixed', top: 0, right: 0, bottom: 0, height: '100dvh', width: 'min(420px, 100vw)', 
         maxWidth: '100vw', boxSizing: 'border-box',
@@ -96,7 +92,6 @@ export const TokenDrawer: React.FC<TokenDrawerProps> = ({ tokens, isOpen, onClos
         animation: 'slideIn 0.3s cubic-bezier(0.4, 0, 0.2, 1)'
       }}>
         
-        {/* Header */}
         <div style={{ 
           padding: '24px 24px 12px 24px', display: 'flex', 
           justifyContent: 'space-between', alignItems: 'center', background: 'rgba(22, 27, 34, 0.95)',
@@ -112,7 +107,6 @@ export const TokenDrawer: React.FC<TokenDrawerProps> = ({ tokens, isOpen, onClos
           }}>&times;</button>
         </div>
 
-        {/* Search Bar Section */}
         <div style={{ padding: '0 24px 16px 24px', background: 'rgba(22, 27, 34, 0.95)', borderBottom: '1px solid #30363d', position: 'relative', zIndex: 1 }}>
           <div style={{ position: 'relative' }}>
             <input 
@@ -161,12 +155,10 @@ export const TokenDrawer: React.FC<TokenDrawerProps> = ({ tokens, isOpen, onClos
             }}>
               <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                  {/* Token Type Badge */}
                   <span style={{ fontSize: '9px', fontWeight: 'bold', color: getTokenColor(token.type) }}>
                     {token.type}
                   </span>
 
-                  {/* SPECIFY LITERAL TYPE HERE */}
                   {groupName === 'Literals' && (
                     <span style={{ 
                       fontSize: '9px', 
@@ -198,7 +190,6 @@ export const TokenDrawer: React.FC<TokenDrawerProps> = ({ tokens, isOpen, onClos
   )}
 </div>
 
-        {/* Footer */}
         <div style={{ padding: '16px 20px', borderTop: '1px solid #30363d', background: '#0d1117' }}>
           <button onClick={handleExportJSON} style={{ 
             width: '100%', padding: '12px', borderRadius: '6px', border: 'none', 

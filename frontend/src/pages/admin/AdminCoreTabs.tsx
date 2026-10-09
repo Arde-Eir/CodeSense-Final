@@ -1,11 +1,11 @@
 import React, { useState } from 'react'
 import type { ProfileImageUrls } from '@/services/ProfileImages'
 import { PlayerDetailModal } from '@/components/PlayerDetailModal'
+import type { AuditEntry } from '@/admin/adminAudit'
 import {
   fmt,
   type AdminUser,
   type Announcement,
-  type AuditEntry,
 } from '@/admin/adminPanelModel'
 
 interface AdminStats {
@@ -44,7 +44,9 @@ const parseAnnouncementPriority = (value: string): Announcement['priority'] => {
 export const AdminDashboardTab: React.FC<{
   stats: AdminStats
   auditLogs: AuditEntry[]
-}> = ({ stats, auditLogs }) => (
+  auditLoading: boolean
+  auditError: string | null
+}> = ({ stats, auditLogs, auditLoading, auditError }) => (
 <>
                   <div className="row row-cards">
                     {[
@@ -75,6 +77,7 @@ export const AdminDashboardTab: React.FC<{
                     <div className="col-12">
                       <div className="card">
                         <div className="card-header"><h3 className="card-title">Recent Activity</h3></div>
+                        {auditError && <div role="alert" className="alert alert-danger m-3">{auditError} Previously loaded entries may be outdated.</div>}
                         <div className="table-responsive">
                           <table className="table table-vcenter card-table">
                             <thead>
@@ -91,13 +94,13 @@ export const AdminDashboardTab: React.FC<{
                                     log.action.includes('maintenance') ? 'orange' :
                                     log.action.includes('impersonat')  ? 'yellow' : 'blue'
                                   }-lt`}>{log.action}</span></td>
-                                  <td>{log.admin?.playername ?? log.admin_id?.slice(0, 8)}</td>
+                                  <td>{log.admin?.playername ?? log.admin_id?.slice(0, 8) ?? 'Deleted admin'}</td>
                                   <td>{log.target?.playername ?? (log.target_user_id ? log.target_user_id.slice(0, 8) : '—')}</td>
-                                  <td className="text-muted">{fmt(log.created_at)}</td>
+                                  <td className="text-muted">{log.created_at ? fmt(log.created_at) : 'Not recorded'}</td>
                                 </tr>
                               ))}
-                              {auditLogs.length === 0 && (
-                                <tr><td colSpan={4} className="text-center text-muted py-3">No audit entries yet</td></tr>
+                              {auditLogs.length === 0 && !auditError && (
+                                <tr><td colSpan={4} className="text-center text-muted py-3">{auditLoading ? 'Loading audit entries…' : 'No audit entries yet'}</td></tr>
                               )}
                             </tbody>
                           </table>
@@ -291,17 +294,20 @@ export const AdminUsersTab: React.FC<{
 
 export const AdminAuditTab: React.FC<{
   auditLogs: AuditEntry[]
+  auditLoading: boolean
+  auditError: string | null
   fetchAuditLogs: () => Promise<void>
-}> = ({ auditLogs, fetchAuditLogs }) => (
-<div className="card">
+}> = ({ auditLogs, auditLoading, auditError, fetchAuditLogs }) => (
+<div className="card" data-testid="admin-audit-log" aria-busy={auditLoading}>
                   <div className="card-header">
                     <h3 className="card-title">Admin Audit Log</h3>
                     <div className="card-options">
-                      <button className="btn btn-sm btn-outline-primary" onClick={fetchAuditLogs}>
-                        <i className="ti ti-refresh me-1" />Refresh
+                      <button type="button" data-testid="admin-audit-refresh" className="btn btn-sm btn-outline-primary" disabled={auditLoading} onClick={() => { void fetchAuditLogs() }}>
+                        <i className="ti ti-refresh me-1" />{auditLoading ? 'Refreshing…' : 'Refresh'}
                       </button>
                     </div>
                   </div>
+                  {auditError && <div role="alert" className="alert alert-danger m-3">{auditError} Previously loaded entries may be outdated.</div>}
                   <div className="table-responsive">
                     <table className="table table-vcenter card-table">
                       <thead>
@@ -323,20 +329,24 @@ export const AdminAuditTab: React.FC<{
                                 {log.action}
                               </span>
                             </td>
-                            <td>{log.admin?.playername ?? '—'}</td>
-                            <td>{log.target?.playername ?? (log.target_user_id ? `…${log.target_user_id.slice(-6)}` : '—')}</td>
-                            <td className="text-muted" style={{ fontSize: '11px', maxWidth: '240px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                              {log.details ? JSON.stringify(log.details) : '—'}
+                            <td><span title={log.admin_id ?? undefined}>{log.admin?.playername ?? log.admin_id ?? 'Deleted admin'}</span></td>
+                            <td><span title={log.target_user_id ?? undefined}>{log.target?.playername ?? log.target_user_id ?? '—'}</span></td>
+                            <td className="text-muted" style={{ fontSize: '11px', maxWidth: '360px' }}>
+                              {log.details !== null ? <details data-testid={`admin-audit-details-${log.id}`}>
+                                <summary>View details</summary>
+                                <pre style={{ whiteSpace: 'pre-wrap', overflowWrap: 'anywhere', margin: '8px 0' }}>{JSON.stringify(log.details, null, 2)}</pre>
+                              </details> : '—'}
                             </td>
-                            <td className="text-muted" style={{ fontSize: '11px' }}>{fmt(log.created_at)}</td>
+                            <td className="text-muted" style={{ fontSize: '11px' }}>{log.created_at ? fmt(log.created_at) : 'Not recorded'}</td>
                           </tr>
                         ))}
-                        {auditLogs.length === 0 && (
-                          <tr><td colSpan={5} className="text-center text-muted py-4">No audit entries yet</td></tr>
+                        {auditLogs.length === 0 && !auditError && (
+                          <tr><td colSpan={5} className="text-center text-muted py-4">{auditLoading ? 'Loading audit entries…' : 'No audit entries yet'}</td></tr>
                         )}
                       </tbody>
                     </table>
                   </div>
+                  <div className="card-footer text-muted">Latest 100 entries. Refreshes every 30 seconds while this tab is open.</div>
                 </div>
 )
 

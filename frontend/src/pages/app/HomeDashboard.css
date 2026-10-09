@@ -165,7 +165,6 @@
 }
 .cs-modal-close { transition: background 0.15s ease, transform 0.15s ease; }
 
-/* ── Mobile responsive ── */
 @media (max-width: 768px) {
   .cs-home-header {
     padding: 12px 16px !important;

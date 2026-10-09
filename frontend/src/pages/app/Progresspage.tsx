@@ -1,11 +1,9 @@
-// src/ProgressPage.tsx
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '@/components/AuthContext';
 import { supabase } from '@/services/supabase';
 import { calculateLevel, getLevelProgress, getXPToNextLevel, getLevelName, XP_LEVELS, getRank } from '@/types'
 
-// ── Types ────────────────────────────────────────────────────────────────────
 
 interface Report {
   id: string
@@ -58,7 +56,6 @@ interface FullStats {
   leaderboardRank: number | null
 }
 
-// ── Animated counter (counts up on mount) ────────────────────────────────────
 
 const AnimatedNumber: React.FC<{ value: number | string; suffix?: string }> = ({ value, suffix = '' }) => {
   const [display, setDisplay] = useState(0)
@@ -71,7 +68,6 @@ const AnimatedNumber: React.FC<{ value: number | string; suffix?: string }> = ({
     let frame: number
     const tick = (now: number) => {
       const t = Math.min(1, (now - start) / duration)
-      // easeOut for smoother finish
       const eased = 1 - Math.pow(1 - t, 3)
       setDisplay(Math.round(numeric * eased))
       if (t < 1) frame = requestAnimationFrame(tick)
@@ -84,7 +80,6 @@ const AnimatedNumber: React.FC<{ value: number | string; suffix?: string }> = ({
   return <>{display.toLocaleString()}{suffix}</>
 }
 
-// ── Helpers ──────────────────────────────────────────────────────────────────
 
 function getWeeklyDistribution(dates: string[]) {
   const days = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
@@ -287,7 +282,6 @@ function uniqueCompletedQuestCount(missions: MissionProgress[]): number {
   return dedupeMissionsByQuest(missions).filter(isMissionCompleted).length
 }
 
-// ── Main Component ───────────────────────────────────────────────────────────
 
 export const ProgressPage: React.FC = () => {
   const navigate = useNavigate();
@@ -506,7 +500,7 @@ export const ProgressPage: React.FC = () => {
     )
   }
 
-  // Rank from XP, not from stale `currentlevel`. See types/index.ts getRank().
+  // XP determines rank; stored currentlevel values can be stale.
   const levelName = getRank(stats.totalXP ?? 0).name
   const maxCount = Math.max(...weeklyData.map(d => d.count), 1)
 
@@ -540,7 +534,6 @@ export const ProgressPage: React.FC = () => {
     })
   }
 
-  // ── Campaign tab filtering ────────────────────────────────────────────────
   const displayMissions = dedupeMissionsByQuest(stats.missions)
   const filteredMissions = displayMissions.filter(m => {
     if (campaignFilter !== 'all' && m.questid?.phase !== campaignFilter) return false
@@ -553,7 +546,6 @@ export const ProgressPage: React.FC = () => {
 
   const completedMissionRows = displayMissions.filter(isMissionCompleted)
 
-  // Phase progress rings (completed vs active campaign quests per phase)
   const phaseProgress = (['beginner','intermediate','advanced'] as const).map(phase => {
     const total = stats.phaseTotals[phase] ?? stats.missions.filter(m => m.questid?.phase === phase).length
     const done = completedMissionRows.filter(m => m.questid?.phase === phase).length
@@ -601,7 +593,6 @@ export const ProgressPage: React.FC = () => {
       color: 'white', fontFamily: "'IBM Plex Sans', system-ui, sans-serif",
       boxSizing: 'border-box' as const
     }}>
-      {/* ── Header ── */}
       <header className="prog-header" style={{
         display: 'flex', justifyContent: 'space-between', alignItems: 'center',
         padding: '16px 20px', background: 'rgba(22, 27, 34, 0.95)',
@@ -650,7 +641,6 @@ export const ProgressPage: React.FC = () => {
 
       <div style={{ maxWidth: 1100, margin: '0 auto', padding: '24px 16px', boxSizing: 'border-box', width: '100%' }}>
 
-        {/* ── Top Stats Row ── */}
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: 14, marginBottom: 24 }}>
           {[
             { label: 'RANK',        value: levelName.toUpperCase(), color: '#64b5f6', icon: '🎖️', raw: levelName },
@@ -676,7 +666,6 @@ export const ProgressPage: React.FC = () => {
           ))}
         </div>
 
-        {/* ── Key Insights ── */}
         <div style={{
           display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(210px, 1fr))',
           gap: 14, marginBottom: 28,
@@ -726,7 +715,6 @@ export const ProgressPage: React.FC = () => {
           ))}
         </div>
 
-        {/* ── XP Progress Bar ── */}
         <div style={{
           background: 'rgba(22, 27, 34, 0.9)', border: '1px solid #30363d',
           borderRadius: 12, padding: 24, marginBottom: 28,
@@ -786,7 +774,6 @@ export const ProgressPage: React.FC = () => {
           </div>
         </div>
 
-        {/* ── Tabs ── */}
         <div style={{
           display: 'flex', gap: 4, marginBottom: 22,
           background: 'rgba(22,27,34,0.9)', border: '1px solid #30363d',
@@ -814,13 +801,10 @@ export const ProgressPage: React.FC = () => {
           ))}
         </div>
 
-        {/* ── Overview Tab ── */}
         {activeTab === 'overview' && (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
-            {/* Weekly Distribution + Complexity Trend (side by side) */}
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(420px, 1fr))', gap: 20 }}>
 
-              {/* Weekly Distribution */}
               <div style={cardStyle}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
                   <div>
@@ -893,7 +877,6 @@ export const ProgressPage: React.FC = () => {
                 </div>
               </div>
 
-              {/* Complexity Trend Line */}
               <div style={cardStyle}>
                 <h3 style={{ ...cardHeaderStyle, marginBottom: 2 }}>Cognitive Complexity Trend</h3>
                 <span style={{ fontSize: 11, color: '#8b949e' }}>Last {complexityTrend.length} sandbox analyses (oldest → newest)</span>
@@ -947,7 +930,6 @@ export const ProgressPage: React.FC = () => {
               </div>
             </div>
 
-            {/* Activity Heatmap */}
             <div style={{ ...cardStyle, position: 'relative' }}>
               {tooltip && (
                 <div style={{
@@ -1015,7 +997,6 @@ export const ProgressPage: React.FC = () => {
               </div>
             </div>
 
-            {/* Campaign Summary — phase progress rings */}
             <div style={cardStyle}>
               <h3 style={cardHeaderStyle}>Campaign Summary</h3>
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 14 }}>
@@ -1054,7 +1035,6 @@ export const ProgressPage: React.FC = () => {
           </div>
         )}
 
-        {/* ── Analyses Tab ── */}
         {activeTab === 'analyses' && (
           <div style={cardStyle}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
@@ -1114,7 +1094,6 @@ export const ProgressPage: React.FC = () => {
           </div>
         )}
 
-        {/* ── Campaign Tab ── */}
         {activeTab === 'campaign' && (
           <div style={cardStyle}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14, flexWrap: 'wrap', gap: 10 }}>
@@ -1131,7 +1110,6 @@ export const ProgressPage: React.FC = () => {
               />
             </div>
 
-            {/* Phase filter chips */}
             <div style={{ display: 'flex', gap: 6, marginBottom: 14, flexWrap: 'wrap' }}>
               {([
                 { key: 'all',          label: 'All',          color: '#8b949e' },
@@ -1235,13 +1213,10 @@ export const ProgressPage: React.FC = () => {
           </div>
         )}
 
-        {/* ── Badges Tab ── */}
         {activeTab === 'badges' && (
           <div style={cardStyle}>
             <h3 style={cardHeaderStyle}>Badges Earned</h3>
             {(() => {
-              // Badge definition now includes a `progress` function so we show
-              // how close the user is to the locked ones.
               const completedInPhase = (phase: 'beginner' | 'intermediate' | 'advanced') =>
                 completedMissionRows.filter(m => m.questid?.phase === phase).length
               const completedWithoutHints = completedMissionRows.some(m => m.hintsused === 0)
@@ -1265,7 +1240,6 @@ export const ProgressPage: React.FC = () => {
 
               return (
                 <>
-                  {/* Overall progress bar */}
                   <div style={{ marginBottom: 20 }}>
                     <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 6 }}>
                       <span style={{ color: '#8b949e', fontSize: 12 }}>
@@ -1316,7 +1290,6 @@ export const ProgressPage: React.FC = () => {
                               <div style={{ fontSize: 28, marginBottom: 8, filter: 'grayscale(1)' }}>{b.icon}</div>
                               <div style={{ color: '#8b949e', fontSize: 13, fontWeight: 700 }}>{b.name}</div>
                               <div style={{ color: '#484f58', fontSize: 11, marginTop: 4 }}>{b.desc}</div>
-                              {/* Progress toward unlock */}
                               <div style={{ marginTop: 10, background: 'rgba(255,255,255,0.04)', borderRadius: 3, height: 4, overflow: 'hidden' }}>
                                 <div style={{
                                   width: `${Math.round(p * 100)}%`, height: '100%',

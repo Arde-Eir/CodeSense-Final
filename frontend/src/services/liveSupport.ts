@@ -1,5 +1,6 @@
 import type { PostgrestError } from '@supabase/supabase-js'
 import { supabase } from './supabase'
+import { assertAdminAuditReady } from '@/admin/adminAudit'
 
 export type SupportStatus = 'requested' | 'active' | 'declined' | 'ended'
 
@@ -108,13 +109,15 @@ const requireSession = (value: unknown, operation: string): SupportSession => {
   return parseSupportSession(value)
 }
 
-export const requestSupportSession = async (learnerId: string): Promise<SupportSession> =>
-  requireSession(
+export const requestSupportSession = async (learnerId: string): Promise<SupportSession> => {
+  await assertAdminAuditReady()
+  return requireSession(
     await requestResult('request_support_session', { learnerId }, () =>
       supabase.rpc('request_support_session', { p_learner_id: learnerId })
     ),
     'request_support_session',
   )
+}
 
 export const acceptSupportSession = async (sessionId: string): Promise<SupportSession> =>
   requireSession(

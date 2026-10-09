@@ -31,7 +31,6 @@ export const BaseNode: React.FC<{
   </div>
 );
 
-/** Small "double-click to edit" tooltip shown on node hover. */
 export const EditHint = () => (
   <div
     className="edit-hint"
@@ -48,7 +47,6 @@ export const EditHint = () => (
   </div>
 );
 
-/** Warning badge shown above nodes that have a safety violation. */
 export const ViolationBadge = () => (
   <div
     role="img"
@@ -64,7 +62,6 @@ export const ViolationBadge = () => (
   </div>
 );
 
-/** Label block rendered inside rectangular/box-type nodes. */
 export const NodeLabel: React.FC<{ data: ExtendedNodeData }> = ({ data }) => (
   <div style={{ pointerEvents: 'none', userSelect: 'none', textAlign: 'center', width: '100%', minWidth: 0 }}>
     <strong style={{ display: 'block', fontSize: 12, fontWeight: 700, color: 'white', letterSpacing: '0.3px', textShadow: '0 2px 3px rgba(0,0,0,0.6)', overflowWrap: 'anywhere', lineHeight: 1.25 }}>
@@ -84,11 +81,7 @@ function isReturnLikeNode(data: ExtendedNodeData): boolean {
   return label === 'return' || code === 'return' || code.startsWith('return ');
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// §4  ISO 5807 NODE COMPONENTS
-// ─────────────────────────────────────────────────────────────────────────────
 
-// ── 1. TERMINATOR — rounded pill ─────────────────────────────────────────────
 export const TerminatorNode = ({ data, selected }: NodeProps<Node<ExtendedNodeData>>) => {
   const returnLike = isReturnLikeNode(data);
   const { color, bg } = useNodeAppearance(returnLike ? 'process' : 'terminator', data);
@@ -120,7 +113,6 @@ export const TerminatorNode = ({ data, selected }: NodeProps<Node<ExtendedNodeDa
   );
 };
 
-// ── 2. PROCESS — plain rectangle ─────────────────────────────────────────────
 export const ProcessNode = ({ data, selected }: NodeProps<Node<ExtendedNodeData>>) => {
   const { color, bg } = useNodeAppearance('process', data);
   const background = bg ?? 'linear-gradient(135deg,#141a14,#1e271e)';
@@ -135,7 +127,6 @@ export const ProcessNode = ({ data, selected }: NodeProps<Node<ExtendedNodeData>
   );
 };
 
-// ── 3. DECISION — true diamond via SVG ───────────────────────────────────────
 export const DecisionNode = ({ data, selected }: NodeProps<Node<ExtendedNodeData>>) => {
   const W = 170, H = 170;
   const { color } = useNodeAppearance('decision', data);
@@ -161,7 +152,6 @@ export const DecisionNode = ({ data, selected }: NodeProps<Node<ExtendedNodeData
   );
 };
 
-// ── 4. I/O — parallelogram ───────────────────────────────────────────────────
 export const IONode = ({ data, selected }: NodeProps<Node<ExtendedNodeData>>) => {
   const W = 260, H = 92, SKEW = 26;
   const { color } = useNodeAppearance('io', data);
@@ -183,7 +173,6 @@ export const IONode = ({ data, selected }: NodeProps<Node<ExtendedNodeData>>) =>
   );
 };
 
-// ── 5. PREDEFINED — rectangle with ISO side bars ─────────────────────────────
 export const PredefinedNode = ({ data, selected }: NodeProps<Node<ExtendedNodeData>>) => {
   const { color, bg } = useNodeAppearance('predefined', data);
   const background = bg ?? 'linear-gradient(135deg,#18091f,#271040)';
@@ -200,7 +189,6 @@ export const PredefinedNode = ({ data, selected }: NodeProps<Node<ExtendedNodeDa
   );
 };
 
-// ── 6. CONNECTOR — small circle ──────────────────────────────────────────────
 export const ConnectorNode = ({ data, selected }: NodeProps<Node<ExtendedNodeData>>) => {
   const { color, bg } = useNodeAppearance('connector', data);
   const background = bg ?? 'linear-gradient(135deg,#042a2e,#073540)';
@@ -217,7 +205,6 @@ export const ConnectorNode = ({ data, selected }: NodeProps<Node<ExtendedNodeDat
   );
 };
 
-// ── 6b. OFF-PAGE CONNECTOR — pentagon / home-plate ───────────────────────────
 export const OffPageConnectorNode = ({ data, selected }: NodeProps<Node<ExtendedNodeData>>) => {
   const W = 96, H = 88;
   const { color } = useNodeAppearance('off_page_connector', data);
@@ -241,7 +228,6 @@ export const OffPageConnectorNode = ({ data, selected }: NodeProps<Node<Extended
   );
 };
 
-// ── 7. DOCUMENT — rectangle with wavy bottom ─────────────────────────────────
 export const DocumentNode = ({ data, selected }: NodeProps<Node<ExtendedNodeData>>) => {
   const W = 260, H = 118;
   const { color } = useNodeAppearance('document', data);
@@ -267,7 +253,6 @@ export const DocumentNode = ({ data, selected }: NodeProps<Node<ExtendedNodeData
   );
 };
 
-// ── 8. MANUAL INPUT — trapezoid, top slopes upward left-to-right ─────────────
 export const ManualInputNode = ({ data, selected }: NodeProps<Node<ExtendedNodeData>>) => {
   const W = 240, H = 92, SLOPE = 22;
   const { color } = useNodeAppearance('manual_input', data);
@@ -289,7 +274,6 @@ export const ManualInputNode = ({ data, selected }: NodeProps<Node<ExtendedNodeD
   );
 };
 
-// ── 9. DELAY — D-shape: flat left, semicircle right ──────────────────────────
 export const DelayNode = ({ data, selected }: NodeProps<Node<ExtendedNodeData>>) => {
   const W = 240, H = 88;
   const R = H / 2 - 2;
@@ -312,7 +296,6 @@ export const DelayNode = ({ data, selected }: NodeProps<Node<ExtendedNodeData>>)
   );
 };
 
-// ── 10. DATABASE — cylinder ───────────────────────────────────────────────────
 export const DatabaseNode = ({ data, selected }: NodeProps<Node<ExtendedNodeData>>) => {
   const W = 240, H = 118;
   const rx = (W - 6) / 2, ry = 14;
@@ -338,7 +321,6 @@ export const DatabaseNode = ({ data, selected }: NodeProps<Node<ExtendedNodeData
   );
 };
 
-// ── 11. JUNCTION — small routing connector / merge point ─────────────────────
 export const JunctionNode = ({ data, selected }: NodeProps<Node<ExtendedNodeData>>) => {
   const S = 36;
   const { color } = useNodeAppearance('junction', data);

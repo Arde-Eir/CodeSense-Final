@@ -4,7 +4,7 @@
     "module": "commonjs",
     "lib": ["ES2020"],
     "outDir": "./dist",
-    "rootDir": "./src",        // ← changed from "../"
+    "rootDir": "./src",
     "strict": true,
     "esModuleInterop": true,
     "skipLibCheck": true,
@@ -17,10 +17,9 @@
     "types": ["node"],
 
     "ignoreDeprecations": "5.0"
-    // removed @shared paths since there's no shared folder
   },
   "include": [
-    "src/**/*"                 // ← removed "../shared/**/*"
+    "src/**/*"
   ],
   "exclude": [
     "node_modules",

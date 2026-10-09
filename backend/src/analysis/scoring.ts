@@ -1,8 +1,4 @@
-/**
- * Cognitive Complexity Calculator
- * Measures code complexity based on control flow structures.
- * Updated to fully traverse expressions in conditions and headers.
- */
+/** Calculates cognitive and cyclomatic complexity from the C++ AST. */
 
 import {
   ASTNode,
@@ -33,7 +29,6 @@ import {
 export class CognitiveComplexity {
   private complexity = 0;
   private nestingLevel = 0;
-  //private inFunction = false;
 
   calculate(ast: ASTNode): number {
     this.complexity = 0;
@@ -41,7 +36,6 @@ export class CognitiveComplexity {
 
     this.linkParents(ast);
     
-    //this.inFunction = false;
     this.visit(ast);
     return this.complexity;
   }
@@ -70,7 +64,6 @@ export class CognitiveComplexity {
     }
   }
 
-  // ── Program ───────────────────────────────────────────────────────────────
   private visitProgram(node: ASTNode): void {
     const prog = node as ProgramNode;
     // Visit preprocessor directives in case they contain expressions
@@ -80,22 +73,16 @@ export class CognitiveComplexity {
     }
   }
 
-  // ── Functions ─────────────────────────────────────────────────────────────
   private visitFunctionDecl(node: ASTNode): void {
     const funcNode = node as FunctionDeclNode;
-    //const wasInFunction = this.inFunction;
-    //this.inFunction = true;
     (funcNode.body || []).forEach((stmt: ASTNode) => this.visit(stmt));
-    //this.inFunction = wasInFunction;
   }
 
   private visitFunctionPrototype(_node: ASTNode): void {
     // Prototypes are forward declarations — no complexity contribution.
   }
 
-  // ── Control Flow ──────────────────────────────────────────────────────────
   private visitIfStatement(node: IfStatementNode): void {
-    // 1. Structural Increment + Nesting Increment
     this.complexity += 1 + this.nestingLevel;
 
     this.nestingLevel++;
@@ -103,7 +90,6 @@ export class CognitiveComplexity {
     this.nestingLevel--;
 
     if (node.elseBranch && node.elseBranch.length > 0) {
-      // Check if it's an 'else if'
       const firstElse = node.elseBranch[0];
       const isElseIf = firstElse.type === 'IfStatement';
 
@@ -111,7 +97,7 @@ export class CognitiveComplexity {
         // 'else if' does not increase nesting, just recurses
         this.visit(firstElse);
       } else {
-        // Plain 'else' adds +1 but NO nesting increment
+        // A plain else adds one without increasing nesting.
         this.complexity += 1;
         node.elseBranch.forEach(stmt => this.visit(stmt));
       }
@@ -180,10 +166,9 @@ export class CognitiveComplexity {
   }
 
   private visitBinaryOp(node: BinaryOpNode): void {
-    // COGNITIVE RULE: Sequences of identical logical operators 
-    // are only penalized once. 
+    // A sequence of identical logical operators contributes once.
     if ((node.operator === '&&' || node.operator === '||')) {
-      const parent = (node as any).parent; // Requires AST to have parent refs
+      const parent = (node as any).parent;
       if (!parent || parent.type !== 'BinaryOp' || parent.operator !== node.operator) {
         this.complexity += 1;
       }
@@ -199,7 +184,6 @@ export class CognitiveComplexity {
     this.nestingLevel--;
   }
 
-  // ── Statements ────────────────────────────────────────────────────────────
   private visitAssignment(node: ASTNode): void {
     const assignNode = node as AssignmentNode;
     if (assignNode.target && typeof assignNode.target !== 'string') {
@@ -236,7 +220,6 @@ export class CognitiveComplexity {
     (initList.values || []).forEach((val: ASTNode) => this.visit(val));
   }
 
-  // ── Function Call & Array Access ──────────────────────────────────────────
   private visitFunctionCall(node: ASTNode): void {
     const callNode = node as FunctionCallNode;
     (callNode.arguments || []).forEach((arg: ASTNode) => this.visit(arg));
@@ -247,7 +230,6 @@ export class CognitiveComplexity {
     (arrayNode.indices || []).forEach((index: ASTNode) => this.visit(index));
   }
 
-  // ── Unary Operators ───────────────────────────────────────────────────────
   private visitUnaryOp(node: ASTNode): void {
     const unaryNode = node as UnaryOpNode;
     if (unaryNode.operand && typeof unaryNode.operand !== 'string') {
@@ -272,7 +254,6 @@ export class CognitiveComplexity {
     this.visit(sizeofNode.value);
   }
 
-  // ── No-ops ────────────────────────────────────────────────────────────────
   private visitIdentifier(): void {}
   private visitInteger():    void {}
   private visitFloat():      void {}
@@ -306,10 +287,7 @@ export class CognitiveComplexity {
   private visitNamespace(): void {}
 }
 
-// ============================================================================
-// Cyclomatic Complexity  V(G) = E - N + 2P
-// Counts decision points: each if/for/while/do-while/case/catch/&&/||/?:
-// ============================================================================
+// Cyclomatic complexity counts decisions using V(G) = E - N + 2P.
 export interface CyclomaticResult {
   score: number;
   edges: number;
@@ -330,8 +308,7 @@ export class CyclomaticComplexity {
     
     return {
       score,
-      // For real-time accuracy, edges/nodes are usually represented via the 
-      // simplified formula rather than a full graph construction.
+      // These counts satisfy the formula; they are not measured from the CFG.
       edges: score + 1, 
       nodes: 2,         
       rating: this.rate(score),
@@ -354,8 +331,7 @@ export class CyclomaticComplexity {
         break;
 
       case 'SwitchStatement':
-        // Standard McCabe: Each case (except the first/default) is a decision.
-        // Simplified: Count every 'Case' node.
+        // Each non-default case contributes one decision.
         if (node.cases) {
           node.cases.forEach((c: any) => {
             if (c.type === 'Case') this.decisions += 1;
@@ -371,7 +347,6 @@ export class CyclomaticComplexity {
         break;
     }
 
-    // High-performance recursion
     for (const key in node) {
       if (key === 'parent') continue;
       if (Object.prototype.hasOwnProperty.call(node, key)) {
@@ -388,7 +363,7 @@ export class CyclomaticComplexity {
   }
 
   private rate(score: number): 'low' | 'moderate' | 'high' | 'very high' {
-    if (score <= 10) return 'low';      // Standard industry thresholds
+    if (score <= 10) return 'low';
     if (score <= 20) return 'moderate';
     if (score <= 50) return 'high';
     return 'very high';

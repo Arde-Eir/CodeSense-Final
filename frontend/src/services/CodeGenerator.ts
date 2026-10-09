@@ -30,9 +30,7 @@ function buildAdjacency(edges: Edge[], nodeIds: Set<string>): Map<string, Edge[]
   const adj = new Map<string, Edge[]>();
   for (const e of edges) {
     if (isCallConnectorEdge(e)) continue;
-    // HARDENING: skip dangling edges — edges referencing a node that was
-    // deleted but whose ref lingers in state. Without this, traverse() can
-    // dereference a missing node and emit malformed code.
+    // Deleted nodes can leave dangling edges in editor state.
     if (!nodeIds.has(e.source) || !nodeIds.has(e.target)) continue;
     if (!adj.has(e.source)) adj.set(e.source, []);
     adj.get(e.source)!.push(e);
@@ -211,7 +209,6 @@ function findMergeNode(
   return undefined;
 }
 
-// ─── Loop Detection ───────────────────────────────────────────────────────────
 
 function reachesNode(startId: string, targetId: string, adj: Map<string, Edge[]>): boolean {
   if (startId === targetId) return true;
@@ -249,7 +246,6 @@ function detectLoop(
   return { isLoop: false };
 }
 
-// ─── Main Traversal ───────────────────────────────────────────────────────────
 
 function traverse(
   nodeId: string,
@@ -269,19 +265,16 @@ function traverse(
     visited.add(currentId);
     const outEdges: Edge[] = adj.get(currentId) ?? [];
 
-    // ── Terminator (Start / End) — no emitted code ────────────────────────────
     if (node.type === 'terminator') {
       currentId = outEdges[0]?.target;
       continue;
     }
 
-    // ── Junction (merge point) — structural only, no emitted code ────────────
     if (node.type === 'junction') {
       currentId = outEdges[0]?.target;
       continue;
     }
 
-    // ── On-page connector (break / continue) ─────────────────────────────────
     if (node.type === 'connector') {
       const code = str(node.data.code).toLowerCase();
       const label = str(node.data.label).toLowerCase();
@@ -297,7 +290,6 @@ function traverse(
       continue;
     }
 
-    // ── Off-page connector (cross-page routing/reference) ─────────────────────
     if (node.type === 'off_page_connector') {
       const label = str(node.data.label);
       output += `${indent}// Off-page connector: ${label || 'reference'}\n`;
@@ -305,7 +297,6 @@ function traverse(
       continue;
     }
 
-    // ── Decision → IfStatement or WhileLoop ──────────────────────────────────
     if (node.type === 'decision') {
       const rawCondition = resolveCode(node);
       const condition = normalizeCondition(rawCondition);
@@ -326,10 +317,7 @@ function traverse(
       const loopInfo = detectLoop(currentId, trueEdge, falseEdge, adj);
 
       if (loopInfo.isLoop) {
-        // The body is the branch that loops back to the decision; the exit is
-        // the other branch (where execution continues after the loop). If the
-        // looping branch is the FALSE branch, we negate the condition so the
-        // emitted while reads naturally.
+        // Negate the condition when the false branch forms the loop body.
         const bodyEdge = loopInfo.bodyEdge;
         const exitEdge = loopInfo.exitEdge;
         const negate   = bodyEdge === falseEdge;
@@ -337,8 +325,7 @@ function traverse(
 
         output += `${indent}while (${whileCondition}) {\n`;
         if (bodyEdge) {
-          // Body must terminate when it reaches back to the decision — pass
-          // the decision node id as a stop so we don't re-emit it.
+          // Stop at the decision to avoid emitting the loop twice.
           const stopAtBody = new Set([currentId]);
           output += traverse(bodyEdge.target, nodeMap, adj, new Set(visited), indent + '    ', stopAtBody);
         }
@@ -380,21 +367,18 @@ function traverse(
       continue;
     }
 
-    // ── I/O (cout) ────────────────────────────────────────────────────────────
     if (node.type === 'io') {
       output += `${indent}${emitIO(str(node.data.label), str(node.data.code))}\n`;
       currentId = outEdges[0]?.target;
       continue;
     }
 
-    // ── Manual Input (cin) ────────────────────────────────────────────────────
     if (node.type === 'manual_input') {
       output += `${indent}${emitManualInput(str(node.data.label), str(node.data.code))}\n`;
       currentId = outEdges[0]?.target;
       continue;
     }
 
-    // ── Predefined Process (function call) ────────────────────────────────────
     if (node.type === 'predefined') {
       const rawCode = resolveCode(node);
       if (isTopLevelDeclaration(rawCode)) {
@@ -406,28 +390,24 @@ function traverse(
       continue;
     }
 
-    // ── Document (file output / report) ──────────────────────────────────────
     if (node.type === 'document') {
       output += `${indent}${emitDocument(str(node.data.label), str(node.data.code))}\n`;
       currentId = outEdges[0]?.target;
       continue;
     }
 
-    // ── Delay (sleep / wait) ─────────────────────────────────────────────────
     if (node.type === 'delay') {
       output += `${indent}${emitDelay(str(node.data.label), str(node.data.code))}\n`;
       currentId = outEdges[0]?.target;
       continue;
     }
 
-    // ── Stored Data (data container) ─────────────────────────────────────────
     if (node.type === 'database') {
       output += `${indent}${emitDatabase(str(node.data.label), str(node.data.code))}\n`;
       currentId = outEdges[0]?.target;
       continue;
     }
 
-    // ── Process node → VariableDeclaration or ExpressionStatement ────────────
     {
       const rawCode = resolveCode(node);
       const label = str(node.data.label);
@@ -472,7 +452,6 @@ function traverse(
   return output;
 }
 
-// ─── Public API ───────────────────────────────────────────────────────────────
 
 export const generateCppFromGraph = (nodes: Node[], edges: Edge[]): string => {
   if (nodes.length === 0) {

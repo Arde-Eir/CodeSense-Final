@@ -1,7 +1,3 @@
-/**
- FlowGraph.tsx
- */
-
 import React, { useState, useEffect, useCallback } from 'react';
 import {
   ReactFlow, Background, Controls, ConnectionMode, MarkerType,
@@ -31,7 +27,6 @@ import {
   NodePalette,
 } from './FlowGraphPanels'
 
-// ── Component props ───────────────────────────────────────────────────────────
 interface Props {
   cfg?:             CFG;
   safetyChecks?:    SafetyCheck[];
@@ -41,25 +36,18 @@ interface Props {
   onCodeGenerated?: (code: string) => void;
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// §7  MAIN FlowGraph COMPONENT
-// ─────────────────────────────────────────────────────────────────────────────
 
 const MAX_NODES_SAFE = 200;
 
 const FlowGraphInner: React.FC<Props> = ({
   cfg,
-  // FIX: do NOT use = [] here — that creates a new array reference on every
-  // render, causing the useEffect([cfg, safetyChecks]) dependency to always
-  // fire, which calls setEdges, which triggers another render, infinite loop.
-  // Instead we resolve to EMPTY_SAFETY_CHECKS (stable module-level constant).
   safetyChecks,
   onNodeClick,
   isDrawerOpen = false,
   onGraphChange,
   onCodeGenerated,
 }) => {
-  // Resolve to stable empty array if prop is undefined/null
+  // A stable empty array prevents the graph effect from triggering on every render.
   const stableSafetyChecks = safetyChecks ?? EMPTY_SAFETY_CHECKS;
 
   const [nodes, setNodes]                 = useState<Node<ExtendedNodeData>[]>([]);
@@ -75,7 +63,6 @@ const FlowGraphInner: React.FC<Props> = ({
 
   const { screenToFlowPosition } = useReactFlow();
 
-  // ── Mid-segment anchoring ──────────────────────────────────────────────────
   const handleEdgeClick = useCallback((evt: React.MouseEvent, edge: Edge) => {
     if (!evt.altKey) return;
     evt.preventDefault();
@@ -142,7 +129,6 @@ const FlowGraphInner: React.FC<Props> = ({
     setIsDirty(true);
   }, [screenToFlowPosition, onGraphChange]);
 
-  // ── Node edit handlers ─────────────────────────────────────────────────────
 
   const handleOpenEdit = useCallback((nodeId: string) => {
     setNodes(current => {
@@ -173,7 +159,6 @@ const FlowGraphInner: React.FC<Props> = ({
     setIsDirty(true);
   }, [editState, onGraphChange]);
 
-  // ── Edge edit handlers ─────────────────────────────────────────────────────
 
   const handleEdgeDoubleClick = useCallback((_: React.MouseEvent, edge: Edge) => {
     setEdgeEditState({
@@ -210,7 +195,6 @@ const FlowGraphInner: React.FC<Props> = ({
     setIsDirty(true);
   }, [edgeEditState, onGraphChange]);
 
-  // ── Canvas actions ─────────────────────────────────────────────────────────
 
   const handleClearCanvas = useCallback(() => {
     if (nodes.length === 0) return;
@@ -266,7 +250,6 @@ const FlowGraphInner: React.FC<Props> = ({
     setIsDirty(true);
   }, [edges, handleOpenEdit, nodes, onGraphChange]);
 
-  // ── React Flow change handlers ─────────────────────────────────────────────
 
   const onNodesChangeHandler = useCallback((changes: NodeChange<Node<ExtendedNodeData>>[]) => {
     const structural = changes.some((c: NodeChange<Node<ExtendedNodeData>>) =>
@@ -350,18 +333,15 @@ const FlowGraphInner: React.FC<Props> = ({
     });
   }, [nodes, onGraphChange]);
 
-  // ── Node click → mark as visited ──────────────────────────────────────────
 
   const handleNodeClick = useCallback((_: React.MouseEvent, node: Node<ExtendedNodeData>) => {
     setNodes(current =>
       current.map(n => n.id === node.id ? { ...n, data: { ...n.data, visited: true } } : n)
     );
-    // FIX: use stableSafetyChecks (not the raw prop) so this closure stays stable
     const cfgNode = cfg?.nodes.find(n => n.id === node.id);
     if (cfgNode?.line != null && onNodeClick) onNodeClick(cfgNode.line);
   }, [cfg, onNodeClick]);
 
-  // ── Analysis mode: build graph from CFG with ELK layout ───────────────────
 
   useEffect(() => {
     let cancelled = false;
@@ -432,11 +412,7 @@ const FlowGraphInner: React.FC<Props> = ({
     const capped = safeNodes.length > hardCap ? safeNodes.slice(0, hardCap) : safeNodes;
     const nodeIdSet = new Set(capped.map(n => n.id));
 
-    // Use Sugiyama x/y computed by the backend's CFGGenerator directly.
-    // The backend runs the full Sugiyama pipeline (break cycles → assign layers
-    // → minimize crossings → compute coordinates → restore cycles) and stores
-    // the result in node.x / node.y.  We trust those coordinates here instead
-    // of running a second layout pass in the browser.
+    // Use the backend Sugiyama coordinates without a second browser layout pass.
     const initialNodes: Node<ExtendedNodeData>[] = capped.map(node => ({
       id:   node.id,
       type: inferNodeType(node),
@@ -447,8 +423,6 @@ const FlowGraphInner: React.FC<Props> = ({
         onHover:   setHoverInfo,
         onEdit:    handleOpenEdit,
       },
-      // node.x / node.y come from the backend Sugiyama layout.
-      // Fall back to a simple vertical stack only when coordinates are missing.
       position: (node.x != null && node.y != null)
         ? { x: node.x, y: node.y }
         : { x: 200, y: capped.indexOf(node) * 220 },
@@ -494,21 +468,17 @@ const FlowGraphInner: React.FC<Props> = ({
 
     applyGraph(initialNodes, initialEdges);
     return () => { cancelled = true; };
-  // FIX: depend on stableSafetyChecks (stable ref) instead of safetyChecks (new [] each render)
   }, [cfg, handleOpenEdit, stableSafetyChecks, onGraphChange]);
 
-  // ── Derived values ─────────────────────────────────────────────────────────
 
   const totalNodes   = nodes.length;
   const visitedNodes = new Set(nodes.filter(n => n.data?.visited).map(n => n.id));
   const safeNodes    = nodes.filter(n => {
     const cfgNode = cfg?.nodes.find(cn => cn.id === n.id);
-    // FIX: use stableSafetyChecks consistently
     return !cfgNode || !stableSafetyChecks.some(c => c.line === cfgNode.line && c.status === 'UNSAFE');
   }).length;
   const isBuildMode = !cfg;
 
-  // ── Render ─────────────────────────────────────────────────────────────────
   return (
     <div
       onMouseMove={e => setMousePos({ x: e.clientX + 15, y: e.clientY + 15 })}
@@ -548,7 +518,6 @@ const FlowGraphInner: React.FC<Props> = ({
           </button>
           {showGuide && !isDrawerOpen && <FlowchartQuickGuide onClose={() => setShowGuide(false)} />}
 
-          {/* Single toggle — always visible, controls the whole panel */}
           <button
             onClick={() => setShowPanel(v => !v)}
             title={showPanel ? 'Hide tools panel' : 'Show tools panel'}
@@ -573,7 +542,6 @@ const FlowGraphInner: React.FC<Props> = ({
             <span style={{ fontSize: 9, transition: 'transform 0.25s', transform: showPanel ? 'rotate(180deg)' : 'none' }}>▼</span>
           </button>
 
-          {/* Collapsible tools panel */}
           {showPanel && (
             <div style={{
               position: 'absolute', top: 52, right: 12, zIndex: 1000,
@@ -723,7 +691,6 @@ const FlowGraphInner: React.FC<Props> = ({
   );
 };
 
-// ── Provider wrapper ──────────────────────────────────────────────────────────
 export const FlowGraph: React.FC<Props> = (props) => (
   <ReactFlowProvider>
     <FlowGraphInner {...props} />

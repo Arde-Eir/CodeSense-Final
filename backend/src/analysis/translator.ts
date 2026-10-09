@@ -1,8 +1,4 @@
-/**
- * CodeSense Mentor (Translator) 
- * Explains C++ code in simple, student-friendly language.
- * Uses metaphors, real-world examples, and step-by-step breakdowns.
- */
+/** Produces plain-language explanations of C++ statements and expressions. */
 
 import {
   ASTNode,
@@ -32,17 +28,10 @@ export class Translator {
   private explanations: string[] = [];
   private indentLevel: number = 0;
   private currentFunctionName: string = '';
-  /**
-   * FIX (user bug #4): Many "💡 Mentor Tip" phrases were emitted once per
-   * occurrence of their parent statement, so an else-if chain repeated the
-   * same "Like choosing a path at a crossroads" line for every branch.
-   * This set holds the text of every 💡 tip already emitted in the current
-   * translate() call; pushTipOnce() uses it to skip duplicates.
-   */
+  /** Tip text emitted during the current translation. */
   private emittedTips: Set<string> = new Set();
 
-  /** Push a tip (anything with 💡), but only the first time its text is seen
-   *  within a single translate() call. Indentation is ignored for the key. */
+  /** Emits each tip once per translation, ignoring indentation when comparing text. */
   private pushTipOnce(line: string): void {
     const key = line.trim();
     if (this.emittedTips.has(key)) return;
@@ -63,15 +52,11 @@ export class Translator {
     return t.includes('&') && !t.includes('&&');
   }
 
-  /** True when a type string is a pointer. */
   private isPtrType(t: string): boolean {
     return t.includes('*');
   }
 
-  /**
-   * Describes one function parameter in plain English, noting how it's passed.
-   * Copy, pass-by-reference, and pass-by-pointer all get different wording.
-   */
+  /** Describes a parameter and its passing convention. */
   private describeParam(p: any): string {
     const t    = String(p.varType || '');
     const name = p.name || '?';
@@ -109,17 +94,13 @@ export class Translator {
     return this.explanations;
   }
 
-  /**
-   * One friendly sentence per CFG node — emoji, plain English, a tiny metaphor.
-   * Does NOT recurse into children.
-   */
+  /** Explains a single CFG node without visiting its children. */
   translateBrief(node: ASTNode | null | undefined): string {
     if (!node) return '';
     const n = node as any;
 
     switch (node.type) {
 
-      // ── Functions ───────────────────────────────────────────────────────────
       case 'FunctionDecl': {
         if (n.name === 'main')
           return 'Program entry point: execution starts inside main().';
@@ -146,7 +127,6 @@ export class Translator {
           ? `Returns ${this.formatExpr(n.value)} and exits the current function.`
           : `Exits the current function and returns to the caller.`;
 
-      // ── Variables ───────────────────────────────────────────────────────────
       case 'VariableDecl': {
         const mods: string[] = Array.isArray(n.modifiers) ? n.modifiers : [];
         const isConst = mods.includes('const') || mods.includes('constexpr');
@@ -196,7 +176,6 @@ export class Translator {
         return `Reads or writes "${n.name}" at index [${idx}].`;
       }
 
-      // ── Decisions ───────────────────────────────────────────────────────────
       case 'IfStatement': {
         const cond = this.formatExpr(n.condition);
         return `Branches on ${cond}: true runs the if path, false runs else or skips it.`;
@@ -212,7 +191,6 @@ export class Translator {
         return `Chooses ${yes} when ${cond} is true; otherwise chooses ${no}.`;
       }
 
-      // ── Loops ────────────────────────────────────────────────────────────────
       case 'WhileLoop':
         return `Repeats while ${this.formatExpr(n.condition)} is true; checks before each run.`;
       case 'DoWhileLoop':
@@ -229,7 +207,6 @@ export class Translator {
           ? 'Break exits the nearest loop or switch immediately.'
           : 'Continue skips the rest of this loop round and starts the next check.';
 
-      // ── I/O ──────────────────────────────────────────────────────────────────
       case 'CoutStatement': {
         const items = this.flattenCout(n.values)
           .filter(s => s !== 'cout' && s !== 'std::cout').join(', ');
@@ -247,7 +224,6 @@ export class Translator {
         return `Reads console input into "${names.join('", "') || 'a variable'}".`;
       }
 
-      // ── Memory ───────────────────────────────────────────────────────────────
       case 'NewExpression':
         return n.size
           ? `Allocates dynamic memory for ${this.formatExpr(n.size)} ${n.baseType} value(s); free it later.`
@@ -257,7 +233,6 @@ export class Translator {
           ? `Frees dynamic array "${this.cleanName(n.target)}"; do not use it afterward.`
           : `Frees dynamic memory "${this.cleanName(n.target)}"; do not use it afterward.`;
 
-      // ── Errors ───────────────────────────────────────────────────────────────
       case 'TryStatement':
         return 'Runs protected code; thrown errors can move control to catch.';
       case 'ThrowStatement': {
@@ -265,13 +240,11 @@ export class Translator {
         return `Throws ${val}; control jumps to the nearest matching catch.`;
       }
 
-      // ── Type ops ─────────────────────────────────────────────────────────────
       case 'CastExpression':
         return `Converts ${this.formatExpr(n.operand)} to type ${n.targetType}.`;
       case 'SizeofExpression':
         return `Gets the byte size of ${this.formatExpr(n.value)}.`;
 
-      // ── Pointers ─────────────────────────────────────────────────────────────
       case 'AddressOf':
         return `Gets the memory address of "${this.cleanName(n.operand)}".`;
       case 'Dereference':
@@ -285,13 +258,11 @@ export class Translator {
       case 'PostDecrement':
         return `Uses "${this.cleanName(n.operand)}", then decrements it.`;
 
-      // ── Goto / Labels ─────────────────────────────────────────────────────────
       case 'GotoStatement':
         return `Jumps directly to label "${n.label}".`;
       case 'LabelStatement':
         return `Defines label "${n.label}" as a goto target.`;
 
-      // ── Expressions ──────────────────────────────────────────────────────────
       case 'BinaryOp':
         return `Evaluates expression: ${this.formatExpr(node)}.`;
       case 'ExpressionStatement':
@@ -301,7 +272,6 @@ export class Translator {
         return `Initializes values with { ${vals} }.`;
       }
 
-      // ── Structure ─────────────────────────────────────────────────────────────
       case 'Block':
         return `Groups statements into one scope.`;
       case 'LambdaExpression': {
@@ -323,23 +293,18 @@ export class Translator {
   }
 
   private visit(node: ASTNode | null | string | undefined): void {
-    // 1. Basic safety check
     if (!node || typeof node === 'string') return;
 
-    // 2. Handle known edge cases where types might be weirdly formatted
-    // (This ensures Cout and Cin are always caught)
     if (node.type === 'CoutStatement') return this.visitCoutStatement(node as any);
     if (node.type === 'CinStatement')  return this.visitCinStatement(node as any);
 
-    // 3. Dynamic Dispatch: Try to find visitIfStatement, visitWhileLoop, etc.
     const methodName = `visit${node.type}`;
     
     if (typeof (this as any)[methodName] === 'function') {
         (this as any)[methodName](node);
     } 
     else {
-        // 4. Fallback: If no specific visitor exists, look for children to continue the walk.
-        // C++ ASTs often use 'body', 'statements', or 'declarations'
+        // Unhandled AST containers can store children in body, statements, or declarations.
         const children = (node as any).body || (node as any).statements || (node as any).declarations;
 
         if (Array.isArray(children)) {
@@ -351,9 +316,6 @@ export class Translator {
     }
 }
 
-  // =========================================================================
-  //  PROGRAM STRUCTURE
-  // =========================================================================
 
   private visitProgram(node: ProgramNode): void {
     this.explanations.push('🎬 **Your Program Starts Here**');
@@ -387,16 +349,10 @@ export class Translator {
     this.explanations.push('✅ **Program Complete!**');
   }
 
-  // =========================================================================
-  //  Multiple Variable Declarations  int x=1, y=2;
-  // =========================================================================
   private visitMultipleVariableDecl(node: any): void {
     (node.declarations || []).forEach((d: any) => this.visitVariableDecl(d));
   }
 
-  // =========================================================================
-  //  VARIABLES - The Storage Boxes
-  // =========================================================================
 
   private visitVariableDecl(node: VariableDeclNode): void {
     const name = this.cleanName(node.name);
@@ -405,7 +361,6 @@ export class Translator {
     const isPtr   = this.isPtrType(node.varType);
     const isArray = node.dimensions && node.dimensions.length > 0;
 
-    // 1. Identify the "Storage Type"
     if (isConst) {
       this.explanations.push(`${this.indent()}❄️ **Constant (Frozen): '${name}'** (type: ${node.varType})`);
       this.explanations.push(`${this.indent()}   This value is locked! It cannot be changed after this line.`);
@@ -425,12 +380,10 @@ export class Translator {
       this.explanations.push(`${this.indent()}📦 **Variable: '${name}'** (type: ${node.varType})`);
     }
 
-    // 2. Handle Initialization (The "Value" part)
     if (node.value) {
       const valueStr = this.formatExpr(node.value);
       this.explanations.push(`${this.indent()}   ✨ **Initialization:** The box is starting with the value: ${valueStr}`);
     } else {
-      // Logic for uninitialized variables - a major source of C++ bugs
       this.explanations.push(`${this.indent()}   ⚠️ **Warning: Uninitialized!**`);
       this.explanations.push(`${this.indent()}   The box '${name}' is currently empty. In C++, it will contain "garbage data" (random leftovers in memory) until you assign it a value.`);
       this.explanations.push(`${this.indent()}   Why: If '${name}' is read before it is assigned, it can produce unpredictable results.`);
@@ -462,9 +415,6 @@ export class Translator {
     this.explanations.push('');
   }
 
-  // =========================================================================
-  //  FUNCTIONS - The Tasks
-  // =========================================================================
 
   private visitFunctionPrototype(node: FunctionPrototypeNode): void {
     const name = this.cleanName(node.name);
@@ -514,8 +464,6 @@ export class Translator {
     
     if (statements.length > 0) {
         statements.forEach((stmt: ASTNode) => {
-            // This will call visitVariableDecl, visitWhileLoop, etc.
-            // Each of those will add their own emoji-led line.
             this.visit(stmt); 
         });
     } else {
@@ -561,9 +509,6 @@ export class Translator {
     this.explanations.push('');
   }
 
-  // =========================================================================
-  //  CONTROL FLOW - Making Decisions
-  // =========================================================================
 
   private visitIfStatement(node: IfStatementNode): void {
     const condition = this.formatExpr(node.condition);
@@ -667,9 +612,6 @@ export class Translator {
     this.explanations.push('');
   }
 
-  // =========================================================================
-  //  CP2: Dynamic Memory
-  // =========================================================================
 
   private visitNewExpression(node: any): void {
     const baseType = node.baseType;
@@ -699,9 +641,6 @@ export class Translator {
     this.explanations.push('');
   }
 
-  // =========================================================================
-  //  ARRAYS
-  // =========================================================================
 
   private visitArrayAccess(node: ArrayAccessNode): void {
     const name    = this.cleanName(node.name);
@@ -719,9 +658,6 @@ export class Translator {
     this.explanations.push('');
   }
 
-  // =========================================================================
-  //  LOOP CONTROL
-  // =========================================================================
 
   private visitLoopControl(node: any): void {
     if (node.value === 'break') {
@@ -734,15 +670,11 @@ export class Translator {
     this.explanations.push('');
   }
 
-  // =========================================================================
-  //  INPUT/OUTPUT - Talking to the User
-  // =========================================================================
 
-  // 1. Add this helper to your Translator class to handle the nested << chain
+  // Flatten nested output chains into individual values.
 private flattenCout(node: any): string[] {
   if (!node) return [];
   
-  // If it's a nested BinaryOp (the new structure from the grammar)
   if (node.type === 'BinaryOp' && node.operator === '<<') {
     return [
       ...this.flattenCout(node.left), 
@@ -758,7 +690,6 @@ private flattenCout(node: any): string[] {
   return [val];
 }
 
-// 2. Update the visitCoutStatement to use the helper
 private visitCoutStatement(node: any): void {
   const items = this.flattenCout(node.values);
   const outputs = items.length > 0 ? items.join(' ⟩⟩ ') : 'something';
@@ -789,9 +720,6 @@ private visitCoutStatement(node: any): void {
     this.explanations.push('');
   }
 
-  // =========================================================================
-  //  BLOCK
-  // =========================================================================
 
   private visitBlock(node: any): void {
     (node.statements || []).forEach((s: ASTNode) => this.visit(s));
@@ -801,9 +729,6 @@ private visitCoutStatement(node: any): void {
     if (node.expression) this.visit(node.expression);
   }
 
-  // =========================================================================
-  //  ADVANCED OPERATORS
-  // =========================================================================
 
   private visitPreIncrement(node: UnaryOpNode): void {
     const v = this.cleanName(node.operand);
@@ -868,9 +793,6 @@ private visitCoutStatement(node: any): void {
     this.explanations.push('');
   }
 
-  // =========================================================================
-  //  HELPERS - Format expressions nicely
-  // =========================================================================
 
   private formatExpr(node: any): string {
     if (!node) return '???';
@@ -884,7 +806,6 @@ private visitCoutStatement(node: any): void {
         const right = this.formatExpr(node.right);
         let note = '';
 
-        // 1. Map symbols to human-friendly words
         const opMap: Record<string, string> = { 
           '&&': 'AND', 
           '||': 'OR', 
@@ -897,7 +818,6 @@ private visitCoutStatement(node: any): void {
         };
         const opLabel = opMap[node.operator] || node.operator;
 
-        // 2. Check for the integer division pitfall
         if (node.operator === '/' && node.left.type === 'Integer' && node.right.type === 'Integer') {
           note = ' 💡 (Note: Integer division cuts off decimals!)';
         }
@@ -982,9 +902,6 @@ private visitCoutStatement(node: any): void {
         return node.type || 'unknown expression';
     }
   }
-  // =========================================================================
-  //  RANGE-BASED FOR (C++11)
-  // =========================================================================
   private visitRangeBasedFor(node: any): void {
     const range = this.formatExpr(node.range);
     this.explanations.push(
@@ -1001,9 +918,6 @@ private visitCoutStatement(node: any): void {
     this.explanations.push('');
   }
 
-  // =========================================================================
-  //  EXCEPTION HANDLING
-  // =========================================================================
   private visitTryStatement(node: any): void {
     this.explanations.push(`${this.indent()}🛡 **Try Block** — code that might throw an error:`);
     this.explanations.push('');
@@ -1030,9 +944,6 @@ private visitCoutStatement(node: any): void {
     this.explanations.push('');
   }
 
-  // =========================================================================
-  //  GOTO / LABELS
-  // =========================================================================
 
   private visitGotoStatement(node: any): void {
     this.explanations.push(`${this.indent()}🏃 **goto ${node.label}** — Jumps directly to the '${node.label}' marker`);
@@ -1047,9 +958,6 @@ private visitCoutStatement(node: any): void {
     this.explanations.push('');
   }
 
-  // =========================================================================
-  //  LAMBDA EXPRESSIONS
-  // =========================================================================
 
   private visitLambdaExpression(node: any): void {
     const capture = node.capture ? `[${node.capture}]` : '[]';
@@ -1067,9 +975,6 @@ private visitCoutStatement(node: any): void {
 
 }
 
-// ---------------------------------------------------------------------------
-// Lookup tables
-// ---------------------------------------------------------------------------
 
 const HEADER_DESCRIPTIONS: Record<string, string> = {
   iostream:  'input/output (cin, cout)',

@@ -2,7 +2,6 @@ import React, { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useAuth } from '@/components/AuthContext'
 
-// ─── Tutorial data ───────────────────────────────────────────────────────────
 
 interface Step {
   title: string
@@ -383,7 +382,6 @@ int main() {
     ],
   },
 
-  // ─── Getting Started — the grand tour ────────────────────────────────────
   {
     id: 'getting-started',
     icon: '🧭',
@@ -437,7 +435,6 @@ int main() {
     ],
   },
 
-  // ─── Campaign Mode — navigation ─────────────────────────────────────────
   {
     id: 'campaign-tour',
     icon: '⚔️',
@@ -482,7 +479,6 @@ int main() {
     ],
   },
 
-  // ─── Reading CFG colour cues ─────────────────────────────────────────────
   {
     id: 'cfg-cues',
     icon: '🎨',
@@ -517,7 +513,6 @@ int main() {
     ],
   },
 
-  // ─── Admin Panel (admins only) ───────────────────────────────────────────
   {
     id: 'admin-basics',
     icon: '🛡',
@@ -564,7 +559,6 @@ const DIFF_STYLE: Record<Tutorial['difficulty'], { color: string; bg: string }> 
   Advanced:     { color: '#f85149', bg: 'rgba(248,81,73,0.12)'  },
 }
 
-// ─── localStorage-backed completion state ───────────────────────────────────
 
 const PROGRESS_KEY = 'cs-tutorial-progress-v1'
 
@@ -576,7 +570,6 @@ function saveProgress(p: Record<string, number>) {
   try { localStorage.setItem(PROGRESS_KEY, JSON.stringify(p)) } catch { /* quota */ }
 }
 
-// ─── Tutorial detail view ───────────────────────────────────────────────────
 
 const TutorialView: React.FC<{
   tutorial: Tutorial
@@ -602,7 +595,6 @@ const TutorialView: React.FC<{
         ← Back to tutorials
       </button>
 
-      {/* Header */}
       <div style={{ display: 'flex', alignItems: 'center', gap: 14, marginBottom: 8 }}>
         <span style={{ fontSize: 30 }}>{tutorial.icon}</span>
         <div>
@@ -611,7 +603,6 @@ const TutorialView: React.FC<{
         </div>
       </div>
 
-      {/* Progress bar */}
       <div style={{ background: 'rgba(255,255,255,0.05)', borderRadius: 6, height: 6, marginBottom: 6, overflow: 'hidden' }}>
         <div style={{
           width: `${((stepIdx + 1) / tutorial.steps.length) * 100}%`,
@@ -623,7 +614,6 @@ const TutorialView: React.FC<{
         Step {stepIdx + 1} of {tutorial.steps.length}
       </div>
 
-      {/* Step card */}
       <div style={{ background: 'rgba(22,27,34,0.9)', border: '1px solid #21262d', borderRadius: 14, padding: '22px 24px', marginBottom: 18 }}>
         <div style={{ color: '#484f58', fontSize: 10, fontWeight: 700, letterSpacing: 1.5, textTransform: 'uppercase', marginBottom: 6 }}>
           Step {stepIdx + 1}
@@ -676,7 +666,6 @@ const TutorialView: React.FC<{
         )}
       </div>
 
-      {/* Nav buttons */}
       <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12 }}>
         <button onClick={() => onStep(Math.max(0, stepIdx - 1))} disabled={stepIdx === 0}
           style={{
@@ -699,7 +688,6 @@ const TutorialView: React.FC<{
   )
 }
 
-// ─── Main Tutorials page ────────────────────────────────────────────────────
 
 export const TutorialsPage: React.FC = () => {
   const navigate = useNavigate()
@@ -739,10 +727,8 @@ export const TutorialsPage: React.FC = () => {
     setActiveId(null)
   }
 
-  // Hide admin-only tutorials from non-admins
   const visibleAll = TUTORIALS.filter(t => !t.adminOnly || isAdmin)
 
-  // Apply category / difficulty / search filters
   const q = search.trim().toLowerCase()
   const visible = visibleAll.filter(t => {
     if (catFilter !== 'All' && t.category !== catFilter) return false
@@ -775,7 +761,6 @@ export const TutorialsPage: React.FC = () => {
       background: 'linear-gradient(135deg, #0d1117 0%, #1a1f2e 100%)',
       color: 'white', fontFamily: "'IBM Plex Sans', system-ui, sans-serif",
     }}>
-      {/* Header */}
       <header className="tut-header" style={{
         display: 'flex', justifyContent: 'space-between', alignItems: 'center',
         padding: '16px 32px', background: 'rgba(22,27,34,0.95)',
@@ -805,7 +790,6 @@ export const TutorialsPage: React.FC = () => {
           />
         ) : (
           <>
-            {/* Summary card */}
             <div style={{
               background: 'linear-gradient(135deg, rgba(76,175,80,0.1), rgba(100,181,246,0.06))',
               border: '1px solid rgba(76,175,80,0.25)',
@@ -830,13 +814,11 @@ export const TutorialsPage: React.FC = () => {
               </div>
             </div>
 
-            {/* ── Filter controls ── */}
             <div style={{
               background: 'rgba(22,27,34,0.9)', border: '1px solid #21262d',
               borderRadius: 12, padding: 14, marginBottom: 14,
               display: 'flex', flexDirection: 'column', gap: 10,
             }}>
-              {/* Search */}
               <div style={{
                 display: 'flex', alignItems: 'center', gap: 10,
                 background: 'rgba(255,255,255,0.03)', border: '1px solid #30363d',
@@ -858,7 +840,6 @@ export const TutorialsPage: React.FC = () => {
                 )}
               </div>
 
-              {/* Category chips */}
               <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
                 <span style={{ color: '#484f58', fontSize: 10, fontWeight: 700, letterSpacing: 1, alignSelf: 'center', marginRight: 4 }}>CATEGORY</span>
                 {CATEGORIES.map(c => {
@@ -884,7 +865,6 @@ export const TutorialsPage: React.FC = () => {
                 })}
               </div>
 
-              {/* Difficulty chips */}
               <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
                 <span style={{ color: '#484f58', fontSize: 10, fontWeight: 700, letterSpacing: 1, alignSelf: 'center', marginRight: 4 }}>DIFFICULTY</span>
                 {DIFFS.map(d => {
@@ -912,7 +892,6 @@ export const TutorialsPage: React.FC = () => {
               </div>
             </div>
 
-            {/* ── Tutorial grid ── */}
             {visible.length === 0 ? (
               <div style={{
                 textAlign: 'center', padding: '40px 20px',

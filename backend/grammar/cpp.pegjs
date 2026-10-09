@@ -7,9 +7,6 @@
   }
 }
 
-// ============================================================================
-// Program Entry Point
-// ============================================================================
 
 Program
   = _ directives:Preprocessor* _ namespace:Namespace? _
@@ -25,13 +22,6 @@ Program
       };
     }
 
-// ============================================================================
-// Preprocessor Directives
-// FIXES:
-//   - #include now accepts + in names (e.g. "c++") via [a-zA-Z0-9_/.+]
-//   - #define value defaults to null (not undefined) when absent
-//   - #line filename is null (not undefined) when absent
-// ============================================================================
 
 Preprocessor
   = "#include" _ "<" name:$[a-zA-Z0-9_/.+]+ ">" _ {
@@ -101,14 +91,8 @@ Namespace
       return { type: 'Namespace', name, ...loc() };
     }
 
-// ============================================================================
-// Functions
-// ============================================================================
 
-// Use `_` instead of `__` between Type and the identifier — Type may already
-// end with `*` or `&` (pointer / reference), in which case there is no
-// whitespace before the name. BaseType / TypeModifier carry their own
-// word-boundary guard (`!IdentChar`) so this still rejects e.g. `intx`.
+// Optional whitespace allows pointer and reference names such as int*ptr; type keywords enforce word boundaries.
 Function
   = returnType:Type _ name:Identifier _ "(" _ params:ParameterList? _ ")" _
     body:("{" _ Statement* _ "}" / ";") _ {
@@ -142,9 +126,7 @@ ParameterList
       return [first, ...rest.map(r => r[3])];
     }
 
-// `_` (zero-or-more whitespace) is correct here: Type can end with `*`/`&`,
-// in which case there is no whitespace before the parameter name. BaseType
-// has a `!IdentChar` guard so `intn` / `floatx` won't be silently accepted.
+// Pointer and reference parameters may omit whitespace before the name.
 Parameter
   = type:Type _ name:Identifier dims:ArrayDimension* _ init:("=" _ Expression)? {
       return {
@@ -166,13 +148,6 @@ Parameter
 ArrayDimension
   = _ "[" _ size:Expression? _ "]" { return size || null; }
 
-// ============================================================================
-// Statements
-// FIXES:
-//   - LoopControlStatement now carries a loopDepth placeholder so the
-//     TypeChecker can verify break/continue appear inside a loop/switch.
-//   - DeleteStatement supports both `delete ptr` and `delete[] arr`.
-// ============================================================================
 
 Statement
   = VariableDeclaration
@@ -198,12 +173,6 @@ Block
       return { type: 'Block', statements, ...loc() };
     }
 
-// ============================================================================
-// Switch / Case
-// FIXES:
-//   - Case and DefaultCase now emit a consistent `isDefault` flag.
-//   - DefaultCase is a distinct type so TypeChecker can detect its presence.
-// ============================================================================
 
 SwitchStatement
   = "switch" _ "(" _ cond:Expression _ ")" _ "{" _ cases:CaseBlock* _ "}" _ {
@@ -249,9 +218,6 @@ DoWhileLoop
     }
 
 
-// ============================================================================
-// Exception Handling  (try / catch / throw)
-// ============================================================================
 TryStatement
   = "try" _ body:Block _ handlers:CatchClause+ {
       return { type: 'TryStatement', body: body.statements, handlers, ...loc() };
@@ -272,8 +238,6 @@ ThrowStatement
   = "throw" __ expr:Expression _ ";" _ { return { type: 'ThrowStatement', value: expr, ...loc() }; }
   / "throw" _ ";" _ { return { type: 'ThrowStatement', value: null, ...loc() }; }
 
-// FIX: LoopControlStatement now records 'break' vs 'continue' in `value`
-//      and the surrounding context can be verified in the TypeChecker.
 LoopControlStatement
   = ctrl:("break" / "continue") _ ";" _ {
       return { type: 'LoopControl', value: ctrl, ...loc() };
@@ -284,16 +248,12 @@ GotoStatement
       return { type: 'GotoStatement', label, ...loc() };
     }
 
-// LabelStatement: `myLabel:` optionally followed by a statement.
 // The `!":"` lookahead prevents matching `::` (scope resolution).
 LabelStatement
   = label:$([a-zA-Z_][a-zA-Z0-9_]*) _ ":" !":" _ stmt:Statement? {
       return { type: 'LabelStatement', label, statement: stmt || null, ...loc() };
     }
 
-// ============================================================================
-// Variable Declarations
-// ============================================================================
 
 VariableDeclaration
   = mods:TypeModifier* _ type:Type _ first:VariableDeclarator
@@ -344,9 +304,6 @@ VariableDeclarator
       };
     }
 
-// ============================================================================
-// Stream Statements (cin / cout)
-// ============================================================================
 
 StreamStatement
   = ("std::" _)? "cout" _ items:CoutChain _ ";" _ {
@@ -378,17 +335,13 @@ CinChain
       }), first);
     }
 
-// FIX: CinTarget tries ArrayAccess before plain Identifier so `cin >> arr[i]`
-//      is correctly parsed as an ArrayAccess node, not just the name "arr".
+// Array targets must be tried before identifiers so cin >> arr[i] consumes the index.
 CinTarget
   = name:Identifier dims:(_ "[" _ Expression _ "]")+ {
       return { type: 'ArrayAccess', name, indices: dims.map(d => d[3]), ...loc() };
     }
   / Identifier
 
-// ============================================================================
-// Control Flow
-// ============================================================================
 
 ReturnStatement
   = "return" __ value:Expression _ ";" _ { return { type: 'ReturnStatement', value, ...loc() }; }
@@ -419,10 +372,6 @@ WhileLoop
     }
 
 
-// ============================================================================
-// Range-Based For Loop  (C++11)
-// for ( Type name : expr ) Statement
-// ============================================================================
 // `_` between Type and name — Type may end with `*`/`&` (e.g. `for (auto& x : v)`).
 RangeBasedFor
   = "for" _ "(" _ type:Type _ name:Identifier _ ":" _ range:Expression _ ")" _ body:Statement {
@@ -436,9 +385,7 @@ RangeBasedFor
       };
     }
 
-// FIX: ForLoop init now tries VariableDeclaration first (handles `int i = 0;`)
-//      then falls back to ExpressionStatement-style (handles `i = 0;`).
-//      The update expression is also captured properly.
+// A for initializer may be a declaration, an expression, or empty.
 ForLoop
   = "for" _ "(" _
     init:(VariableDeclaration / (expr:Expression _ ";" _ { return { type: 'ExpressionStatement', expression: expr, ...loc() }; }) / (_ ";" _ { return null; }))?
@@ -460,15 +407,9 @@ ExpressionStatement
       return { type: 'ExpressionStatement', expression: expr, ...loc() };
     }
 
-// ============================================================================
-// Expressions
-// ============================================================================
 
 Expression = Assignment / InitializerList
 
-// FIX: Assignment now includes |= ^= &= <<= >>= (bitwise compound operators).
-// AssignTarget allows `*p = ...` (dereference) in addition to plain Primaries
-// like identifiers and array accesses, so pointer-assignment statements parse.
 Assignment
   = target:AssignTarget _ op:("=" / "+=" / "-=" / "*=" / "/=" / "%=" / "&=" / "|=" / "^=" / "<<=" / ">>=") _ value:Expression {
       return { type: 'Assignment', operator: op, target, value, ...loc() };
@@ -505,8 +446,7 @@ LogicalAnd
       }), left);
     }
 
-// FIX: Added full bitwise operator precedence chain (|, ^, &) between
-//      logical AND and equality — matches the C++ standard precedence table.
+// Bitwise operators bind between logical AND and equality.
 BitwiseOr
   = left:BitwiseXor rest:(_ "|" !"|" _ BitwiseXor)* {
       return rest.reduce((acc, r) => ({
@@ -542,7 +482,6 @@ Relational
       }), left);
     }
 
-// FIX: Added Shift level (<<, >>) between Relational and Additive.
 Shift
   = left:Additive rest:(_ ("<<" / ">>") _ Additive)* {
       return rest.reduce((acc, r) => ({
@@ -564,7 +503,6 @@ Multiplicative
       }), left);
     }
 
-// FIX: Unary now includes bitwise NOT (~) and logical NOT (!) as separate cases.
 Unary
   = "(" _ type:Type _ ")" _ operand:Unary { return { type: 'CastExpression', targetType: type, operand, ...loc() }; }
   / "sizeof" _ "(" _ expr:Expression _ ")" { return { type: 'SizeofExpression', value: expr, ...loc() }; }
@@ -596,8 +534,7 @@ Primary
   / "std::" name:Identifier { return { type: 'Identifier', name: "std::" + name, ...loc() }; }
   / Identifier
 
-// FIX: Identifier guard checks ReservedWord with a proper word-boundary look-ahead
-//      so keywords like "int" don't match as the start of "integer".
+// Reserved-word boundaries allow identifiers such as integer.
 Identifier
   = !ReservedWord chars:$([a-zA-Z_][a-zA-Z0-9_]*) {
       return chars;
@@ -627,9 +564,6 @@ InitializerList
       return { type: 'InitializerList', values: [first, ...rest.map(r => r[3])], ...loc() };
     }
 
-// ============================================================================
-// Literals
-// ============================================================================
 
 BooleanLiteral
   = value:("true" / "false") !([a-zA-Z0-9_]) {
@@ -661,22 +595,17 @@ Float
       return { type: 'Float', value: parseFloat(value + exp), suffix: suffix || null, ...loc() };
     }
 
-// FIX: Char literal handles all standard escape sequences
 Char
   = "'" ch:(("\\" .) / [^'\\]) "'" {
       const raw = Array.isArray(ch) ? ch[0] + ch[1] : ch;
       return { type: 'Char', value: raw, ...loc() };
     }
 
-// FIX: String literal explicitly loops over escape-or-regular-char groups
 String
   = prefix:$("u8" / "u" / "U" / "L")? "\"" chars:$((("\\" .) / [^"\\])*) "\"" {
       return { type: 'String', value: chars, ...loc() };
     }
 
-// ============================================================================
-// Types
-// ============================================================================
 
 Type
   = mods:TypeModifier* _ base:BaseType ptr:(_ ("*" / "&"))* {
@@ -685,9 +614,7 @@ Type
       return modStr + base + ptrStr;
     }
 
-// IdentChar: helper used by !IdentChar lookaheads to enforce word boundaries
-// after type keywords. Without these guards, `intx` would mis-parse as
-// `int x` because BaseType's literal `"int"` would match the prefix.
+// Type keywords require word boundaries so intx cannot parse as int x.
 IdentChar = [a-zA-Z0-9_]
 
 BaseType
@@ -708,9 +635,7 @@ TypeModifier
      / "unsigned" / "signed" / "inline" / "virtual" / "public" / "private"
      / "protected" / "override" / "final" / "mutable" / "explicit") !IdentChar { return name; }
 
-// ============================================================================
-// Reserved Keywords — kept in sync with the Lexer keyword list
-// ============================================================================
+// Keep reserved words in sync with the lexer keyword list.
 
 ReservedWord
   = ( "auto" / "bool" / "break" / "case" / "catch" / "char" / "class"
@@ -725,9 +650,6 @@ ReservedWord
     / "virtual" / "void" / "volatile" / "while"
     ) ![a-zA-Z0-9_]
 
-// ============================================================================
-// Whitespace & Comments
-// ============================================================================
 
 _  = (Whitespace / LineComment / BlockComment)*
 __ = (Whitespace / LineComment / BlockComment)+

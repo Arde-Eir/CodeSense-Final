@@ -43,10 +43,6 @@ function readPositiveIntegerEnvironment(name: string, fallback: number): number 
 const apiRateBuckets = new Map<string, RateBucket>();
 const analyzeRateBuckets = new Map<string, RateBucket>();
 
-/**
- * 1. DYNAMIC CORS CONFIGURATION
- * Updated to allow local development, production, and VS Code Dev Tunnels.
- */
 const envOrigins = (process.env.CORS_ORIGINS ?? '')
   .split(',')
   .map(o => o.trim())
@@ -57,7 +53,7 @@ const allowedOrigins = [
     'http://localhost:4173',
     'https://code-sense-final-lsif.vercel.app',
     'https://codesense-4f57.up.railway.app',
-    'https://ubiquitous-peony-399ebd.netlify.app',
+    'https://pr-codesense.netlify.app',
     ...envOrigins,
 ];
 
@@ -108,9 +104,6 @@ function pruneExpiredRateBuckets(buckets: Map<string, RateBucket>, now: number):
 
 app.use(cors({
     origin: (origin, callback) => {
-        // Allow if:
-        // - No origin (Postman/Curl)
-        // - In our allowedOrigins list or CORS_ORIGINS
         if (
             !origin ||
             allowedOrigins.includes(origin)
@@ -185,9 +178,6 @@ app.use('/api', (req: Request, res: Response, next: NextFunction) => {
 app.use('/api', registrationCaptchaRoutes);
 app.use(bodyParser.json({ limit: '1mb' }));
 
-/**
- * 2. REQUEST LOGGING
- */
 app.use((req: Request, _res: Response, next: NextFunction) => {
     if (LOG_ANALYSIS_REQUESTS && req.path === '/api/analyze') {
         const rawSrc = req.body?.sourceCode;
@@ -197,12 +187,8 @@ app.use((req: Request, _res: Response, next: NextFunction) => {
     next();
 });
 
-/**
- * 3. ROUTE REGISTRATION
- */
 app.use('/api', analyzeRoutes);
 
-// Simple Health Check for Vercel
 app.get('/', (_req, res) => {
     res.status(200).send('CodeSense Analysis Engine is Online.');
 });
@@ -231,9 +217,6 @@ app.use((req: Request, res: Response) => {
   });
 });
 
-/**
- * 4. GLOBAL ERROR HANDLER
- */
 app.use((err: unknown, _req: Request, res: Response, _next: NextFunction) => {
     const httpError = err as HttpError;
     const message = httpError?.message ?? 'Unexpected backend error';
@@ -276,11 +259,7 @@ function getErrorStatusCode(error: HttpError): number {
     return 500;
 }
 
-/**
- * 5. SERVER EXECUTION LOGIC
- * Only run app.listen when this file is executed directly. Serverless hosts can
- * import the Express app without binding a second listener.
- */
+/** Importing the app on serverless hosts must not open a second listener. */
 if (require.main === module) {
     app.listen(PORT, () => {
         console.log(`✅ CodeSense Backend is running on port ${PORT}`);

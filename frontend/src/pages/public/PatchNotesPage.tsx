@@ -82,7 +82,6 @@ export const PatchNotesPage: React.FC = () => {
         @keyframes fadeUp { from { opacity: 0; transform: translateY(16px); } to { opacity: 1; transform: translateY(0); } }
       `}</style>
 
-      {/* Header */}
       <header style={{
         position: 'sticky', top: 0, zIndex: 10,
         height: 56, background: 'rgba(13,17,23,0.97)',
@@ -144,7 +143,6 @@ export const PatchNotesPage: React.FC = () => {
                 animation: `fadeUp 0.4s ease ${i * 60}ms both`,
               }}
             >
-              {/* Card header */}
               <div style={{
                 padding: '18px 24px 14px',
                 borderBottom: '1px solid #21262d',
@@ -168,7 +166,6 @@ export const PatchNotesPage: React.FC = () => {
                 <div style={{ marginLeft: 'auto', fontSize: 11, color: '#484f58' }}>{fmt(note.releasedate)}</div>
               </div>
 
-              {/* Card body */}
               <div style={{ padding: '16px 24px 20px' }}>
                 <h2 style={{ margin: '0 0 14px', fontSize: 16, fontWeight: 700, color: '#e6edf3' }}>
                   {note.title}

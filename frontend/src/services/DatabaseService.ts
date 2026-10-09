@@ -1,10 +1,8 @@
-// src/services/DatabaseService.ts
 import { supabase } from './supabase'
 import type { ExplorerProfile } from '@/types'
 
 export const DatabaseService = {
 
-  // ── AUTHENTICATION ──────────────────────────────────────────────────────────
 
   async updateLastActive(userId: string): Promise<void> {
     try {
@@ -94,7 +92,6 @@ export const DatabaseService = {
         const msg  = error.message.toLowerCase()
         const code = (error as any).code ?? ''
 
-        // ── EMAIL_TAKEN: all known Supabase variants ──────────────────────────
         if (
           code === 'user_already_exists'  ||
           code === 'email_exists'         ||
@@ -103,11 +100,7 @@ export const DatabaseService = {
           msg.includes('email address is already') ||
           msg.includes('user already exists')
         ) {
-          // FIX Bug 1: Check whether a users-table profile exists for this email.
-          // If it does NOT, the auth account is a zombie (trigger failed on a
-          // previous attempt). We surface a friendlier error so the user knows
-          // to contact support or try a different email, rather than being
-          // silently blocked by a phantom account.
+          // An existing auth account may lack its public profile.
           const { data: existingProfile } = await supabase
             .from('users')
             .select('id')
@@ -115,17 +108,13 @@ export const DatabaseService = {
             .maybeSingle()
 
           if (!existingProfile) {
-            // Orphan auth account: public.users was deleted but auth.users still
-            // holds this email (e.g. manually deleted from the dashboard).
-            // Try to sign in with the supplied credentials — if it works we can
-            // recover by re-inserting the missing profile row.
+            // Verify account ownership before restoring the missing profile.
             const { data: recoveryData, error: recoveryErr } = await supabase.auth.signInWithPassword({
               email,
               password: secretCode,
             })
 
             if (!recoveryErr && recoveryData?.user) {
-              // Password matched — re-create the public.users profile.
               const recoveredId = recoveryData.user.id
               const { data: newProfile, error: insertErr } = await supabase
                 .from('users')
@@ -162,15 +151,12 @@ export const DatabaseService = {
               } as ExplorerProfile
             }
 
-            // Password didn't match — orphan belongs to someone else.
             throw new Error('EMAIL_ORPHANED')
           }
           throw new Error('EMAIL_TAKEN')
         }
 
-        // ── USERNAME_TAKEN ────────────────────────────────────────────────────
-        // FIX Bug 2: also catch generic 'duplicate key' messages that don't
-        // name the column explicitly.
+        // Supabase may report a duplicate without naming the affected column.
         if (
           code === '23505'                         ||
           msg.includes('playername')               ||
@@ -199,9 +185,7 @@ export const DatabaseService = {
 
       const userId = data.user.id
 
-      // FIX Bug 3: Poll up to 5 times (1 s apart) for the DB trigger to create
-      // the profile row. If the row already exists when we attempt the fallback
-      // INSERT we treat that as success (not USERNAME_TAKEN).
+      // Allow the database trigger to create the profile before inserting it here.
       let profile: any = null
       for (let attempt = 0; attempt < 5; attempt++) {
         await new Promise(r => setTimeout(r, 1000))
@@ -232,8 +216,7 @@ export const DatabaseService = {
           .single()
 
         if (insertErr) {
-          // FIX Bug 3b: if the row appeared between our last poll and the INSERT
-          // (race condition), fetch it instead of throwing USERNAME_TAKEN.
+          // The trigger may have created this profile between the last poll and insert.
           if (insertErr.code === '23505') {
             const { data: racedRow } = await supabase
               .from('users')
@@ -243,7 +226,6 @@ export const DatabaseService = {
             if (racedRow) {
               profile = racedRow
             } else {
-              // Truly a duplicate playername from another account
               throw new Error('USERNAME_TAKEN')
             }
           } else {
@@ -330,7 +312,6 @@ export const DatabaseService = {
     }
   },
 
-  // ── PROGRESS SYSTEM ─────────────────────────────────────────────────────────
 
   async addXP(userId: string, xpEarned: number): Promise<ExplorerProfile | null> {
     try {
@@ -369,9 +350,7 @@ export const DatabaseService = {
     }
   },
 
-  // ── SANDBOX ─────────────────────────────────────────────────────────────────
-  // NOTE: Sandbox runs ONLY increment the sandbox_runs counter.
-  // They do NOT award any XP — sandbox is a free exploration mode.
+  // Sandbox runs increment the counter without awarding XP.
 
   async logSandboxRun(
     userId: string,
@@ -419,7 +398,6 @@ export const DatabaseService = {
     }
   },
 
-  // ── CAMPAIGN ────────────────────────────────────────────────────────────────
 
   async getQuests(phase: 'beginner' | 'intermediate' | 'advanced') {
     const { data, error } = await supabase
@@ -455,7 +433,6 @@ export const DatabaseService = {
     return data
   },
 
-  // ── REPORTS ─────────────────────────────────────────────────────────────────
 
   async saveAnalysisReport(
     userId: string,
@@ -481,7 +458,6 @@ export const DatabaseService = {
   },
 }
 
-// ── HELPER ───────────────────────────────────────────────────────────────────
 function mapProfile(profile: any): ExplorerProfile {
   return {
     id:            profile.id,

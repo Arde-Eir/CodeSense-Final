@@ -64,7 +64,6 @@ function analysisFailureFromError(error: unknown): AnalysisResult {
   };
 }
 
-// ─── Rank config ──────────────────────────────────────────────────────────────
 const RANK_CONFIG = {
   1: { color: '#8b949e', icon: '🛡️', label: 'Squire' },
   2: { color: '#58a6ff', icon: '⚔️', label: 'Knight' },
@@ -73,7 +72,6 @@ const RANK_CONFIG = {
   5: { color: '#ffd700', icon: '🔱', label: 'King'   },
 } as const;
 
-// ─── Player HUD ───────────────────────────────────────────────────────────────
 const PlayerHUD: React.FC<{
   user: { id: string; playerName: string } | null;
   isGuest: boolean;
@@ -150,7 +148,6 @@ const PlayerHUD: React.FC<{
   );
 };
 
-// ─── Mode Toggle ──────────────────────────────────────────────────────────────
 const ModeToggle: React.FC<{ mode: AppMode; onChange: (m: AppMode) => void }> = ({ mode, onChange }) => (
   <div style={{
     display: 'flex', gap: 0,
@@ -177,7 +174,6 @@ const ModeToggle: React.FC<{ mode: AppMode; onChange: (m: AppMode) => void }> = 
   </div>
 );
 
-// ─── Safety Banner ────────────────────────────────────────────────────────────
 const SafetyBanner: React.FC<{ total: number; unsafe: number }> = ({ total, unsafe }) => {
   if (total === 0) return null;
   const allSafe = unsafe === 0;
@@ -209,7 +205,6 @@ const SafetyBanner: React.FC<{ total: number; unsafe: number }> = ({ total, unsa
   );
 };
 
-// ─── Generated Code Viewer ────────────────────────────────────────────────────
 const GeneratedCodeViewer: React.FC<{
   code: string;
   onLoadInEditor: (code: string) => void;
@@ -383,14 +378,12 @@ const BuildModeManual: React.FC = () => (
   </div>
 );
 
-// ─── Accordion Panel ──────────────────────────────────────────────────────────
 interface AccordionPanelProps {
   label: string;
   icon: string;
   isOpen: boolean;
   onToggle: () => void;
   children: React.ReactNode;
-  // FIX: accept string (e.g. "55%") or number (pixels) or undefined
   height?: number | string;
   accentColor?: string;
   badge?: React.ReactNode;
@@ -404,7 +397,6 @@ const AccordionPanel: React.FC<AccordionPanelProps> = ({
 }) => {
   const outerStyle: React.CSSProperties = isOpen
     ? height != null
-      // FIX: pass the value as-is — works for both "55%" strings and pixel numbers
       ? { height: typeof height === 'number' ? `${height}px` : height, flex: 'none', minHeight: 0 }
       : { flex: '1 1 0', minHeight: 0, overflow: 'hidden' }
     : { height: `${HEADER_H}px`, flex: 'none', minHeight: 0 };
@@ -455,7 +447,6 @@ const AccordionPanel: React.FC<AccordionPanelProps> = ({
   );
 };
 
-// ─── SandboxPage ──────────────────────────────────────────────────────────────
 export const SandboxPage = () => {
   const navigate = useNavigate();
   const { user, isGuest } = useAuth();
@@ -505,10 +496,7 @@ int main() {
     tabs: false,
   });
 
-  // ─── Resizer ────────────────────────────────────────────────────────────────
-  // ratio: fraction of the left column's height given to the editor panel.
-  // We use getBoundingClientRect on mousemove so it's always accurate —
-  // no ResizeObserver, no pixel state, no drift.
+  // The ratio is the fraction of the left column occupied by the editor.
   const containerRef = useRef<HTMLDivElement>(null);
   const [ratio, setRatio] = useState(0.58);
 
@@ -690,7 +678,6 @@ int main() {
 
   return (
     <div className="app-container">
-      {/* ── Header ─────────────────────────────────────────────────────── */}
       <header className="app-header">
         <div className="header-brand" role="button" tabIndex={0} onClick={() => navigate('/home')} onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); navigate('/home'); } }} title="Return to Dashboard" aria-label="CodeSense — return to dashboard">
           <span className="brand-icon">📦</span>
@@ -715,13 +702,11 @@ int main() {
         </div>
       </header>
 
-      {/* ── Main ───────────────────────────────────────────────────────── */}
       <main
         className={`main-layout ${mode === 'build' ? 'build-layout' : ''} ${mode === 'build' && !buildRailOpen ? 'build-layout-rail-closed' : ''}`}
         style={mode === 'build' && buildRailOpen ? { gridTemplateColumns: `${buildRailWidth}px minmax(0, 1fr)` } : undefined}
       >
 
-        {/* ══════════════════ ANALYZE MODE ══════════════════════════════ */}
         {mode === 'analyze' && (<>
           <div
             ref={containerRef}
@@ -776,7 +761,6 @@ int main() {
               </div>
             </AccordionPanel>
 
-            {/* ── Inline Resize Handle ── */}
             {bothOpen && (
               <div
                 onMouseDown={handleResizerMouseDown}
@@ -906,7 +890,6 @@ int main() {
           </div>
         </>)}
 
-        {/* ══════════════════ BUILD MODE ════════════════════════════════ */}
         {mode === 'build' && (<>
           <aside className={`build-side-rail ${buildRailOpen ? 'open' : 'closed'}`}>
             {buildRailOpen && (
@@ -966,7 +949,6 @@ int main() {
         <TokenDrawer tokens={result?.tokens || []} isOpen={isTokenDrawerOpen} onClose={() => setIsTokenDrawerOpen(false)} />
       )}
 
-      {/* ── Tab Fullscreen Modal ── */}
       {tabFullscreen && (
         <div style={{ position: 'fixed', inset: 0, zIndex: 9999, background: 'rgba(1,4,9,0.92)', backdropFilter: 'blur(6px)', display: 'flex', flexDirection: 'column', padding: '24px' }}
           onClick={(e) => { if (e.target === e.currentTarget) setTabFullscreen(false); }}>
@@ -1001,7 +983,6 @@ int main() {
         </div>
       )}
 
-      {/* ── Editor Fullscreen Modal ── */}
       {editorFullscreen && (
         <div style={{ position: 'fixed', inset: 0, zIndex: 9999, background: 'rgba(1,4,9,0.92)', backdropFilter: 'blur(6px)', display: 'flex', flexDirection: 'column', padding: '24px' }}
           onClick={(e) => { if (e.target === e.currentTarget) setEditorFullscreen(false); }}>

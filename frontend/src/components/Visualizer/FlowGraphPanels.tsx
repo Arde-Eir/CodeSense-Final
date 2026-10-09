@@ -22,11 +22,7 @@ import type {
   FlowNodeType,
 } from './flowGraphTypes'
 
-// ─────────────────────────────────────────────────────────────────────────────
-// §5  OVERLAY UI COMPONENTS
-// ─────────────────────────────────────────────────────────────────────────────
 
-// ── NodePalette ───────────────────────────────────────────────────────────────
 export const NodePalette: React.FC<{
   onAddNode:        (type: FlowNodeType) => void;
   onClearCanvas:    () => void;
@@ -95,7 +91,6 @@ export const NodePalette: React.FC<{
   );
 };
 
-// ── FlowchartLegend ───────────────────────────────────────────────────────────
 export const FlowchartLegend: React.FC<{
   isBuildMode: boolean;
   graphNodes:  Node<ExtendedNodeData>[];
@@ -169,7 +164,6 @@ export const FlowchartLegend: React.FC<{
   );
 };
 
-// ── GameStats ─────────────────────────────────────────────────────────────────
 export const GameStats: React.FC<{
   visitedNodes:  Set<string>;
   totalNodes:    number;
@@ -412,7 +406,6 @@ cout << total << endl;`}
   </aside>
 );
 
-// ── GenerateCodePanel ─────────────────────────────────────────────────────────
 function generationFailureResult(error: unknown): ValidationResult {
   const message = error instanceof Error ? error.message : String(error);
   const issue = {
@@ -558,7 +551,7 @@ export const GenerateCodePanel: React.FC<{
 
           {(!showValidation || !hasIssues) && !isDirty && (
             <div style={{ fontSize: 12, color: '#8b949e', lineHeight: 1.55, padding: '10px 12px', background: 'rgba(168,85,247,0.06)', borderRadius: 8, border: '1px solid rgba(168,85,247,0.2)' }}>
-              Type simple sentence steps. No AI, no compilation. For two-way decisions, label edges{' '}
+              Type simple sentence steps to generate C++. For two-way decisions, label edges{' '}
               <strong style={{ color: '#4caf50' }}>true</strong> /{' '}
               <strong style={{ color: '#ff6b6b' }}>false</strong>{' '}
               → click Generate
@@ -637,11 +630,7 @@ export const GenerateCodePanel: React.FC<{
   );
 };
 
-// ─────────────────────────────────────────────────────────────────────────────
-// §6  MODAL EDITORS
-// ─────────────────────────────────────────────────────────────────────────────
 
-// ── NodeEditor ────────────────────────────────────────────────────────────────
 export const NodeEditor: React.FC<{
   editState: EditState;
   onSave:    (label: string, code: string) => void;
@@ -865,7 +854,6 @@ export const NodeEditor: React.FC<{
   );
 };
 
-// ── EdgeLabelEditor ───────────────────────────────────────────────────────────
 export const EdgeLabelEditor: React.FC<{
   editState: EdgeEditState;
   onSave:    (label: string) => void;

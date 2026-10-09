@@ -1,18 +1,4 @@
-/**
- * Roles.ts
- * ─────────────────────────────────────────────────────────────────────────────
- * Single source of truth for role-based visibility rules across the frontend.
- *
- * Tiers:
- *  - guest       : unauthenticated / guest-session user. Sandbox + Tutorials only.
- *  - student     : authenticated user with user_type=student (default).
- *  - professional: authenticated user with user_type=professional.
- *  - admin       : any user with is_admin=true. Can see system metrics & global user data.
- *
- * Use `canAccess()` in route guards and `canSee()` in UI components to decide
- * what to render per-user. Never inline `isAdmin` checks elsewhere — update this
- * module so permission rules stay consolidated.
- */
+/** Role-based feature visibility shared by route guards and UI components. */
 import type { ExplorerProfile } from '@/types'
 
 export type UserTier = 'guest' | 'student' | 'professional' | 'admin'
@@ -31,7 +17,6 @@ export function resolveTier(ctx: TierContext): UserTier {
   return 'student'
 }
 
-/** Feature keys — add to this union when gating a new feature. */
 export type Feature =
   | 'sandbox'           // Code editor + CFG
   | 'tutorials'         // Tutorial quests
@@ -61,12 +46,10 @@ export function canSee(feature: Feature, ctx: TierContext): boolean {
   return ALLOW[feature].includes(resolveTier(ctx))
 }
 
-/** Humanised tier label for UI (e.g. "STUDENT", "ADMIN"). */
 export function tierLabel(tier: UserTier): string {
   return tier.toUpperCase()
 }
 
-/** Tier colour for pills / badges. */
 export function tierColor(tier: UserTier): string {
   switch (tier) {
     case 'admin':        return '#a371f7'

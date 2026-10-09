@@ -1,16 +1,4 @@
-/**
- * PlayerDetailModal.tsx
- * ─────────────────────────────────────────────────────────────────────────────
- * Shared player-detail card. Accepts a userId, fetches the full row from
- * Supabase, and renders avatar + rank progress + stats + online indicator.
- *
- * Used by:
- *   - LeaderboardPage (click any row or podium avatar)
- *   - HomeDashboard   (click a player in the global search dropdown)
- *
- * Previously HomeDashboard navigated to /profile on click, which always showed
- * the current user's own profile instead of the clicked user's.
- */
+/** Shared profile card for leaderboard entries and player search results. */
 import React, { useEffect, useState } from 'react'
 import { supabase } from '@/services/supabase'
 import { getProfileImageUrls } from '@/services/ProfileImages'
@@ -318,7 +306,6 @@ export const PlayerDetailModal: React.FC<{
     }
   }
 
-  // Close on Escape
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose() }
     document.addEventListener('keydown', onKey)
@@ -328,7 +315,7 @@ export const PlayerDetailModal: React.FC<{
   const isMe = currentUserId === userId
   const player = detail?.player ?? null
   const bannerUrl = detail?.bannerUrl ?? null
-  // Rank from XP (not stale `currentlevel`) — see types/index.ts getRank().
+  // XP determines rank; stored currentlevel values can be stale.
   const rank     = player ? getRank(player.totalxp ?? 0) : null
   const progress = player ? getLevelProgress(player.totalxp) : 0
   const xpToNext = player ? getXPToNextLevel(player.totalxp) : null
@@ -408,7 +395,6 @@ export const PlayerDetailModal: React.FC<{
               }} />
             )}
 
-            {/* Header */}
             <div style={{
               display: 'flex',
               alignItems: 'flex-start',
@@ -475,7 +461,6 @@ export const PlayerDetailModal: React.FC<{
               </div>
             </div>
 
-            {/* XP Progress */}
             <div style={{ background: 'rgba(255,255,255,0.03)', border: '1px solid #21262d', borderRadius: '12px', padding: '14px', marginBottom: '14px' }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '8px' }}>
                 <span style={{ color: '#e6edf3', fontSize: '12px', fontWeight: '700' }}>Rank Progress</span>
@@ -492,7 +477,6 @@ export const PlayerDetailModal: React.FC<{
               </div>
             </div>
 
-            {/* Stats grid */}
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(120px, 1fr))', gap: '8px', marginBottom: '18px' }}>
               {[
                 { icon: '⭐', value: player.totalxp.toLocaleString(), label: 'Total XP',    color: '#ffc107' },
@@ -530,7 +514,6 @@ export const PlayerDetailModal: React.FC<{
               </div>
             </div>
 
-            {/* Activity line */}
             <div style={{ padding: '10px 14px', background: 'rgba(88,166,255,0.04)', border: '1px solid rgba(88,166,255,0.15)', borderRadius: '10px', fontSize: '12px', color: '#8b949e', marginBottom: '18px' }}>
               🕒 Last active <b style={{ color: '#c9d1d9' }}>{timeAgo(player.lastactive)}</b>
             </div>

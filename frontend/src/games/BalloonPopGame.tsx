@@ -1,19 +1,3 @@
-// frontend/src/games/BalloonPopGame.tsx
-// Canvas-based balloon-pop quiz. Pop the balloon labeled with the correct
-// answer; wrong pops cost a life. Three lives total per quest.
-//
-// FIXES:
-//  • Outer wrapper uses `aspectRatio: '4/3'` + `width: 100%` instead of a
-//    fixed `minHeight: 420` — canvas always fills available width and scales
-//    height proportionally, so balloons never crowd the HUD / prompt.
-//  • Prompt box is capped at `maxWidth: min(72%, 340px)` and uses `fontSize:
-//    clamp(12px, 1.8vw, 14px)` so long questions never overflow on narrow
-//    screens.
-//  • Explanation toast is anchored `bottom: 14px` with a safe `maxWidth:
-//    min(76%, 360px)` and wraps text with `wordBreak: 'break-word'`.
-//  • HUD score/lives row uses `flexWrap: 'wrap'` + `gap: 4` so it never
-//    overflows on very narrow viewports.
-
 import React, { useEffect, useRef, useState, useCallback } from 'react';
 import type { MCQ } from '@/types/campaign';
 import { normalizeMCQList } from './normalizeMCQ';
@@ -154,8 +138,6 @@ export const BalloonPopGame: React.FC<Props> = ({ questions, onComplete, resetSi
     correctLabel: '',
   });
 
-  // Notify parent of the active question so the side panel can show the
-  // per-question hint. Fires on mount and every qIdx transition.
   useEffect(() => { onItemChange?.(ui.qIdx); }, [ui.qIdx, onItemChange]);
 
   const syncUi = useCallback(() => {
@@ -385,7 +367,7 @@ export const BalloonPopGame: React.FC<Props> = ({ questions, onComplete, resetSi
           b.y      += b.vy * dt;
 
           const minX = bRX + 4, maxX = W - bRX - 4;
-          // ↓ key fix: top boundary pushed down by ~22% to clear the HUD+prompt
+          // Keep balloons below the HUD and prompt.
           const minY = Math.max(bRY + 4, H * 0.22), maxY = H - bRY - 4;
           if (b.x < minX) { b.x = minX; b.vx =  Math.abs(b.vx) * 0.7; }
           if (b.x > maxX) { b.x = maxX; b.vx = -Math.abs(b.vx) * 0.7; }
@@ -496,9 +478,6 @@ export const BalloonPopGame: React.FC<Props> = ({ questions, onComplete, resetSi
     <div style={{
       position: 'relative',
       width: '100%',
-      // ↓ key fix: aspect-ratio keeps height proportional to width so
-      //   balloons always have room and never crowd the overlaid UI elements.
-      //   Falls back to minHeight for very wide containers.
       aspectRatio: '4 / 3',
       minHeight: 300,
       maxHeight: 520,
@@ -519,17 +498,14 @@ export const BalloonPopGame: React.FC<Props> = ({ questions, onComplete, resetSi
         }}
       />
 
-      {/* ── HUD ──────────────────────────────────────────────────────── */}
       <div style={{
         position: 'absolute', top: 0, left: 0, right: 0,
         padding: '10px 14px',
         background: 'linear-gradient(to bottom, rgba(13,17,23,0.97) 55%, transparent)',
         display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-        // ↓ key fix: wrap so it never clips on narrow containers
         flexWrap: 'wrap', gap: 6,
         pointerEvents: 'none', zIndex: 10,
       }}>
-        {/* Lives */}
         <div style={{ display: 'flex', gap: 5 }}>
           {Array.from({ length: TOTAL_LIVES }).map((_, i) => (
             <span key={i} style={{
@@ -541,7 +517,6 @@ export const BalloonPopGame: React.FC<Props> = ({ questions, onComplete, resetSi
           ))}
         </div>
 
-        {/* Progress dots */}
         <div style={{ display: 'flex', gap: 5, alignItems: 'center' }}>
           {Array.from({ length: ui.total }).map((_, i) => (
             <div key={i} style={{
@@ -554,7 +529,6 @@ export const BalloonPopGame: React.FC<Props> = ({ questions, onComplete, resetSi
           ))}
         </div>
 
-        {/* Score */}
         <div style={{
           fontFamily: "'JetBrains Mono',monospace",
           fontSize: 13, fontWeight: 700, color: '#facc15',
@@ -563,18 +537,15 @@ export const BalloonPopGame: React.FC<Props> = ({ questions, onComplete, resetSi
         </div>
       </div>
 
-      {/* ── Question prompt ───────────────────────────────────────────── */}
       {(ui.phase === 'playing' || ui.phase === 'between') && (
         <div style={{
           position: 'absolute',
-          // ↓ key fix: use % from top so it scales with canvas height
           top: '14%',
           left: '50%', transform: 'translateX(-50%)',
           background: 'rgba(22,27,34,0.95)',
           border: '1px solid rgba(88,166,255,0.28)',
           borderRadius: 12,
           padding: '10px 18px',
-          // ↓ key fix: constrain width so long questions wrap, not overflow
           width: 'min(72%, 360px)',
           textAlign: 'center',
           zIndex: 10, pointerEvents: 'none',
@@ -587,7 +558,6 @@ export const BalloonPopGame: React.FC<Props> = ({ questions, onComplete, resetSi
             letterSpacing: '2px', textTransform: 'uppercase', marginBottom: 5,
           }}>🎈 POP ALL CORRECT BALLOONS</div>
           <div style={{
-            // ↓ key fix: clamp font size so it always fits
             fontSize: 'clamp(12px, 1.8vw, 14px)',
             fontWeight: 700, color: '#e6edf3',
             lineHeight: 1.5, fontFamily: 'Inter,sans-serif',
@@ -596,7 +566,6 @@ export const BalloonPopGame: React.FC<Props> = ({ questions, onComplete, resetSi
         </div>
       )}
 
-      {/* ── Explanation toast ─────────────────────────────────────────── */}
       {ui.phase === 'between' && ui.explanation && (
         <div style={{
           position: 'absolute',
@@ -605,7 +574,6 @@ export const BalloonPopGame: React.FC<Props> = ({ questions, onComplete, resetSi
           border: '1px solid rgba(63,185,80,.4)',
           borderRadius: 12,
           padding: '12px 18px',
-          // ↓ key fix: constrain width so explanation wraps cleanly
           width: 'min(76%, 380px)',
           textAlign: 'center',
           zIndex: 10, pointerEvents: 'none',
@@ -626,7 +594,6 @@ export const BalloonPopGame: React.FC<Props> = ({ questions, onComplete, resetSi
         </div>
       )}
 
-      {/* Damage vignette */}
       <div style={{
         position: 'absolute', inset: 0, pointerEvents: 'none', zIndex: 5,
         borderRadius: 12,
@@ -635,7 +602,6 @@ export const BalloonPopGame: React.FC<Props> = ({ questions, onComplete, resetSi
         transition: 'box-shadow .6s ease',
       }} />
 
-      {/* ── Game Over overlay ─────────────────────────────────────────── */}
       {ui.phase === 'gameover' && (
         <div style={{
           position: 'absolute', inset: 0, zIndex: 20,
@@ -659,7 +625,6 @@ export const BalloonPopGame: React.FC<Props> = ({ questions, onComplete, resetSi
         </div>
       )}
 
-      {/* ── Done overlay ─────────────────────────────────────────────── */}
       {ui.phase === 'done' && (
         <div style={{
           position: 'absolute', inset: 0, zIndex: 20,

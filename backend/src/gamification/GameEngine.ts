@@ -1,8 +1,4 @@
-/**
- * Gamification Engine
- * Manages XP calculation, Leveling logic, and Quest progression.
- * Connects the Analysis Results to the User Profile.
- */
+/** Calculates submission rewards, player levels, and error hints. */
 
 import { 
     AnalysisResult, 
@@ -52,7 +48,7 @@ export class GameEngine {
     qualityBonus = unsafeCount === 0 ? 15 : Math.max(5, 15 - unsafeCount * 3);
   }
 
-  // FIX: Apply complexity penalty to quality bonus too, proportionally
+  // Complexity penalties also reduce the quality bonus.
   if (cogComplexity > 10) {
     qualityBonus = Math.max(0, qualityBonus - Math.floor((cogComplexity - 10) * 2));
   }
@@ -97,10 +93,7 @@ export class GameEngine {
         }
     }
 
-    /**
-     * Generate a tutorial hint based on the specific error type found
-     * (Mappings from your Thesis "Error-Hint" table)
-     */
+    /** Returns a tutorial hint for the detected error type. */
     generateHint(errorType: string): TutorialHint {
         switch (errorType) {
             case 'lexical':

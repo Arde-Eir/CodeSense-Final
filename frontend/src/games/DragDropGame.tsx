@@ -1,17 +1,3 @@
-// frontend/src/games/DragDropGame.tsx
-// Drag a term card into the matching description row. All items must be
-// matched correctly to complete.
-//
-// FIXES:
-//  • Term column is now `minWidth: 110, maxWidth: 150` + auto height so long
-//    labels never overflow into the description column.
-//  • Drop zones use `minHeight: 56` (not fixed height) so wrapping labels
-//    never get clipped.
-//  • Outer container no longer sets `flex: 1 / minHeight: 0` on the scroll
-//    area — it scrolls internally instead of fighting a parent fixed height.
-//  • Term cards use `wordBreak: 'break-word'` + `whiteSpace: 'normal'` so
-//    long text wraps inside the card rather than overflowing.
-
 import React from 'react';
 import type { GameItem, DropZone } from '@/types/campaign';
 
@@ -77,7 +63,6 @@ const DragDropGameInner: React.FC<{
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
 
-      {/* Instruction banner */}
       <div style={{
         background: 'rgba(56,139,253,0.08)', border: '1px solid rgba(56,139,253,0.2)',
         borderRadius: 8, padding: '10px 14px',
@@ -86,7 +71,6 @@ const DragDropGameInner: React.FC<{
         🧩 {question?.trim() || 'Drag each term to its matching description'}
       </div>
 
-      {/* Column headers */}
       <div style={{ display: 'flex', gap: 14 }}>
         <div style={{
           width: 130, flexShrink: 0,
@@ -102,10 +86,8 @@ const DragDropGameInner: React.FC<{
         }}>DESCRIPTIONS</div>
       </div>
 
-      {/* Main layout: term cards (left) + drop zones (right) */}
       <div style={{ display: 'flex', gap: 14, alignItems: 'flex-start' }}>
 
-        {/* ── Term cards ─────────────────────────────────────────────── */}
         <div style={{
           width: 130, flexShrink: 0,
           display: 'flex', flexDirection: 'column', gap: 10,
@@ -120,7 +102,6 @@ const DragDropGameInner: React.FC<{
                 onDragStart={() => { if (!used && !submitted) setDragging(item.id); }}
                 onDragEnd={() => setDragging(null)}
                 style={{
-                  // ↓ key fix: allow height to grow with content
                   padding: '10px 8px',
                   borderRadius: 7,
                   textAlign: 'center',
@@ -130,7 +111,6 @@ const DragDropGameInner: React.FC<{
                   fontFamily: 'Inter,sans-serif',
                   fontSize: 12,
                   fontWeight: 700,
-                  // ↓ key fix: wrap long labels instead of overflowing
                   wordBreak: 'break-word',
                   whiteSpace: 'normal',
                   lineHeight: 1.35,
@@ -146,7 +126,6 @@ const DragDropGameInner: React.FC<{
           })}
         </div>
 
-        {/* ── Drop zones ─────────────────────────────────────────────── */}
         <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 10 }}>
           {zones.map(zone => {
             const droppedItem = items.find(i => i.id === dropped[zone.id]);
@@ -167,11 +146,8 @@ const DragDropGameInner: React.FC<{
                   e.preventDefault();
                   if (dragging && !submitted) {
                     setDropped(prev => {
-                      // If the target zone already holds a different term, the
-                      // displaced item automatically returns to the unplaced pool
-                      // (it just won't be in `dropped` anymore — no extra step needed).
+                      // Replacing a zone returns its displaced term to the unplaced pool.
                       const next = { ...prev };
-                      // Remove the dragged item from any zone it was already in.
                       for (const zid of Object.keys(next)) {
                         if (next[zid] === dragging) { delete next[zid]; break; }
                       }
@@ -192,20 +168,16 @@ const DragDropGameInner: React.FC<{
                       ? correct ? 'rgba(35,134,54,0.07)' : 'rgba(218,54,51,0.07)'
                       : '#0d1117',
                   transition: 'all .15s',
-                  // ↓ key fix: min-height instead of fixed height
                   minHeight: 56,
                 }}
               >
-                {/* Dropped chip */}
                 <div style={{
                   width: 80, flexShrink: 0,
-                  // ↓ key fix: min-height so chip grows with label text
                   minHeight: 36,
                   borderRadius: 6,
                   border: `1.5px solid ${droppedItem ? droppedItem.color + '66' : '#2d333b'}`,
                   background: droppedItem ? `${droppedItem.color}12` : '#161b22',
                   display: 'flex', alignItems: 'center', justifyContent: 'center',
-                  // ↓ key fix: wrap text inside chip
                   fontFamily: 'Inter,sans-serif',
                   fontSize: 11,
                   fontWeight: 700,
@@ -220,12 +192,10 @@ const DragDropGameInner: React.FC<{
                   {droppedItem?.label ?? '?'}
                 </div>
 
-                {/* Description */}
                 <span style={{
                   flex: 1,
                   fontSize: 13, color: '#c9d1d9', lineHeight: 1.45,
                   fontFamily: 'Inter,sans-serif',
-                  // ↓ key fix: allow text to wrap naturally
                   wordBreak: 'break-word',
                 }}>
                   {zone.label}
@@ -242,7 +212,6 @@ const DragDropGameInner: React.FC<{
         </div>
       </div>
 
-      {/* Result banner */}
       {checked && (
         <div style={{
           padding: '10px 14px', borderRadius: 8,
@@ -260,7 +229,6 @@ const DragDropGameInner: React.FC<{
         </div>
       )}
 
-      {/* Action buttons */}
       <div style={{ display: 'flex', gap: 10 }}>
         <button
           onClick={doReset}

@@ -1,28 +1,4 @@
-/**
- * DataIsolationService
- *
- * Ensures complete data separation between:
- * 1. Guest users (temporary, limited access)
- * 2. Authenticated users (each with unique isolated data)
- *
- * FIX Bug 9 (Security): Guest mode flag stored in sessionStorage is trivially forgeable.
- *   sessionStorage.setItem('guestMode', 'true') was the ONLY thing controlling guest vs
- *   authenticated flow. Any user could open DevTools and set this to bypass ProtectedRoute.
- *
- *   Fix: sessionStorage guest data is used ONLY for UX (sandbox scratch-pad, temporary
- *   progress display). ProtectedRoute now checks isAuthenticated independently from
- *   isGuest. Guests only access routes explicitly marked `guestAllowed: true` — they
- *   cannot reach all ProtectedRoutes the way authenticated users can.
- *
- *   The DataIsolationService itself is unchanged in behaviour; the security fix is in
- *   AuthScreen / ProtectedRoute. Comments below document the intended contract so
- *   future callers don't re-introduce the vulnerability.
- *
- * FIX Bug 9b (Data integrity): migrateGuestToUser now clears sessionStorage BEFORE
- *   writing to localStorage so a mid-migration crash cannot leave duplicate data in
- *   both stores. The migration is wrapped in try/finally so the guest session is always
- *   cleaned up regardless of whether the migration succeeds.
- */
+/** Stores guest data in sessionStorage and account data under user-specific localStorage keys. */
 
 export class DataIsolationService {
   private static readonly GUEST_PREFIX   = 'guest_';
@@ -47,7 +23,6 @@ export class DataIsolationService {
     return sessionId;
   }
 
-  // ── User progress ──────────────────────────────────────────────────────────
 
   static saveUserProgress(userId: string, progress: any): void {
     const key  = this.getUserKey(userId, 'progress');
@@ -66,13 +41,7 @@ export class DataIsolationService {
     return data ? JSON.parse(data) : null;
   }
 
-  // ── Guest progress ─────────────────────────────────────────────────────────
-  //
-  // NOTE (Bug 9): Guest progress is stored in sessionStorage for UX only.
-  // It MUST NOT be used to make access-control decisions. ProtectedRoute must
-  // check server-side authentication (via useAuth().isAuthenticated) separately.
-  // The `isGuest` flag from sessionStorage only determines UI affordances
-  // (e.g. showing "sign up to save"), not route access.
+  // Guest storage controls display only; access checks require authenticated state.
 
   static saveGuestProgress(progress: any): void {
     const key  = this.getGuestKey('progress');
@@ -99,7 +68,6 @@ export class DataIsolationService {
     return parsed;
   }
 
-  // ── Sandbox code ───────────────────────────────────────────────────────────
 
   static saveSandboxCode(userId: string | null, code: string, filename: string): void {
     const key  = userId
@@ -143,7 +111,6 @@ export class DataIsolationService {
     return files;
   }
 
-  // ── Campaign progress ──────────────────────────────────────────────────────
 
   static saveCampaignProgress(userId: string, level: number, mission: number, data: any): void {
     const key          = this.getUserKey(userId, `campaign_${level}_${mission}`);
@@ -157,7 +124,6 @@ export class DataIsolationService {
     return data ? JSON.parse(data) : null;
   }
 
-  // ── Clear data ─────────────────────────────────────────────────────────────
 
   static clearGuestData(): void {
     const sessionId = sessionStorage.getItem('guestSessionId');
@@ -170,7 +136,6 @@ export class DataIsolationService {
     }
     keysToRemove.forEach(key => sessionStorage.removeItem(key));
     sessionStorage.removeItem('guestSessionId');
-    // NOTE (Bug 9): also clear the legacy guestMode flag so it can't be reused
     sessionStorage.removeItem('guestMode');
   }
 
@@ -184,31 +149,16 @@ export class DataIsolationService {
     keysToRemove.forEach(key => localStorage.removeItem(key));
   }
 
-  // ── FIX Bug 9b: Atomic guest → user migration ─────────────────────────────
-  //
-  // Previous behaviour: wrote to localStorage first, cleared sessionStorage last.
-  // A mid-migration crash left duplicate data in both stores, causing the
-  // useAuth hook to behave inconsistently.
-  //
-  // New behaviour:
-  //   1. Snapshot all guest data in memory.
-  //   2. Clear sessionStorage FIRST (the guest data is now gone).
-  //   3. Write the snapshot to localStorage.
-  //   4. If step 3 throws, the guest data is already gone — we lose it rather
-  //      than duplicate it. This is the safer trade-off.
-  //
+  // Clear guest data before writing account data to prevent duplicate state on failure.
   static migrateGuestToUser(userId: string): void {
-    // --- snapshot ---
     const guestProgress = this.getGuestProgress();
     const guestFiles    = this.listSandboxFiles(null);
     const fileContents: { filename: string; code: string }[] = guestFiles
       .map(filename => ({ filename, code: this.getSandboxCode(null, filename) ?? '' }))
       .filter(f => f.code !== '');
 
-    // --- clear guest FIRST (prevents duplicate state on crash) ---
     this.clearGuestData();
 
-    // --- write to user storage ---
     try {
       if (guestProgress) {
         this.saveUserProgress(userId, {
@@ -221,12 +171,10 @@ export class DataIsolationService {
         this.saveSandboxCode(userId, code, filename);
       }
     } catch (err) {
-      // Guest data is already cleared. Log and continue — the user's account is clean.
       console.error('migrateGuestToUser: failed to write user data, guest data was already cleared', err);
     }
   }
 
-  // ── Storage stats ──────────────────────────────────────────────────────────
 
   static getStorageStats(userId: string | null): { totalKeys: number; totalSize: number; files: number } {
     const prefix  = userId ? this.getUserKey(userId, '') : this.getGuestKey('');
@@ -243,11 +191,7 @@ export class DataIsolationService {
     return { totalKeys, totalSize, files };
   }
 
-  // ── Guards ─────────────────────────────────────────────────────────────────
-  //
-  // NOTE (Bug 9): canAccessCampaign / canSavePermanently should be called with
-  // the server-verified isGuest value from useAuth(), NOT from sessionStorage
-  // directly. The sessionStorage `guestMode` flag is UX-only and forgeable.
+  // Use the isGuest value from useAuth; sessionStorage is not an authentication source.
 
   static canAccessCampaign(isGuest: boolean): boolean   { return !isGuest; }
   static canSavePermanently(isGuest: boolean): boolean  { return !isGuest; }

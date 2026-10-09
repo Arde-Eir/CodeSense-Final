@@ -3,15 +3,12 @@ import { useState } from 'react';
 
 function flattenStreamChain(node: any): string {
   if (!node) return '';
-  // If it's a nested BinaryOp (the new structure), recurse through both sides
   if (node.type === 'BinaryOp' && (node.operator === '<<' || node.operator === '>>')) {
     return `${flattenStreamChain(node.left)} ${node.operator} ${describeValue(node.right)}`;
   }
-  // Otherwise, it's the leaf (like cout or a variable), describe it normally
   return describeValue(node);
 }
 
-// ─── Friendly label maps ──────────────────────────────────────────────────────
 const NODE_LABELS: Record<string, { label: string; icon: string; color: string }> = {
   Program:             { label: 'Program',            icon: '📄', color: '#58a6ff' },
   FunctionDecl:        { label: 'Function',           icon: '⚙️', color: '#a371f7' },
@@ -56,7 +53,6 @@ function getNodeInfo(type: string) {
   return NODE_LABELS[type] ?? { label: type, icon: '🔹', color: '#8b949e' };
 }
 
-// ─── Describe a node in plain English ────────────────────────────────────────
 function describeNode(node: any): string {
   if (!node || typeof node !== 'object') return '';
   switch (node.type) {
@@ -131,18 +127,15 @@ function formatDimensions(dimensions?: any[]): string {
   return (dimensions ?? []).map(d => `[${describeValue(d)}]`).join('');
 }
 
-// ─── Summary builder ──────────────────────────────────────────────────────────
 function buildSummary(ast: any): Array<{ icon: string; color: string; text: string; line?: number }> {
   const items: Array<{ icon: string; color: string; text: string; line?: number }> = [];
   if (!ast) return items;
 
-  // Headers
   (ast.directives ?? []).forEach((d: any) => {
     if (d.type === 'Include') items.push({ icon: '📎', color: '#8b949e', text: `Includes the <${d.name}> library`, line: d.line });
   });
   if (ast.namespace) items.push({ icon: '🌐', color: '#8b949e', text: `Uses namespace "${ast.namespace.name}"`, line: ast.namespace.line });
 
-  // Body
   (ast.body ?? []).forEach((node: any) => {
     if (node.type === 'FunctionDecl') {
       items.push({ icon: '⚙️', color: '#a371f7', text: `Defines function "${node.name}" (returns ${node.returnType}, ${node.params?.length ?? 0} param(s))`, line: node.line });
@@ -167,7 +160,6 @@ function buildSummary(ast: any): Array<{ icon: string; color: string; text: stri
   return items;
 }
 
-// ─── Tree node component ──────────────────────────────────────────────────────
 const TreeNode: React.FC<{ node: any; depth: number }> = ({ node, depth }) => {
   const [expanded, setExpanded] = useState(depth < 2);
   if (!node || typeof node !== 'object') return null;
@@ -194,12 +186,10 @@ const TreeNode: React.FC<{ node: any; depth: number }> = ({ node, depth }) => {
         onMouseEnter={e => { if (hasChildren) (e.currentTarget as HTMLElement).style.background = 'rgba(255,255,255,0.04)'; }}
         onMouseLeave={e => { (e.currentTarget as HTMLElement).style.background = 'transparent'; }}
       >
-        {/* Expand toggle */}
         <span style={{ width: '14px', flexShrink: 0, color: '#484f58', fontSize: '10px', fontFamily: 'IBM Plex Mono, monospace' }}>
           {hasChildren ? (expanded ? '▾' : '▸') : ' '}
         </span>
 
-        {/* Icon + type badge */}
         <span style={{ fontSize: '13px', flexShrink: 0 }}>{info.icon}</span>
         <span style={{
           fontSize: '10px', fontWeight: '700', fontFamily: 'IBM Plex Mono, monospace',
@@ -210,20 +200,17 @@ const TreeNode: React.FC<{ node: any; depth: number }> = ({ node, depth }) => {
           {info.label}
         </span>
 
-        {/* Short label */}
         {label && (
           <span style={{ fontSize: '11px', color: '#c9d1d9', fontFamily: 'IBM Plex Mono, monospace', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1 }}>
             {label}
           </span>
         )}
 
-        {/* Line number */}
         {node.line > 0 && (
           <span style={{ fontSize: '10px', color: '#484f58', flexShrink: 0, fontFamily: 'IBM Plex Mono, monospace' }}>L{node.line}</span>
         )}
       </div>
 
-      {/* Children */}
       {expanded && hasChildren && (
         <div>
           {children.map((child, i) => (
@@ -265,7 +252,6 @@ function getChildren(node: any): any[] {
   const kids: any[] = [];
   const skip = new Set(['type', 'line', 'column', 'operator', 'varType', 'returnType', 'name', 'isSystem', 'initStyle', 'modifiers', 'dimensions']);
 
-  // Prioritize meaningful child keys
   const priority = ['directives', 'namespace', 'body', 'thenBranch', 'elseBranch', 'condition', 'value', 'left', 'right', 'operand', 'values', 'params', 'arguments', 'cases', 'statements', 'members', 'handlers'];
   const seen = new Set<any>();
 
@@ -284,7 +270,6 @@ function getChildren(node: any): any[] {
   return kids;
 }
 
-// ─── Main ASTViewer ───────────────────────────────────────────────────────────
 export const ASTViewer: React.FC<{ ast: any }> = ({ ast }) => {
   const [view, setView] = useState<'both' | 'summary' | 'tree'>('both');
   const summary = buildSummary(ast);
@@ -301,14 +286,12 @@ export const ASTViewer: React.FC<{ ast: any }> = ({ ast }) => {
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '14px', padding: '4px 2px' }}>
 
-      {/* View toggle */}
       <div style={{ display: 'flex', alignItems: 'center', gap: '4px', background: '#0d1117', border: '1px solid #21262d', borderRadius: '8px', padding: '3px', alignSelf: 'flex-start' }}>
         <button style={btnStyle(view === 'both')}    onClick={() => setView('both')}>Both</button>
         <button style={btnStyle(view === 'summary')} onClick={() => setView('summary')}>Summary</button>
         <button style={btnStyle(view === 'tree')}    onClick={() => setView('tree')}>Tree</button>
       </div>
 
-      {/* ── Summary ── */}
       {(view === 'both' || view === 'summary') && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
           <div style={{ fontSize: '10px', fontWeight: '700', color: '#484f58', letterSpacing: '1px', textTransform: 'uppercase', fontFamily: 'IBM Plex Mono, monospace', marginBottom: '6px', paddingLeft: '4px' }}>
@@ -342,12 +325,10 @@ export const ASTViewer: React.FC<{ ast: any }> = ({ ast }) => {
         </div>
       )}
 
-      {/* ── Divider ── */}
       {view === 'both' && (
         <div style={{ height: '1px', background: '#21262d', margin: '2px 0' }} />
       )}
 
-      {/* ── Tree ── */}
       {(view === 'both' || view === 'tree') && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
           <div style={{ fontSize: '10px', fontWeight: '700', color: '#484f58', letterSpacing: '1px', textTransform: 'uppercase', fontFamily: 'IBM Plex Mono, monospace', marginBottom: '6px', paddingLeft: '4px' }}>

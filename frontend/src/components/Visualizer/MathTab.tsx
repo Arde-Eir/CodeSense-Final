@@ -1,6 +1,5 @@
 import { useState } from 'react';
 
-// ─── Types ────────────────────────────────────────────────────────────────────
 interface SafetyCheck {
   status: 'UNSAFE' | 'SAFE' | 'WARNING';
   line: number;
@@ -18,7 +17,6 @@ interface MathTabProps {
   symbolicExecution?: SymbolicEntry[];
 }
 
-// ─── Risk level config ────────────────────────────────────────────────────────
 const RISK_INFO: Record<string, { icon: string; color: string; bg: string; border: string; label: string; badge: string }> = {
   UNSAFE: {
     icon: '💀', color: '#f85149', bg: 'rgba(248,81,73,0.06)',
@@ -34,7 +32,6 @@ const RISK_INFO: Record<string, { icon: string; color: string; bg: string; borde
   },
 };
 
-// ─── Friendly explanations for error types ────────────────────────────────────
 function explainOperation(op: string, message: string): { what: string; why: string; fix: string } {
   const msg = message.toLowerCase();
 
@@ -80,7 +77,6 @@ function explainOperation(op: string, message: string): { what: string; why: str
   };
 }
 
-// ─── Single safety card ───────────────────────────────────────────────────────
 const SafetyCard: React.FC<{ check: SafetyCheck; index: number }> = ({ check, index }) => {
   const [expanded, setExpanded] = useState(check.status === 'UNSAFE');
   const cfg = RISK_INFO[check.status] ?? RISK_INFO.WARNING;
@@ -94,7 +90,6 @@ const SafetyCard: React.FC<{ check: SafetyCheck; index: number }> = ({ check, in
       overflow: 'hidden',
       transition: 'all 0.2s',
     }}>
-      {/* Header row */}
       <div
         role="button"
         tabIndex={0}
@@ -106,7 +101,6 @@ const SafetyCard: React.FC<{ check: SafetyCheck; index: number }> = ({ check, in
           padding: '12px 14px', cursor: 'pointer',
         }}
       >
-        {/* Index bubble */}
         <div style={{
           width: '22px', height: '22px', borderRadius: '50%', flexShrink: 0,
           background: cfg.badge, border: `1px solid ${cfg.border}`,
@@ -119,12 +113,10 @@ const SafetyCard: React.FC<{ check: SafetyCheck; index: number }> = ({ check, in
 
         <span style={{ fontSize: '14px', flexShrink: 0 }}>{cfg.icon}</span>
 
-        {/* What */}
         <span style={{ flex: 1, fontSize: '12px', fontWeight: '700', color: cfg.color, fontFamily: 'IBM Plex Mono, monospace' }}>
           {what}
         </span>
 
-        {/* Line badge */}
         <span style={{
           fontSize: '10px', color: cfg.color, background: cfg.badge,
           padding: '2px 8px', borderRadius: '4px', flexShrink: 0,
@@ -133,7 +125,6 @@ const SafetyCard: React.FC<{ check: SafetyCheck; index: number }> = ({ check, in
           L{check.line}
         </span>
 
-        {/* Status badge */}
         <span style={{
           fontSize: '9px', fontWeight: '800', letterSpacing: '0.8px',
           color: cfg.color, background: cfg.badge,
@@ -146,11 +137,9 @@ const SafetyCard: React.FC<{ check: SafetyCheck; index: number }> = ({ check, in
         <span style={{ color: '#484f58', fontSize: '11px', flexShrink: 0 }}>{expanded ? '▾' : '▸'}</span>
       </div>
 
-      {/* Expanded detail */}
       {expanded && (
         <div style={{ borderTop: `1px solid ${cfg.border}`, padding: '14px 16px', display: 'flex', flexDirection: 'column', gap: '12px' }}>
 
-          {/* Raw message */}
           <div style={{
             background: 'rgba(0,0,0,0.3)', borderRadius: '7px',
             padding: '10px 12px', fontFamily: 'IBM Plex Mono, monospace',
@@ -159,7 +148,6 @@ const SafetyCard: React.FC<{ check: SafetyCheck; index: number }> = ({ check, in
             <span style={{ color: '#484f58' }}>engine says → </span>{check.message}
           </div>
 
-          {/* Why */}
           <div style={{ display: 'flex', gap: '10px', alignItems: 'flex-start' }}>
             <div style={{
               width: '24px', height: '24px', borderRadius: '6px', flexShrink: 0,
@@ -172,7 +160,6 @@ const SafetyCard: React.FC<{ check: SafetyCheck; index: number }> = ({ check, in
             </div>
           </div>
 
-          {/* Fix */}
           <div style={{ display: 'flex', gap: '10px', alignItems: 'flex-start' }}>
             <div style={{
               width: '24px', height: '24px', borderRadius: '6px', flexShrink: 0,
@@ -190,7 +177,6 @@ const SafetyCard: React.FC<{ check: SafetyCheck; index: number }> = ({ check, in
   );
 };
 
-// ─── Symbolic trace row ───────────────────────────────────────────────────────
 const TraceRow: React.FC<{ entry: SymbolicEntry; index: number }> = ({ entry, index }) => {
   const isUnknown = String(entry.value) === 'unknown' || String(entry.value) === 'uninitialized';
   const isType = typeof entry.value === 'string' && ['int', 'float', 'double', 'char', 'bool', 'string'].includes(entry.value);
@@ -206,17 +192,14 @@ const TraceRow: React.FC<{ entry: SymbolicEntry; index: number }> = ({ entry, in
       onMouseEnter={e => (e.currentTarget as HTMLElement).style.background = 'rgba(255,255,255,0.05)'}
       onMouseLeave={e => (e.currentTarget as HTMLElement).style.background = index % 2 === 0 ? 'rgba(255,255,255,0.02)' : 'transparent'}
     >
-      {/* Step number */}
       <span style={{ fontSize: '10px', color: '#2d333b', fontFamily: 'IBM Plex Mono, monospace', flexShrink: 0, width: '20px' }}>
         {String(index + 1).padStart(2, '0')}
       </span>
 
-      {/* Expression */}
       <span style={{ flex: 1, fontSize: '12px', color: '#c9d1d9', fontFamily: 'IBM Plex Mono, monospace' }}>
         {entry.expression}
       </span>
 
-      {/* Value */}
       <span style={{
         fontSize: '11px', fontWeight: '700', fontFamily: 'IBM Plex Mono, monospace',
         padding: '2px 10px', borderRadius: '5px',
@@ -230,16 +213,13 @@ const TraceRow: React.FC<{ entry: SymbolicEntry; index: number }> = ({ entry, in
   );
 };
 
-// ─── Score ring ───────────────────────────────────────────────────────────────
 const ScoreRing: React.FC<{ safe: number; total: number }> = ({ safe, total }) => {
   if (total === 0) return null;
   const pct = Math.round((safe / total) * 100);
   const color = pct === 100 ? '#3fb950' : pct >= 70 ? '#e3b341' : '#f85149';
   const r = 22, circ = 2 * Math.PI * r;
   const dash = (pct / 100) * circ;
-  // PDF #9: at 100%, the dasharray-based stroke + round linecap leave a
-  // visible seam at 12 o'clock where the two round caps meet — it reads as
-  // "not a full circle". Render a plain unbroken ring at 100%.
+  // An unbroken ring avoids the seam between rounded stroke caps at 100%.
   const isFull = pct >= 100;
 
   return (
@@ -267,7 +247,6 @@ const ScoreRing: React.FC<{ safe: number; total: number }> = ({ safe, total }) =
   );
 };
 
-// ─── Main MathTab ─────────────────────────────────────────────────────────────
 export const MathTab: React.FC<MathTabProps> = ({ safetyChecks = [], symbolicExecution = [] }) => {
   const [activeView, setActiveView] = useState<'safety' | 'trace'>('safety');
 
@@ -298,10 +277,8 @@ export const MathTab: React.FC<MathTabProps> = ({ safetyChecks = [], symbolicExe
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
 
-      {/* Score summary */}
       <ScoreRing safe={safe.length + warning.length} total={safetyChecks.length} />
 
-      {/* Tab switcher */}
       {symbolicExecution.length > 0 && (
         <div style={{ display: 'flex', gap: '4px', background: '#0d1117', border: '1px solid #21262d', borderRadius: '8px', padding: '3px', alignSelf: 'flex-start' }}>
           <button style={btnStyle(activeView === 'safety', unsafe.length > 0 ? '#f85149' : '#3fb950')} onClick={() => setActiveView('safety')}>
@@ -313,11 +290,9 @@ export const MathTab: React.FC<MathTabProps> = ({ safetyChecks = [], symbolicExe
         </div>
       )}
 
-      {/* ── Safety view ── */}
       {activeView === 'safety' && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
 
-          {/* Critical */}
           {unsafe.length > 0 && (
             <div>
               <div style={{ fontSize: '10px', fontWeight: '700', color: '#f85149', fontFamily: 'IBM Plex Mono, monospace', letterSpacing: '1px', textTransform: 'uppercase', marginBottom: '6px', paddingLeft: '2px' }}>
@@ -327,7 +302,6 @@ export const MathTab: React.FC<MathTabProps> = ({ safetyChecks = [], symbolicExe
             </div>
           )}
 
-          {/* Warnings */}
           {warning.length > 0 && (
             <div>
               <div style={{ fontSize: '10px', fontWeight: '700', color: '#e3b341', fontFamily: 'IBM Plex Mono, monospace', letterSpacing: '1px', textTransform: 'uppercase', marginBottom: '6px', marginTop: unsafe.length > 0 ? '8px' : '0', paddingLeft: '2px' }}>
@@ -337,7 +311,6 @@ export const MathTab: React.FC<MathTabProps> = ({ safetyChecks = [], symbolicExe
             </div>
           )}
 
-          {/* Safe */}
           {safe.length > 0 && (
             <div>
               <div style={{ fontSize: '10px', fontWeight: '700', color: '#3fb950', fontFamily: 'IBM Plex Mono, monospace', letterSpacing: '1px', textTransform: 'uppercase', marginBottom: '6px', marginTop: (unsafe.length + warning.length) > 0 ? '8px' : '0', paddingLeft: '2px' }}>
@@ -349,14 +322,12 @@ export const MathTab: React.FC<MathTabProps> = ({ safetyChecks = [], symbolicExe
         </div>
       )}
 
-      {/* ── Value trace view ── */}
       {activeView === 'trace' && symbolicExecution.length > 0 && (
         <div>
           <div style={{ fontSize: '10px', fontWeight: '700', color: '#484f58', fontFamily: 'IBM Plex Mono, monospace', letterSpacing: '1px', textTransform: 'uppercase', marginBottom: '8px', paddingLeft: '2px' }}>
             🔢 Variable Value Trace
           </div>
           <div style={{ background: '#010409', border: '1px solid #21262d', borderRadius: '10px', padding: '8px', display: 'flex', flexDirection: 'column', gap: '2px' }}>
-            {/* Header */}
             <div style={{ display: 'flex', gap: '12px', padding: '6px 12px', borderBottom: '1px solid #21262d', marginBottom: '4px' }}>
               <span style={{ width: '20px', flexShrink: 0 }} />
               <span style={{ flex: 1, fontSize: '9px', fontWeight: '700', color: '#484f58', fontFamily: 'IBM Plex Mono, monospace', textTransform: 'uppercase', letterSpacing: '1px' }}>Expression</span>

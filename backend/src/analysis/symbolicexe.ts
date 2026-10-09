@@ -1,6 +1,4 @@
-/**
- * Bulletproof Symbolic Execution Engine for CodeSense
- */
+/** Tracks symbolic values and checks runtime safety in the C++ AST. */
 
 import {
   ASTNode,
@@ -64,7 +62,7 @@ export class SymbolicExecutor {
 
   private emittedKeys: Set<string> = new Set();
 
-  // Rich value trace for the Math tab
+  // Value trace for the Math tab.
   public valueTrace: Array<{ expression: string; value: string | number; line?: number }> = [];
 
   constructor(symbolTable: SymbolTable) {
@@ -83,9 +81,6 @@ export class SymbolicExecutor {
     };
   }
 
-  // ==========================================================================
-  // CORE EXECUTION
-  // ==========================================================================
 
   public execute(ast: ASTNode): SafetyCheck[] {
     this.safetyChecks = [];
@@ -137,9 +132,6 @@ export class SymbolicExecutor {
     });
   }
 
-  // ==========================================================================
-  // VISITOR DISPATCH
-  // ==========================================================================
 
   private visit(node: ASTNode | null | string | undefined): SymbolicValue {
     if (!node) return { type: 'unknown' as const };
@@ -171,9 +163,6 @@ export class SymbolicExecutor {
     return { type: 'unknown' as const };
   }
 
-  // ==========================================================================
-  // LITERAL VISITORS
-  // ==========================================================================
 
   private visitInteger(node: any): SymbolicValue {
     return { type: 'concrete', value: Number(node.value) };
@@ -204,9 +193,6 @@ export class SymbolicExecutor {
     return { type: 'symbolic', name: String(node.value), constraints: [] };
   }
 
-  // ==========================================================================
-  // FIX 11: visitProgram — iterate directives + body explicitly
-  // ==========================================================================
   private visitProgram(node: any): SymbolicValue {
     (node.directives || []).forEach((d: ASTNode) => this.visit(d));
     if (node.namespace) this.visit(node.namespace);
@@ -214,9 +200,6 @@ export class SymbolicExecutor {
     return { type: 'unknown' as const };
   }
 
-  // ==========================================================================
-  // VISITOR IMPLEMENTATIONS
-  // ==========================================================================
 
   private visitFunctionDecl(node: FunctionDeclNode): SymbolicValue {
     const prevFunc = this.currentFunction;
@@ -262,19 +245,16 @@ export class SymbolicExecutor {
  private visitVariableDecl(node: VariableDeclNode): SymbolicValue {
   let size: number | undefined;
 
-  // 1. Handle array dimensions
   if (node.dimensions && node.dimensions.length > 0) {
     const dimResult = this.visit(node.dimensions[0]);
     if (dimResult.type === 'concrete') size = dimResult.value;
   }
 
-  // 2. Resolve the initializer value
   let val: SymbolicValue = node.value
     ? this.visit(node.value)
     : { type: 'unknown' as const };
 
-  // 3. FIX: Handle Reference Aliasing (&)
-  // If the type is a reference (e.g., int&), it must point to the target variable's identity.
+  // References alias the target variable by name.
   const isReference = node.varType.includes('&');
   if (isReference && node.value) {
     const targetName = typeof node.value === 'string' 
@@ -288,12 +268,10 @@ export class SymbolicExecutor {
     }
   }
 
-  // 4. Standard pointer initialization (nullptr logic)
   if (!node.value && node.varType && node.varType.includes('*')) {
     val = { type: 'pointer', offset: 0, isNull: true };
   }
 
-  // 5. Finalize value and array sizes
   const allDims: number[] = [];
   if (node.dimensions) {
     node.dimensions.forEach((d: any) => {
@@ -311,7 +289,6 @@ export class SymbolicExecutor {
     ? { ...val, arraySize: allDims[0], arraySizes: allDims }
     : val;
 
-  // 6. Update state
   this.state.variables.set(node.name, finalVal);
   if (allDims.length > 0 && (node.value as any)?.type === 'InitializerList') {
     this.writeInitializerListElements(node.name, allDims, node.value as InitializerListNode);
@@ -322,7 +299,7 @@ export class SymbolicExecutor {
     this.state.initialized.add(node.name);
   }
 
-  // 7. Emit to rich Math tab trace
+  // Record the value for the Math tab.
   if (node.value) {
     const tracedLabel = isReference ? `(reference to ${this.expressionToString(node.value)})` : '';
     const tracedVal = finalVal.type === 'concrete'
@@ -379,7 +356,7 @@ export class SymbolicExecutor {
         });
       }
 
-      // FIX 12: track new-assigned via assignment (e.g. ptr = new int[n])
+      // Track allocations assigned after declaration, such as ptr = new int[n].
       if ((node.value as any)?.type === 'NewExpression') {
         this.state.allocatedPointers.set(targetName, {
           line: (node as any).line || 0,
@@ -461,9 +438,7 @@ export class SymbolicExecutor {
   private visitWhileLoop(node: WhileLoopNode): SymbolicValue {
     this.detectInfiniteLoop(node);
 
-    // FIX #6: ALWAYS_FALSE — evaluate the condition with the current concrete
-    // variable state. If it resolves to a concrete false at entry, the body
-    // will never execute, which is almost certainly a bug.
+    // Check whether the condition is false at loop entry.
     const condValue = this.evalConcreteCondition(node.condition);
     if (condValue === false) {
       this.addSafetyCheck(
@@ -484,11 +459,7 @@ export class SymbolicExecutor {
     return { type: 'unknown' as const };
   }
 
-  /**
-   * FIX #6 helper: evaluate a condition AST using the current concrete state.
-   * Returns true/false when the outcome is provably concrete, or null when
-   * the condition depends on unknown/symbolic values and we can't decide.
-   */
+  /** Evaluates a concrete condition, returning null when symbolic values prevent a decision. */
   private evalConcreteCondition(cond: any): boolean | null {
     if (!cond) return null;
     // Literal booleans
@@ -541,9 +512,7 @@ export class SymbolicExecutor {
 
   private resolveConcrete(node: any): number | null {
     if (node == null) return null;
-    // Bare-string identifier (parser emits identifiers as raw strings inside
-    // BinaryOp.left / right). Without this branch, `while (x < 5)` couldn't
-    // see x's concrete value and the always-false check never fired.
+    // The parser also emits bare-string identifiers inside binary expressions.
     if (typeof node === 'string') {
       const v = this.state.variables.get(node);
       if (v?.type === 'concrete' && typeof v.value === 'number') return v.value;
@@ -692,9 +661,7 @@ export class SymbolicExecutor {
     const left  = resolveUnknown(leftRaw,  node.left);
     const right = resolveUnknown(rightRaw, node.right);
 
-    // FIX #5: UNINITIALIZED_READ — if a binary op uses a variable that has
-    // been declared but never assigned a value, emit a loud safety warning.
-    // Garbage memory reads are a classic C++ bug that the user must see.
+    // Flag reads from declared variables that have not been initialized.
     const checkUninit = (operand: any, resolved: SymbolicValue) => {
       if (resolved.type !== 'unknown') return;
       const name = typeof operand === 'string' ? operand : operand?.name;
@@ -712,8 +679,7 @@ export class SymbolicExecutor {
     checkUninit(node.right, rightRaw);
 
     if (node.operator === '/' || node.operator === '%') {
-      // FIX #7: use operator-specific phrasing so Modulo-by-zero is reported
-      // as "Modulo by zero" (not the generic "Division by zero").
+      // Distinguish modulo-by-zero from division-by-zero diagnostics.
       const opName = node.operator === '%' ? 'Modulo by zero' : 'Division by zero';
       const opType = node.operator === '%' ? 'modulo'        : 'arithmetic';
       // Concrete zero check
@@ -780,7 +746,6 @@ export class SymbolicExecutor {
     return { type: 'unknown' as const };
   }
 
-  // FIX 13: visitAddressOf / visitDereference properly delegated
   private visitAddressOf(node: UnaryOpNode): SymbolicValue {
     const name = typeof node.operand === 'string' ? node.operand : (node.operand as any)?.name;
     const val = name ? this.state.variables.get(name) : undefined;
@@ -825,7 +790,7 @@ export class SymbolicExecutor {
     const name = typeof node.operand === 'string' ? node.operand : operandNode?.name;
     const val = name ? this.state.variables.get(name) : undefined;
 
-    // FIX: arithmetic unary minus — resolve operand concretely first
+    // Resolve the operand before applying arithmetic negation.
     if ((node as any).operator === '-') {
       // Try to get concrete value from operand node directly
       const operandVal = this.visit(operandNode);
@@ -865,7 +830,7 @@ export class SymbolicExecutor {
     return val ?? { type: 'unknown' as const };
   }
 
-  // FIX 16: inc/dec marks variable as symbolically changed even when unknown
+  // Increment and decrement mark symbolic values as changed.
   private visitPreIncrement(node: any):  SymbolicValue { return this.applyIncDec(node,  1, true);  }
   private visitPostIncrement(node: any): SymbolicValue { return this.applyIncDec(node,  1, false); }
   private visitPreDecrement(node: any):  SymbolicValue { return this.applyIncDec(node, -1, true);  }
@@ -965,7 +930,7 @@ export class SymbolicExecutor {
     return val;
   }
 
-  // FIX 12: visitNewExpression — register in allocatedPointers
+  // Register allocated pointers for leak and lifetime checks.
   private visitNewExpression(node: any): SymbolicValue {
     let size: number | undefined;
     if (node.size) {
@@ -1089,9 +1054,6 @@ export class SymbolicExecutor {
     return { type: 'unknown' as const };
   }
 
-  // =========================================================================
-  // Range-Based For
-  // =========================================================================
   private visitRangeBasedFor(node: any): SymbolicValue {
     this.visit(node.range);
     // Treat the loop variable as symbolic (value comes from range)
@@ -1103,9 +1065,6 @@ export class SymbolicExecutor {
     return { type: 'unknown' as const };
   }
 
-  // =========================================================================
-  // Exception Handling
-  // =========================================================================
   private visitTryStatement(node: any): SymbolicValue {
     const preState = this.cloneState();
     (node.body || []).forEach((s: any) => this.visit(s));
@@ -1140,10 +1099,7 @@ export class SymbolicExecutor {
   private visitNamespace(_n: any): SymbolicValue { return { type: 'unknown' as const }; }
 
   private visitCinStatement(node: any): SymbolicValue {
-    // Flatten `cin >> a >> b` chains: the parser may emit a leaf, an array,
-    // or a BinaryOp tree. Marking only the root would leave the inner
-    // identifiers symbolic but uninitialized, masking real bugs and surfacing
-    // false "uninitialized" warnings later.
+    // Flatten cin chains so each input target is marked initialized.
     const flatten = (n: any): any[] => {
       if (n == null) return [];
       if (Array.isArray(n)) return n.flatMap(flatten);
@@ -1195,16 +1151,13 @@ export class SymbolicExecutor {
   }
 
   private visitCoutStatement(node: any): SymbolicValue {
-    // node.values is now the root of the BinaryOp tree (e.g., cout << "hello")
+    // Cout values form a BinaryOp tree.
     if (node.values) {
         this.visit(node.values);
     }
     return { type: 'unknown' as const };
 }
 
-  // ==========================================================================
-  // FIX 15: visitIdentifier — check initialized set for uninitialized access
-  // ==========================================================================
   private visitIdentifier(node: any): SymbolicValue {
     if (node.name === 'nullptr' || node.name === 'NULL') {
       return { type: 'nullptr' };
@@ -1239,9 +1192,6 @@ export class SymbolicExecutor {
     return val ?? { type: 'unknown' as const };
   }
 
-  // ==========================================================================
-  // PATH CONSTRAINTS
-  // ==========================================================================
 
   private applyPathConstraint(cond: ASTNode, negate: boolean): void {
     if (cond.type === 'BinaryOp') {
@@ -1266,13 +1216,9 @@ export class SymbolicExecutor {
     }
   }
 
-  // ==========================================================================
-  // STATE MERGING
-  // ==========================================================================
 
   private mergeStates(s1: SymbolicState, s2: SymbolicState): SymbolicState {
-    // Start from a genuinely empty state — do NOT clone this.state, which may
-    // carry stale variables from a previous branch or iteration.
+    // Merge into an empty state to avoid retaining variables from earlier branches.
     const merged: SymbolicState = {
       variables: new Map(),
       aliases: new Map(),
@@ -1343,9 +1289,6 @@ export class SymbolicExecutor {
     return merged;
   }
 
-  // ==========================================================================
-  // INFINITE LOOP DETECTION
-  // ==========================================================================
 
   private detectInfiniteLoop(node: WhileLoopNode): void {
     const vars = this.extractVariables(node.condition);
@@ -1509,9 +1452,6 @@ export class SymbolicExecutor {
     return s;
   }
 
-  // ==========================================================================
-  // UTILITIES
-  // ==========================================================================
 
   private extractVariables(node: any): Set<string> {
     const s = new Set<string>();

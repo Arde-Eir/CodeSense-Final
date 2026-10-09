@@ -1,17 +1,4 @@
-/**
- * Lexical Analyzer (Tokenizer)
- * Converts raw C++ source code into a stream of tokens using regex patterns.
- * Phase 1 (Structure) – Step 1 of the analysis pipeline.
- *
- * FIXES vs original:
- *  - Raw string literals  R"(...)"  R"TAG(...)TAG"
- *  - Unicode/wide char/string literals  L"..." u"..." U"..." u8"..."
- *  - Macro expansion for #define IDENTIFIER value tokens
- *  - Long-long / unsigned-long-long integer suffixes
- *  - Binary literal 0b… / 0B…
- *  - Octal literals 0[0-7]+
- *  - nullptr_t token
- */
+/** Tokenizes C++ source after expanding object-like macros. */
 
 import { Token } from '../types';
 
@@ -20,9 +7,7 @@ export interface LexerResult {
   errors: Array<{ message: string; line: number; column: number }>;
 }
 
-// ---------------------------------------------------------------------------
-// Token pattern table — ORDER IS CRITICAL (first match wins, loop breaks)
-// ---------------------------------------------------------------------------
+// Patterns are tried in order; the first match wins.
 const TOKEN_PATTERNS: Array<{ type: Token['type']; pattern: RegExp }> = [
   { type: 'Comment',    pattern: /\/\*[\s\S]*?\*\//y },
   { type: 'Comment',    pattern: /\/\/[^\n]*/y },
@@ -46,9 +31,6 @@ const TOKEN_PATTERNS: Array<{ type: Token['type']; pattern: RegExp }> = [
   { type: 'Separator',  pattern: /[(){}\[\];,]/y },
 ];
 
-// ---------------------------------------------------------------------------
-// Simple #define macro table built during tokenization
-// ---------------------------------------------------------------------------
 type MacroTable = Map<string, string>;
 
 function buildMacroTable(sourceCode: string): MacroTable {
@@ -67,9 +49,6 @@ function buildMacroTable(sourceCode: string): MacroTable {
   return macros;
 }
 
-// ---------------------------------------------------------------------------
-// Expand macro occurrences in source (one level deep, guarded against cycles)
-// ---------------------------------------------------------------------------
 function expandMacros(sourceCode: string, macros: MacroTable): string {
   if (macros.size === 0) return sourceCode;
   // Remove #define lines first so we don't re-expand inside them
@@ -81,15 +60,12 @@ function expandMacros(sourceCode: string, macros: MacroTable): string {
       const re = new RegExp(`\\b${name}\\b`, 'g');
       expanded = expanded.replace(re, value);
     } catch (_) {
-      // malformed macro name — skip safely
+      // Invalid macro names are skipped.
     }
   });
   return expanded;
 }
 
-// ---------------------------------------------------------------------------
-// Main tokenize function
-// ---------------------------------------------------------------------------
 
 const wsRegex = /[ \t]+/y;
 
@@ -97,7 +73,6 @@ export function tokenize(sourceCode: string): LexerResult {
   const tokens: Token[] = [];
   const errors: Array<{ message: string; line: number; column: number }> = [];
 
-  // Phase 0: collect and expand macros
   const macros = buildMacroTable(sourceCode);
   const workingSource = expandMacros(sourceCode, macros);
   let line   = 1;
@@ -132,28 +107,22 @@ export function tokenize(sourceCode: string): LexerResult {
       continue;
     }
 
-    // Try every token pattern in order
-    // Replace your entire for...of loop and the "Nothing matched" block with this:
     let matched = false;
 
     for (const { type, pattern } of TOKEN_PATTERNS) {
-      // 1. Point the regex to look exactly at the current position
       pattern.lastIndex = pos;
 
-      // 2. Use .exec() instead of .match(). 
-      // Because of the 'y' flag, it only checks the string at exactly 'pos'
+      // Sticky expressions match only at the current position.
       const match = pattern.exec(workingSource);
 
       if (!match) continue;
 
       const value = match[0];
 
-      // 3. Keep your original logic for Comments
       if (type !== 'Comment') {
         tokens.push({ type, value, line, column });
       }
 
-      // 4. Efficiently handle multi-line tokens (raw strings, block comments)
       const parts = value.split('\n');
       if (parts.length > 1) {
         line += parts.length - 1;
@@ -162,13 +131,11 @@ export function tokenize(sourceCode: string): LexerResult {
         column += value.length;
       }
 
-      // 5. Update the master position
       pos += value.length;
       matched = true;
       break;
     }
 
-    // 6. Error handling for unknown characters
     if (!matched) {
       const ch = workingSource[pos];
       errors.push({
@@ -183,9 +150,6 @@ export function tokenize(sourceCode: string): LexerResult {
   return { tokens, errors }; 
 } 
 
-// ---------------------------------------------------------------------------
-// Utility helpers
-// ---------------------------------------------------------------------------
 
 export function formatTokens(tokens: Token[]): string {
   if (tokens.length === 0) return '(no tokens)';

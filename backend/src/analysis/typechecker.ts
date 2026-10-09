@@ -1,8 +1,4 @@
-/**
- * Advanced Type Checker (Semantic Analysis)
- * Validates type compatibility and semantic correctness of C++ code.
- * Phase 2 (Logic & Meaning) – Step 1 of the analysis pipeline.
- */
+/** Validates C++ types, symbol usage, and control-flow constraints. */
 
 import {
   ASTNode,
@@ -36,9 +32,7 @@ import {
   ParameterNode,
 } from '../types';
 
-// ---------------------------------------------------------------------------
-// Extended SymbolInfo with const flag and param count (added non-breakingly)
-// ---------------------------------------------------------------------------
+// Symbol metadata for const and function-argument checks.
 interface ExtendedSymbolInfo extends SymbolInfo {
   isConst?: boolean;
   paramCount?: number;
@@ -49,9 +43,6 @@ interface ExtendedSymbolInfo extends SymbolInfo {
 
 export class TypeChecker {
 
-  // =========================================================================
-  // State
-  // =========================================================================
   private symbolTable: SymbolTable = {};
   private errors: AnalysisError[] = [];
   private currentScope: string = 'global';
@@ -67,9 +58,6 @@ export class TypeChecker {
   private usageTracker: Map<string, number> = new Map();
   private dirtyAssignment: Map<string, { line: number; overwritten: boolean }> = new Map();
 
-  // =========================================================================
-  // Entry point
-  // =========================================================================
   check(ast: ASTNode): { symbolTable: SymbolTable; errors: AnalysisError[] } {
     this.symbolTable = {};
     this.errors = [];
@@ -95,12 +83,6 @@ export class TypeChecker {
     return { symbolTable: this.symbolTable, errors: this.errors };
   }
 
-  // =========================================================================
-  // Standard library pre-registration
-  // =========================================================================
-  // =========================================================================
-  // Header requirements map — which header must be included for which symbols
-  // =========================================================================
   private readonly HEADER_REQUIREMENTS: Record<string, string> = {
     pow: 'cmath', sqrt: 'cmath', abs: 'cmath', fabs: 'cmath',
     ceil: 'cmath', floor: 'cmath', round: 'cmath', fmod: 'cmath',
@@ -206,11 +188,7 @@ export class TypeChecker {
     };
   }
 
-  // =========================================================================
-  // Pre-scan: register all top-level function declarations before the main
-  // pass so that functions defined BELOW their call site (no forward
-  // prototype) are still found at the call site without an error.
-  // =========================================================================
+  // Register top-level functions before checking calls, including later definitions.
   private preScanFunctions(ast: ASTNode): void {
     const prog = ast as any;
     const scanBody = (nodes: any[]) => {
@@ -240,9 +218,6 @@ export class TypeChecker {
     if (prog.namespace && Array.isArray(prog.namespace.body)) scanBody(prog.namespace.body);
   }
 
-  // =========================================================================
-  // Visitor dispatch
-  // =========================================================================
   private visit(node: ASTNode | null | string | undefined): string | null {
     if (!node) return null;
     if (typeof node === 'string') {
@@ -254,8 +229,7 @@ export class TypeChecker {
     if (nodeType === 'NewExpression')   return this.visitNewExpression(node);
     if (nodeType === 'DeleteStatement') return this.visitDeleteStatement(node);
 
-    // FIX 14: Handle UnaryOp '-', '!', '~' which the grammar emits as
-    // { type: 'UnaryOp', operator: '-'|'!'|'~', operand: ... }
+    // The grammar emits UnaryOp nodes for '-', '!', and '~'.
     if (nodeType === 'UnaryOp') return this.visitGenericUnaryOp(node);
 
     const method = `visit${nodeType}`;
@@ -265,9 +239,6 @@ export class TypeChecker {
     return null;
   }
 
-  // =========================================================================
-  // Program / Block
-  // =========================================================================
   private visitProgram(node: ASTNode): string | null {
     const prog = node as any;
     (prog.directives || []).forEach((d: ASTNode) => this.visit(d));
@@ -300,10 +271,6 @@ export class TypeChecker {
     return this.visit((node as ExpressionStatementNode).expression);
   }
 
-  // =========================================================================
-  // Function Prototype
-  // FIX 15: Store param count so definition mismatch can be detected.
-  // =========================================================================
   private visitFunctionPrototype(node: ASTNode): string | null {
     const proto = node as FunctionPrototypeNode;
     const key = `${this.currentScope}::${proto.name}`;
@@ -320,9 +287,6 @@ export class TypeChecker {
     return proto.returnType;
   }
 
-  // =========================================================================
-  // Function Declaration
-  // =========================================================================
   private visitFunctionDecl(node: ASTNode): string | null {
     const func = node as FunctionDeclNode;
     const key = `${this.currentScope}::${func.name}`;
@@ -340,7 +304,6 @@ export class TypeChecker {
           'error',
         );
       }
-      // FIX 12: param-count mismatch
       if (
         existing.paramCount !== undefined &&
         existing.paramCount !== func.params.length
@@ -399,15 +362,11 @@ export class TypeChecker {
     return;
   }
 
-  // 1. Register the symbol as a parameter
   this.addSymbol(param.name, param.varType, param.line || 0, true, this.getDimensionSizes(param.dimensions), true, 'parameter');
 
-  // 2. Track the initial "Write" from the caller. 
-  // We don't call markRead yet because the function body hasn't actually used it.
+  // Caller-provided values count as writes until the function body reads them.
   const fullKey = `${this.currentScope}::${param.name}`;
   
-  // We set 'overwritten: false' to indicate it has a value from the caller, 
-  // but it hasn't been replaced by an internal assignment yet.
   this.dirtyAssignment.set(fullKey, { 
     line: param.line || func.line || 0, 
     overwritten: false 
@@ -465,9 +424,6 @@ export class TypeChecker {
     return func.returnType;
   }
 
-  // =========================================================================
-  // Variable Declaration
-  // =========================================================================
   private visitVariableDecl(node: ASTNode): string | null {
     const varNode = node as VariableDeclNode;
     const mods: string[] = Array.isArray((varNode as any).modifiers) ? (varNode as any).modifiers : [];
@@ -490,7 +446,6 @@ export class TypeChecker {
 
     this.validateHeaderForType(varNode.varType, node);
 
-    // ── auto type inference ─────────────────────────────────────────────────
     if (varNode.varType === 'auto') {
       if (!initialized) {
         this.addError(node, `'auto' variable '${varNode.name}' must have an initializer for type inference.`, 'error');
@@ -512,7 +467,6 @@ export class TypeChecker {
       const valueType = this.visit(varNode.value);
       this.markWrite(varNode.name, varNode.line || 0);
 
-      // ── REFERENCE DECLARATIONS are always type-compatible ──────────────
       const normalizedDeclType = varNode.varType.replace(/\s+/g, '');
       const isReferenceDecl = normalizedDeclType.includes('&');
       const isValidConstructorInit = this.isConstructorInitializationCompatible(varNode, valueType);
@@ -545,9 +499,6 @@ export class TypeChecker {
     return lastType;
   }
 
-  // =========================================================================
-  // Array Access
-  // =========================================================================
 
   private visitArrayAccess(node: ASTNode): string | null {
     const arr = node as ArrayAccessNode;
@@ -588,9 +539,6 @@ export class TypeChecker {
     return resultingType;
   }
 
-  // =========================================================================
-  // CP2: new / delete
-  // =========================================================================
   private visitNewExpression(node: any): string | null {
     if (node.size) {
       const sizeType = this.visit(node.size);
@@ -618,9 +566,6 @@ export class TypeChecker {
     return 'void';
   }
 
-  // =========================================================================
-  // Initializer List
-  // =========================================================================
   private visitInitializerList(node: ASTNode): string | null {
     const initList = node as InitializerListNode;
     let detectedType: string | null = null;
@@ -635,10 +580,7 @@ export class TypeChecker {
     return detectedType;
   }
 
-  // =========================================================================
   // Loops & Control Flow
-  // FIX 16: Infinite-loop detection integrated into while / for visitors.
-  // =========================================================================
   private visitWhileLoop(node: ASTNode): string | null {
     const w = node as WhileLoopNode;
     const condType = this.visit(w.condition);
@@ -646,9 +588,7 @@ export class TypeChecker {
       this.addError(w.condition, `While condition must be boolean-convertible, got '${condType}'`);
     }
 
-    // PDF #6: Constant-false condition detection. `while (false)` / `while (0)`
-    // never executes the body — surface a beginner-friendly warning so the
-    // user understands the loop body is dead code.
+    // Constant-false conditions make the loop body unreachable.
     const cond = w.condition as any;
     if ((cond?.type === 'Literal' && cond.value === false) ||
         (cond?.type === 'Integer' && cond.value === 0)) {
@@ -658,11 +598,7 @@ export class TypeChecker {
         'warning',
       );
     }
-    // Compile-time constant-false comparison, e.g. `while (10 < 5)` or
-    // an initial-state comparison like `int x = 10; while (x < 5)` where x
-    // is never modified between init and the loop. Use the same const-fold
-    // helper the symbolic executor would use; here a lightweight literal
-    // check covers the most common beginner case from the bug report.
+    // Evaluate comparisons between numeric literals at compile time.
     if (cond?.type === 'BinaryOp' &&
         (cond.left?.type === 'Integer'  || cond.left?.type === 'Float') &&
         (cond.right?.type === 'Integer' || cond.right?.type === 'Float')) {
@@ -684,7 +620,6 @@ export class TypeChecker {
       }
     }
 
-    // FIX 16: Infinite-loop detection (only when body is non-empty and no exit statement)
     const condVars = this.extractVariablesFromNode(w.condition);
     const modified = this.extractModifiedVariables(w.body);
     const hasExit = this.bodyHasExit(w.body);
@@ -728,7 +663,6 @@ export class TypeChecker {
       if (ct && !this.isContextuallyConvertibleToBool(ct)) {
         this.addError(f.condition, `For-loop condition must be boolean-convertible, got '${ct}'`);
       }
-      // FIX 16: Infinite-loop detection for for-loops (no update expression)
       if (!f.update) {
         const condVars = this.extractVariablesFromNode(f.condition);
         const modified = this.extractModifiedVariables(f.body);
@@ -788,7 +722,6 @@ export class TypeChecker {
       this.addError(ifn.condition, `If condition must be boolean-convertible, got '${ct}'`);
     }
 
-    // ── Logical contradiction / tautology detection ───────────────────────
     const cond = ifn.condition as any;
     if (cond) {
       // if (false) or if (0)
@@ -852,9 +785,6 @@ export class TypeChecker {
     return null;
   }
 
-  // =========================================================================
-  // Goto / Labels
-  // =========================================================================
   private gotoTargets:   Set<string> = new Set();
   private definedLabels: Set<string> = new Set();
 
@@ -892,11 +822,8 @@ export class TypeChecker {
     this.definedLabels.clear();
   }
 
-  // =========================================================================
   // Member access  (.field  /  ->field)
-  // Member type cannot be resolved without a class schema, so we return
-  // 'unknown' which is compatible with everything in isTypeCompatible.
-  // =========================================================================
+  // Member access uses 'unknown' when no class schema is available.
   private visitMemberAccess(node: any): string | null {
     this.visit(node.object ?? node.left ?? node.target);
     return 'unknown';
@@ -920,10 +847,8 @@ export class TypeChecker {
   private visitMemberCallExpression(node: any): string | null { return this.visitMethodCall(node); }
   private visitChainedCall(node: any):           string | null { return this.visitMethodCall(node); }
 
-  // =========================================================================
   // Comma operator — (expr1, expr2, ...) — left side for side effects,
   // right-most (or last) type is the result type.
-  // =========================================================================
   private visitCommaExpression(node: any): string | null {
     let lastType: string | null = null;
     (node.expressions || node.operands || []).forEach((e: ASTNode) => { lastType = this.visit(e); });
@@ -946,9 +871,6 @@ export class TypeChecker {
     return symbol.type;
   }
 
-  // =========================================================================
-  // Function Call
-  // =========================================================================
   private visitFunctionCall(node: ASTNode): string | null {
     const call = node as FunctionCallNode;
     this.markRead(call.name);
@@ -1039,15 +961,11 @@ export class TypeChecker {
     return 'unknown';
   }
 
-  // =========================================================================
-  // Unary Operators
-  // =========================================================================
   private visitPreIncrement(node: ASTNode): string | null  { return this.visitUnaryMutate(node); }
   private visitPostIncrement(node: ASTNode): string | null { return this.visitUnaryMutate(node); }
   private visitPreDecrement(node: ASTNode): string | null  { return this.visitUnaryMutate(node); }
   private visitPostDecrement(node: ASTNode): string | null { return this.visitUnaryMutate(node); }
 
-  // FIX 14: Generic UnaryOp for '-', '!', '~'
   private visitGenericUnaryOp(node: ASTNode): string | null {
     const u = node as any;
     const operandType = this.visit(u.operand);
@@ -1122,9 +1040,6 @@ export class TypeChecker {
     return '';
   }
 
-  // =========================================================================
-  // Ternary / Cast / Sizeof / Lambda
-  // =========================================================================
   private visitConditionalExpression(node: ASTNode): string | null {
     const t = node as ConditionalExpressionNode;
     const ct = this.visit(t.condition);
@@ -1160,9 +1075,7 @@ export class TypeChecker {
     return 'lambda';
   }
 
-  // =========================================================================
-  // Assignment (FIX 10: const mutation detection)
-  // =========================================================================
+  // Assignments must respect const declarations.
   private visitAssignment(node: ASTNode): string | null {
     const assign = node as AssignmentNode;
     let targetType: string | null = null;
@@ -1208,9 +1121,6 @@ export class TypeChecker {
     return targetType;
   }
 
-  // =========================================================================
-  // Binary Operations
-  // =========================================================================
   private visitBinaryOp(node: ASTNode): string | null {
   const bin = node as BinaryOpNode;
   const leftType = this.visit(bin.left);
@@ -1218,7 +1128,6 @@ export class TypeChecker {
 
   if (!leftType || !rightType) return null;
 
-  // ─── ARITHMETIC OPERATORS ───────────────────────────────────────────────
   if (['+', '-', '*', '/', '%'].includes(bin.operator)) {
     if (bin.operator === '+' && leftType === 'string' && rightType === 'string') {
       return 'string';
@@ -1233,7 +1142,6 @@ export class TypeChecker {
       return 'string';
     }
 
-    // ── Pointer arithmetic ────────────────────────────────────────────────
     const leftIsPtr  = leftType.endsWith('*');
     const rightIsPtr = rightType.endsWith('*');
     if (leftIsPtr || rightIsPtr) {
@@ -1288,7 +1196,6 @@ export class TypeChecker {
     return this.promoteType(leftType, rightType);
   }
 
-  // ─── COMPARISON OPERATORS ───────────────────────────────────────────────
   if (['<', '>', '<=', '>=', '==', '!='].includes(bin.operator)) {
     if (!this.isComparable(leftType, rightType)) {
       this.addError(node, `Cannot compare '${leftType}' with '${rightType}'`);
@@ -1296,7 +1203,6 @@ export class TypeChecker {
     return 'bool';
   }
 
-  // ─── LOGICAL OPERATORS ──────────────────────────────────────────────────
   if (['&&', '||'].includes(bin.operator)) {
     if (!this.isContextuallyConvertibleToBool(leftType) || !this.isContextuallyConvertibleToBool(rightType)) {
       this.addError(node, `Operator '${bin.operator}' requires boolean-convertible operands`);
@@ -1304,9 +1210,6 @@ export class TypeChecker {
     return 'bool';
   }
 
-  // ─── BITWISE & STREAM OPERATORS ─────────────────────────────────────────
- // backend/src/analysis/typechecker.ts -> visitBinaryOp
-// backend/src/analysis/typechecker.ts -> visitBinaryOp
 
 if (['&', '|', '^', '<<', '>>'].includes(bin.operator)) {
   const streamTypes = ['ostream', 'istream', 'manipulator', 'unknown', 
@@ -1327,19 +1230,13 @@ if (['&', '|', '^', '<<', '>>'].includes(bin.operator)) {
 }
   return null;
 }
-  // =========================================================================
-  // Identifier
-  // =========================================================================
  private visitIdentifier(node: ASTNode): string | null {
   let name = (node as any).name;
 
-  // 1. Handle Keywords/Literals
   if (name === 'true' || name === 'false') return 'bool';
   if (name === 'nullptr') return 'nullptr_t';
 
-  // 2. Handle std:: prefix (e.g., std::cout)
-  // Strip the prefix for lookup if your symbolTable uses plain 'cout' 
-  // or handle it as a pass-through.
+  // Standard-library symbols are stored without the std:: prefix.
   if (typeof name === 'string' && name.startsWith('std::')) {
     const plainName = name.replace('std::', '');
     const stdSymbol = this.lookupSymbol(plainName);
@@ -1351,7 +1248,6 @@ if (['&', '|', '^', '<<', '>>'].includes(bin.operator)) {
     return 'unknown'; 
   }
 
-  // 3. Regular Lookup
   const symbol = this.lookupSymbol(name);
 
   if (!symbol) {
@@ -1359,25 +1255,16 @@ if (['&', '|', '^', '<<', '>>'].includes(bin.operator)) {
     return null;
   }
 
-  // 4. Initialization Check
-  // We don't warn for functions or symbols marked as initialized (like cout/cin)
   if (!symbol.initialized && symbol.kind !== 'function') {
     this.addError(node, `Variable '${name}' used before initialization`, 'warning');
   }
 
-  // 5. Usage Tracking
   this.validateHeaderForSymbol(name, node);
   this.markRead(name);
 
   return symbol.type;
 }
 
-  // =========================================================================
-  // Return Statement (FIX 9)
-  // =========================================================================
-  // =========================================================================
-  // Helper: does every possible execution path in stmts end with a return?
-  // =========================================================================
   private allPathsReturn(stmts: ASTNode[]): boolean {
     for (let i = stmts.length - 1; i >= 0; i--) {
       const s = stmts[i] as any;
@@ -1426,9 +1313,6 @@ if (['&', '|', '^', '<<', '>>'].includes(bin.operator)) {
     return actualType;
   }
 
-  // =========================================================================
-  // Literals
-  // =========================================================================
   private visitInteger(_node: any): string { return 'int'; }
   private visitFloat(node: any): string {
     // In C++: 3.14 is double, 3.14f / 3.14F is float
@@ -1445,18 +1329,10 @@ if (['&', '|', '^', '<<', '>>'].includes(bin.operator)) {
     return 'int';
   }
 
-  // =========================================================================
-  // Stream I/O
-  // =========================================================================
   private visitCinStatement(node: ASTNode): string | null {
     const cin = node as any;
 
-    // The grammar produces `targets` as either a single leaf (Identifier
-    // string / ArrayAccess node) for `cin >> a`, or a left-folded BinaryOp
-    // tree for chained `cin >> a >> b >> c`. Older code assumed it was
-    // always an array and crashed with `targets.forEach is not a function`,
-    // which halted the typechecker — and as a knock-on effect, swallowed
-    // logs/symbols (PDF #13). Flatten any of these shapes into an array.
+    // Normalize cin targets from a leaf, an array, or a chained BinaryOp tree.
     const flatten = (n: any): Array<string | ASTNode> => {
       if (n == null) return [];
       if (Array.isArray(n)) return n.flatMap(flatten);
@@ -1513,12 +1389,9 @@ if (['&', '|', '^', '<<', '>>'].includes(bin.operator)) {
     return 'ostream';
   }
 
-  // =========================================================================
-  // Preprocessor node visitors
-  // =========================================================================
   private visitInclude(node: any): string | null {
     const name = node.name as string;
-    // Track for header-requirement validation (Phase 4)
+    // Track included headers for symbol validation.
     if (name) this.includedHeaders.add(name);
     if (name && /^(iostream|iomanip|string|cmath|fstream|vector|algorithm)\.h$/.test(name)) {
       this.addError(node, `Use <${name.replace('.h', '')}> instead of <${name}> in modern C++.`, 'warning');
@@ -1564,9 +1437,6 @@ if (['&', '|', '^', '<<', '>>'].includes(bin.operator)) {
 
 
 
-  // =========================================================================
-  // Header-usage validation — fires after symbol lookup
-  // =========================================================================
   private validateHeaderForSymbol(name: string, node: any): void {
     const required = this.HEADER_REQUIREMENTS[name];
     if (!required) return;
@@ -1587,9 +1457,6 @@ if (['&', '|', '^', '<<', '>>'].includes(bin.operator)) {
     if (baseType) this.validateHeaderForSymbol(baseType, node);
   }
 
-  // =========================================================================
-  // Exception Handling  (try / catch / throw)
-  // =========================================================================
   private visitTryStatement(node: any): string | null {
     this.enterScope('try');
     (node.body || []).forEach((s: any) => this.visit(s));
@@ -1613,15 +1480,12 @@ if (['&', '|', '^', '<<', '>>'].includes(bin.operator)) {
     return 'void';
   }
 
-  // =========================================================================
-  // Range-Based For Loop  (C++11)
-  // =========================================================================
   private visitRangeBasedFor(node: any): string | null {
   this.visit(node.range);
   this.loopDepth++;
   this.enterScope('range-for');
   this.addSymbol(node.name, node.varType, node.line || 0, true, undefined, true, 'variable');
-  this.markRead(node.name); // ADD THIS LINE — the range loop implicitly uses the var
+  this.markRead(node.name); // Range iteration implicitly uses the loop variable.
   (node.body || []).forEach((s: any) => this.visit(s));
   this.exitScope();
   this.loopDepth--;
@@ -1644,9 +1508,6 @@ if (['&', '|', '^', '<<', '>>'].includes(bin.operator)) {
   private visitMacroText(_n: any): string | null { return 'unknown'; }
   private visitFunctionPrototypeNode(_n: any): string | null { return null; } // alias safety
 
-  // =========================================================================
-  // Redundant-assignment & usage tracking
-  // =========================================================================
   private mergeBranchDirtyAssignments(
     thenDirty: Map<string, { line: number; overwritten: boolean }>,
     elseDirty: Map<string, { line: number; overwritten: boolean }>,
@@ -1686,7 +1547,7 @@ if (['&', '|', '^', '<<', '>>'].includes(bin.operator)) {
     this.usageTracker.set(full, (this.usageTracker.get(full) || 0) + 1);
   }
 
-  // FIX 13: Skip parameter entries — they receive implicit usage credits
+  // Parameters receive implicit usage credits.
   private performDeadCodeAnalysis(): void {
     Object.keys(this.symbolTable).forEach(fullName => {
       const symbol = this.symbolTable[fullName];
@@ -1728,16 +1589,12 @@ if (['&', '|', '^', '<<', '>>'].includes(bin.operator)) {
     if (this.symbolTable[key]) return key;
   }
   
-  // NEW: Check global if not found in current stacks
   const globalKey = `global::${name}`;
   if (this.symbolTable[globalKey]) return globalKey;
 
   return null;
 }
 
-  // =========================================================================
-  // Scope helpers
-  // =========================================================================
   private enterScope(name: string): void {
     this.scopeStack.push(name);
     this.currentScope = this.scopeStack.join('::');
@@ -1748,9 +1605,6 @@ if (['&', '|', '^', '<<', '>>'].includes(bin.operator)) {
     this.currentScope = this.scopeStack.join('::');
   }
 
-  // =========================================================================
-  // Symbol table helpers
-  // =========================================================================
   private addSymbol(
     name: string,
     type: string,
@@ -1781,7 +1635,7 @@ if (['&', '|', '^', '<<', '>>'].includes(bin.operator)) {
       return;
     }
 
-    // Scope shadowing is a hard ERROR (prevents confusing bugs)
+    // Reject declarations that shadow an existing symbol.
     for (let i = this.scopeStack.length - 2; i >= 0; i--) {
       const parent = this.scopeStack.slice(0, i + 1).join('::');
       const parentKey = `${parent}::${name}`;
@@ -1823,23 +1677,19 @@ if (['&', '|', '^', '<<', '>>'].includes(bin.operator)) {
   }
 
   private lookupSymbol(name: string): SymbolInfo | null {
-  // 1. Search up the scope stack (local variables, parameters, etc.)
   for (let i = this.scopeStack.length - 1; i >= 0; i--) {
     const scope = this.scopeStack.slice(0, i + 1).join('::');
     const key = `${scope}::${name}`;
     if (this.symbolTable[key]) return this.symbolTable[key];
   }
 
-  // 2. NEW: Explicitly check the global standard library namespace
+  // Standard-library symbols are registered in the global scope.
   const globalKey = `global::${name}`;
   if (this.symbolTable[globalKey]) return this.symbolTable[globalKey];
 
   return null;
 }
-  // =========================================================================
-  // FIX 16 helper — checks if a body has any break / return / exit() call
-  // that could terminate the loop, preventing a false-positive infinite-loop warning
-  // =========================================================================
+  // Explicit loop exits suppress infinite-loop warnings.
   private bodyHasExit(body: ASTNode[]): boolean {
     const walk = (nodes: ASTNode[]): boolean => {
       for (const n of nodes) {
@@ -1863,9 +1713,6 @@ if (['&', '|', '^', '<<', '>>'].includes(bin.operator)) {
     return walk(body);
   }
 
-  // =========================================================================
-  // FIX 16 helper — extract variable names from a condition expression
-  // =========================================================================
   private extractVariablesFromNode(node: any): Set<string> {
     const vars = new Set<string>();
     const walk = (n: any) => {
@@ -1907,7 +1754,6 @@ if (['&', '|', '^', '<<', '>>'].includes(bin.operator)) {
     return names;
   }
 
-  // FIX 16 helper — extract all variables modified in a statement list
   private extractModifiedVariables(body: ASTNode[]): Set<string> {
     const s = new Set<string>();
     const walk = (nodes: ASTNode[]) => {
@@ -1947,9 +1793,6 @@ if (['&', '|', '^', '<<', '>>'].includes(bin.operator)) {
     return s;
   }
 
-  // =========================================================================
-  // Type compatibility & promotion helpers
-  // =========================================================================
   private isConstructorInitializationCompatible(varNode: VariableDeclNode, valueType: string | null): boolean {
     if ((varNode as any).initStyle !== 'constructor' || !valueType) return false;
 
@@ -1963,7 +1806,7 @@ if (['&', '|', '^', '<<', '>>'].includes(bin.operator)) {
   }
 
 private isTypeCompatible(target: string, source: string, sourceNode?: any): boolean {
-  // Step 1: Strip ALL whitespace, then normalize references and const
+  // Normalize whitespace, references, and const before comparing types.
   const stripRef = (t: string) =>
     t.replace(/\s+/g, '')       // remove all spaces first: "int &" → "int&"
      .replace(/&+$/, '')        // remove trailing &:        "int&"  → "int"
@@ -1972,23 +1815,20 @@ private isTypeCompatible(target: string, source: string, sourceNode?: any): bool
   const tBase = stripRef(target);
   const sBase = stripRef(source);
 
-  // Step 2: Fast path — normalized bases match
   if (tBase === sBase) return true;
 
-  // Step 3: unknown is always compatible
+  // The unresolved 'unknown' type is compatible with all types.
   if (tBase === 'unknown' || sBase === 'unknown') return true;
 
-  // Step 4: Pointer compatibility
   if (tBase.endsWith('*')) {
     if (sBase === 'nullptr_t') return true;
     if (sBase === 'int' && sourceNode?.type === 'Integer' && sourceNode.value === 0) return true;
     if (tBase === 'void*' && sBase.endsWith('*')) return true;
   }
 
-  // Step 5: Bool contextual conversion
   if (tBase === 'bool') return this.isContextuallyConvertibleToBool(sBase);
 
-  // Step 6: Numeric promotion / narrowing (use normalized bases)
+  // Apply numeric promotion and narrowing rules to normalized types.
   const numWeight: Record<string, number> = {
     char: 1, short: 1.5, int: 2, long: 2.5, float: 3, double: 4,
   };
@@ -2013,10 +1853,7 @@ private isTypeCompatible(target: string, source: string, sourceNode?: any): bool
 
   private isNumericType(type: string): boolean {
     if (!type) return false;
-    // Strip reference / pointer / cv qualifiers — `int&`, `const int`,
-    // `unsigned int` should all be considered numeric for arithmetic checks.
-    // Without this, parameters declared `int &n` mis-flag `n++` as
-    // "non-numeric" because the underlying type carries the `&` suffix.
+    // Ignore reference, pointer, and cv qualifiers when checking numeric types.
     const base = type
       .replace(/[*&\s]+$/g, '')             // trailing *, &, whitespace
       .replace(/^(const|static|volatile|unsigned|signed|mutable|extern|inline)\s+/g, '')
@@ -2043,9 +1880,7 @@ private isTypeCompatible(target: string, source: string, sourceNode?: any): bool
       (left.endsWith('*') && right === 'nullptr_t') ||
       (right.endsWith('*') && left === 'nullptr_t')
     ) return true;
-    // Pointer types are comparable to numeric types and to each other (C/C++ pointer arithmetic).
-    // This also gracefully handles the grammar artifact where "&&" can be mis-parsed
-    // as bitwise-& + address-of, producing 'int*' on the left of a comparison.
+    // Comparisons permit pointers with numeric types and other pointers.
     if (left.endsWith('*') && (this.isNumericType(right) || right.endsWith('*'))) return true;
     if (right.endsWith('*') && (this.isNumericType(left) || left.endsWith('*'))) return true;
     return false;
@@ -2058,9 +1893,6 @@ private isTypeCompatible(target: string, source: string, sourceNode?: any): bool
     return 'int';
   }
 
-  // =========================================================================
-  // Error helper
-  // =========================================================================
   private addError(node: any, message: string, severity: 'error' | 'warning' = 'error'): void {
     this.errors.push({
       type: 'semantic',

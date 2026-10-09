@@ -1,4 +1,3 @@
-// frontend/src/services/api.ts
 import type { AnalysisResult, CFG, ControlFlowNode, GraphEdge } from '@/types';
 import { findPreprocessorDependencyErrors } from './PreprocessorDependencies';
 
@@ -31,7 +30,6 @@ export const analyzeCode = async (
   if (IS_PROD && !API_BASE_URL) {
     throw new Error('Missing VITE_API_BASE_URL in production build');
   }
-  // Abort the previous request if still pending
   if (_activeController) {
     _activeController.abort();
   }

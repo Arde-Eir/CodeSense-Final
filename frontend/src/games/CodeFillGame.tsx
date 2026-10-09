@@ -1,8 +1,3 @@
-// frontend/src/games/CodeFillGame.tsx
-// Fill-in-the-blank style game. Each `code_lines[]` may contain three
-// underscores (`___`) which become input boxes left-to-right; their answers
-// come from `answers[]` in the same order.
-
 import React, { useEffect } from 'react';
 import type { CodeFillItem } from '@/types/campaign';
 
@@ -10,8 +5,7 @@ interface Props {
   items:       CodeFillItem[];
   onComplete:  (score: number, total: number) => void;
   resetSignal: number;
-  /** Notifies the parent of the active code-fill item index. Used by the
-   *  lesson side panel to show this item's per-question hint. */
+  /** Reports the active item for the side-panel hint. */
   onItemChange?: (index: number) => void;
 }
 
@@ -68,8 +62,6 @@ export const CodeFillGame: React.FC<Props> = ({ items, onComplete, resetSignal, 
     }
   };
 
-  // Count filled blanks — use length check, not .filter(Boolean), so a blank
-  // answer of '0' or ' ' (single space) is still counted.
   const filledCount = item.answers.reduce((n, _, i) => n + (answers[i] !== undefined && answers[i] !== '' ? 1 : 0), 0);
 
   const doNext = () => {
@@ -129,7 +121,6 @@ export const CodeFillGame: React.FC<Props> = ({ items, onComplete, resetSignal, 
       </div>
       {item.caption && <div style={{ fontSize: 12, color: '#8b949e', fontFamily: 'Inter,sans-serif' }}>{item.caption}</div>}
       <div style={{ background: '#0d1117', border: '1px solid #30363d', borderRadius: 10, flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
-        {/* Language header — always C++ unless the item explicitly overrides it */}
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '7px 14px', background: '#161b22', borderBottom: '1px solid #21262d', flexShrink: 0 }}>
           <div style={{ display: 'flex', gap: 5 }}>
             {['#f85149', '#e3b341', '#3fb950'].map(c => (

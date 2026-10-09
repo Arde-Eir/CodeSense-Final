@@ -1,4 +1,3 @@
-// src/WelcomePage.tsx
 import React, { useEffect, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useAuth } from '@/components/AuthContext'
@@ -12,8 +11,6 @@ export const WelcomePage: React.FC = () => {
 
   const playerName = isGuest ? 'Explorer' : (user?.playerName ?? 'Explorer')
 
-  // Redirect returning (non-guest) users who already have XP — they've been
-  // here before and shouldn't see the new-user welcome screen again.
   useEffect(() => {
     if (!isGuest && user && (user.totalXP ?? 0) > 0) {
       navigate('/home', { replace: true })
@@ -48,7 +45,6 @@ export const WelcomePage: React.FC = () => {
       overflow: 'hidden', position: 'relative'
     }}>
 
-      {/* Animated background grid */}
       <div style={{
         position: 'absolute', inset: 0, opacity: 0.06,
         backgroundImage: 'linear-gradient(rgba(76,175,80,0.8) 1px, transparent 1px), linear-gradient(90deg, rgba(76,175,80,0.8) 1px, transparent 1px)',
@@ -56,7 +52,6 @@ export const WelcomePage: React.FC = () => {
         maskImage: 'radial-gradient(ellipse at center, black 30%, transparent 80%)'
       }} />
 
-      {/* Glow orbs */}
       <div style={{
         position: 'absolute', width: '500px', height: '500px', borderRadius: '50%',
         background: 'radial-gradient(circle, rgba(76,175,80,0.08) 0%, transparent 70%)',
@@ -68,7 +63,6 @@ export const WelcomePage: React.FC = () => {
         bottom: '10%', right: '15%', pointerEvents: 'none'
       }} />
 
-      {/* Main card */}
       <div className="welcome-card" style={{
         position: 'relative', zIndex: 1, textAlign: 'center',
         background: 'rgba(22,27,34,0.85)', border: '1px solid #21262d',
@@ -81,7 +75,6 @@ export const WelcomePage: React.FC = () => {
         transition: 'opacity 0.5s ease, transform 0.5s ease'
       }}>
 
-        {/* Logo */}
         <div style={{
           width: '72px', height: '72px', borderRadius: '20px', margin: '0 auto 24px',
           background: 'linear-gradient(135deg, #1a3a1a, #0d2a0d)',
@@ -93,12 +86,10 @@ export const WelcomePage: React.FC = () => {
           🧠
         </div>
 
-        {/* CodeSense label */}
         <div style={{ color: '#4caf50', fontSize: '12px', fontWeight: '700', letterSpacing: '3px', textTransform: 'uppercase', marginBottom: '16px', opacity: 0.8 }}>
           CodeSense
         </div>
 
-        {/* Welcome text */}
         <h1 style={{
           margin: '0 0 10px',
           fontSize: '32px', fontWeight: '800', lineHeight: 1.2,
@@ -122,10 +113,8 @@ export const WelcomePage: React.FC = () => {
             : 'Your journey to master code safety continues. Ready to level up?'}
         </p>
 
-        {/* Divider */}
         <div style={{ width: '48px', height: '2px', background: 'rgba(76,175,80,0.4)', borderRadius: '2px', margin: '0 auto 32px' }} />
 
-        {/* Start button */}
         <button
           onClick={handleStart}
           style={{
@@ -149,7 +138,6 @@ export const WelcomePage: React.FC = () => {
           Start →
         </button>
 
-        {/* Guest note */}
         {isGuest && (
           <p style={{ color: '#484f58', fontSize: '12px', marginTop: '16px', marginBottom: 0 }}>
             Want to save your progress?{' '}

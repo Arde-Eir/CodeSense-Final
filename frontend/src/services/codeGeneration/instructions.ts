@@ -1,7 +1,6 @@
 import type { Node, Edge } from '@xyflow/react';
 import { detectRequiredHeaders } from '../PreprocessorDependencies';
 
-// ─── Types ────────────────────────────────────────────────────────────────────
 
 export interface NodeData {
   label?: unknown;
@@ -20,7 +19,6 @@ export const FLOWCHART_CODE_TOPICS = [
   'raw C++ snippets only when they stay inside the same CP1/selected-CP2 foundations scope',
 ];
 
-// ─── Grammar-Aligned Reserved Words ──────────────────────────────────────────
 
 export const RESERVED_WORDS = new Set([
   'if', 'else', 'while', 'for', 'return', 'int', 'float', 'double',
@@ -33,7 +31,6 @@ export const RESERVED_WORDS = new Set([
   'override', 'final', 'true', 'false',
 ]);
 
-// ─── Grammar-Aligned Types ────────────────────────────────────────────────────
 
 export const BASE_TYPES = [
   'long long', 'long double', 'unsigned int',
@@ -414,7 +411,6 @@ export function detectIncludes(allCode: string[]): string[] {
   return [...sorted, ...rest];
 }
 
-// ─── Variable Declaration Parser ──────────────────────────────────────────────
 
 export interface VarDecl {
   modifiers: string[];
@@ -490,7 +486,6 @@ export function parseVarDecl(code: string): VarDecl | null {
   return null;
 }
 
-// ─── Statement Normalizer ─────────────────────────────────────────────────────
 
 export function normalizeStatement(code: string): string {
   const s = code.trim();
@@ -593,7 +588,6 @@ export function normalizeCondition(code: string): string {
     .trim() || '/* condition */';
 }
 
-// ─── Node-type specific code emitters ────────────────────────────────────────
 // Each matches the grammar construct for that ISO 5807 shape.
 
 /** io node → grammar StreamStatement (cout) */
@@ -764,6 +758,3 @@ export function emitDatabase(label: string, code: string): string {
   if (human) return human;
   return normalizeStatement(c);
 }
-
-// ─── Graph Helpers ────────────────────────────────────────────────────────────
-

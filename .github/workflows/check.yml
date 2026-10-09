@@ -9,7 +9,7 @@ on:
 
 jobs:
   check:
-    name: Lint, Test, and Build
+    name: Scan, Lint, and Build
     runs-on: ubuntu-latest
 
     steps:

@@ -8,7 +8,6 @@ import {
   type CompletedMissionRow,
 } from './dashboardMetrics'
 
-/* ── Announcement types ── */
 interface Announcement {
   id: string
   title: string
@@ -591,7 +590,6 @@ const ADMIN_ACTION_META: Record<string, { icon: string; color: string; title: st
   impersonate:   { icon: '👁️', color: '#e3b341', title: 'An admin previewed your account' },
 }
 
-/* ── Announcements Modal ── */
 export const AnnouncementsModal: React.FC<{ onClose: () => void }> = ({ onClose }) => {
   const [announcements, setAnnouncements] = useState<Announcement[]>([])
   const [loading, setLoading] = useState(true)

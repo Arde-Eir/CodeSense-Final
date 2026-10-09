@@ -5,7 +5,6 @@ import type { OnMount } from '@monaco-editor/react';
 interface CodeEditorProps {
   code: string;
   onChange: (value: string) => void;
-  // This fix solves the "Property does not exist on type IntrinsicAttributes" error
   onEditorMount?: (editor: any) => void; 
 }
 
@@ -31,10 +30,6 @@ export const CodeEditor: React.FC<CodeEditorProps> = ({ code, onChange, onEditor
     setTheme(prev => (prev === 'vs-dark' ? 'light' : 'vs-dark'));
   };
 
-  /**
-   * handleOnMount uses the OnMount type from Monaco to solve 
-   * the "Parameter implicitly has an any type" error.
-   */
   const handleOnMount: OnMount = (editor) => {
     if (onEditorMount) {
       onEditorMount(editor);
@@ -43,7 +38,6 @@ export const CodeEditor: React.FC<CodeEditorProps> = ({ code, onChange, onEditor
 
   return (
     <div ref={containerRef} style={{ height: '100%', width: '100%', display: 'flex', flexDirection: 'column' }}>
-      {/* Mini-toolbar for the toggle */}
       <div style={{ 
         padding: '5px 10px', 
         background: theme === 'vs-dark' ? '#1e1e1e' : '#f3f3f3',
@@ -74,7 +68,7 @@ export const CodeEditor: React.FC<CodeEditorProps> = ({ code, onChange, onEditor
         theme={theme}
         value={code}
         onChange={handleEditorChange}
-        onMount={handleOnMount} // Captures the instance for the SandboxPage
+        onMount={handleOnMount}
         options={{
           fontSize: 14,
           minimap: { enabled: false },

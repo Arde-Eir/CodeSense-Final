@@ -1,4 +1,3 @@
-// src/HomeDashboard.tsx
 import React, { useEffect, useState, useRef, useCallback, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '@/components/AuthContext';
@@ -13,7 +12,6 @@ import {
 } from '@/components/dashboard/DashboardNotifications'
 import './HomeDashboard.css'
 
-// ── Maintenance Banner ─────────────────────────────────────────────────────────
 const MaintenanceBanner: React.FC<{ message: string; isAdmin: boolean; onDisable?: () => void }> = ({ message, isAdmin, onDisable }) => (
   <div style={{
     background: 'linear-gradient(90deg, rgba(180,83,9,0.15), rgba(180,83,9,0.08))',
@@ -529,8 +527,7 @@ export const HomeDashboard: React.FC = () => {
     else { logout(); await new Promise(r => setTimeout(r, 50)); navigate('/', { replace: true }) }
   }
 
-  // Derive rank name from XP, NOT from `currentlevel` — legacy rows can have
-  // a stale level number (the old RPC used `1 + xp/500`). XP is the source of truth.
+  // XP determines rank; stored currentlevel values can be stale.
   const currentLevelName = user ? getRank(user.totalXP ?? 0).name : 'Squire'
 
   const handleSearchActionClick = (action: Pick<typeof QUICK_ACTIONS[0], 'label' | 'path'>) => {
@@ -548,7 +545,6 @@ export const HomeDashboard: React.FC = () => {
 
       {announcementsOpen && <AnnouncementsModal onClose={() => setAnnouncementsOpen(false)} />}
 
-      {/* ── PROFILE MENU BACKDROP — rendered at root level outside all stacking contexts ── */}
       {profileMenuOpen && (
         <div
           onMouseDown={(e) => { e.preventDefault(); setProfileMenuOpen(false); }}
@@ -565,7 +561,6 @@ export const HomeDashboard: React.FC = () => {
         />
       )}
 
-      {/* ── HEADER — no backdropFilter so it doesn't create a stacking context ── */}
       <header className="cs-home-header" style={{
         display: 'flex', justifyContent: 'space-between', alignItems: 'center',
         padding: '16px 32px',
@@ -584,7 +579,6 @@ export const HomeDashboard: React.FC = () => {
 
         <div style={{ flex: 1 }} />
 
-        {/* Search */}
         <div ref={searchRef} className="cs-home-search" style={{ position: 'relative', width: '200px' }}>
           <div className="cs-search-bar" style={{ display: 'flex', alignItems: 'center', gap: '8px', background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(48,54,61,0.8)', borderRadius: '10px', padding: '8px 12px' }}>
             <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#484f58" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0 }}>
@@ -695,7 +689,6 @@ export const HomeDashboard: React.FC = () => {
           )}
         </div>
 
-        {/* Right icons */}
         <div style={{ display: 'flex', gap: '4px', alignItems: 'center', flexShrink: 0 }}>
           <NotificationBell userId={user?.id} onViewAllAnnouncements={() => setAnnouncementsOpen(true)} />
 
@@ -779,7 +772,6 @@ export const HomeDashboard: React.FC = () => {
         </div>
       </header>
 
-      {/* ── MAINTENANCE BANNER ── */}
       {maintenanceMode && (
         <div style={{ width: '95%', maxWidth: '1280px', marginBottom: '0' }}>
           <MaintenanceBanner
@@ -793,10 +785,8 @@ export const HomeDashboard: React.FC = () => {
         </div>
       )}
 
-      {/* ── MAIN GRID ── */}
       <div className="cs-home-grid" style={{ width: '95%', maxWidth: '1280px', display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '24px', margin: '0 auto', boxSizing: 'border-box', alignItems: 'stretch' }}>
 
-        {/* LEFT COLUMN */}
         <div style={{ display: 'flex', flexDirection: 'column', gap: '24px', minWidth: 0, height: '100%' }}>
 
           <AnimatedHero
@@ -826,7 +816,6 @@ export const HomeDashboard: React.FC = () => {
           `}</style>
 
           <div className="cs-home-qa-grid" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '20px' }}>
-            {/* ── SANDBOX ── */}
             <div
               className="mc-card"
               onClick={() => navigate('/sandbox')}
@@ -862,7 +851,6 @@ export const HomeDashboard: React.FC = () => {
               </div>
             </div>
 
-            {/* ── CAMPAIGN ── */}
             <div
               className="mc-card"
               onClick={() => !isGuest && navigate('/campaign')}
@@ -923,10 +911,8 @@ export const HomeDashboard: React.FC = () => {
 
         </div>
 
-        {/* RIGHT COLUMN */}
         <div style={{ display: 'flex', flexDirection: 'column', gap: '24px', minWidth: 0 }}>
 
-          {/* ── Leaderboard (mini) ── */}
           <style>{`
             @keyframes lbCrown      { 0%,100%{transform:translateY(0) rotate(-5deg)} 50%{transform:translateY(-3px) rotate(5deg)} }
             @keyframes lbGoldGlow   { 0%,100%{box-shadow:0 0 0 rgba(255,215,0,0.4)} 50%{box-shadow:0 0 20px rgba(255,215,0,0.6)} }
@@ -1058,7 +1044,6 @@ export const HomeDashboard: React.FC = () => {
             )}
           </div>
 
-          {/* ── Progress Report ── */}
           <style>{`
             @keyframes prRingFill    { from { stroke-dashoffset: 226; } }
             @keyframes prFadeIn      { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: translateY(0); } }

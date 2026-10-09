@@ -1,19 +1,4 @@
-// frontend/src/lessonactivity.tsx
-// Lesson player. Loads a quest by id, walks the user through theory → games,
-// awards XP, and handles retakes. Uses the extracted games (`games/*.tsx`),
-// the extracted theory renderer (`components/TheorySection`), and shared
-// types from `types/campaign`.
-//
-// Completion model:
-//   • Each game tab calls onComplete(score, total). Passing tabs are saved
-//     through the Campaign RPC, which owns progress and XP changes.
-//   • When ALL available tabs (computed from what data the quest carries)
-//     are in completed_activities, we mark mission_progress.status='completed'
-//     AND set first_completed_at via the patched RPC. That timestamp is the
-//     durable signal CampaignInside reads to unlock the next quest.
-//   • Retake calls reset_quest_for_retake. The RPC sets status='active' and
-//     clears completedat — but `first_completed_at` is preserved (RPC doesn't
-//     touch it; trigger blocks NULLing). So the next quest stays unlocked.
+// Campaign RPCs own progress and XP updates; first_completed_at keeps later quests unlocked during retakes.
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
@@ -36,10 +21,8 @@ import {
   RETAKE_COMPLETION_XP, HINT_XP_COST, HINT_PENALTY_CAP_RATIO,
 } from '@/campaign/retakeXp';
 
-// ─── Constants ────────────────────────────────────────────────────────────
 const FETCH_TIMEOUT_MS   = 10_000;
 
-// ─── Tab metadata ─────────────────────────────────────────────────────────
 const TAB_LABEL: Record<ActivityTab, string> = {
   drag:      '🃏 Drag & Drop',
   code_fill: '💻 Code Fill',
@@ -64,14 +47,7 @@ const TAB_SUBTITLE: Record<ActivityTab, string> = {
   mc:        'Pick the correct answer for each question',
 };
 
-/** Compute which tabs this quest should show.
- *  All activities that have backing data are shown.
- *  question_type identifies the PRIMARY tab — it appears first so the user
- *  lands on the designated activity by default. Other populated activities
- *  are still accessible as additional tabs.
- *  Exception: mc_questions backs EITHER 'balloon' or 'mc' — never both.
- *  'pop_balloon' → balloon tab only. Everything else with mc_questions → mc tab only.
- *  (If you genuinely want both, set two separate question entries in the DB.) */
+/** Show populated activities with the designated question_type first. */
 function computeAvailableTabs(quest: Quest | null): ActivityTab[] {
   if (!quest) return [];
   const qt = (quest.question_type ?? '').trim().toLowerCase();
@@ -80,7 +56,6 @@ function computeAvailableTabs(quest: Quest | null): ActivityTab[] {
     qt === 'multiple_choice' || qt === 'multiple-choice' ||
     qt === 'mc' || qt === 'mcq' || qt === 'quiz';
 
-  // Identify the designated primary tab (may be null if question_type is unset).
   let primary: ActivityTab | null = null;
   if      (qt === 'drag_drop')   primary = 'drag';
   else if (qt === 'code_fill')   primary = 'code_fill';
@@ -88,9 +63,6 @@ function computeAvailableTabs(quest: Quest | null): ActivityTab[] {
   else if (qt === 'pop_balloon') primary = 'balloon';
   else if (isMC)                 primary = 'mc';
 
-  // Collect all activities that have data.
-  // mc_questions backs EITHER balloon OR mc — determined by question_type.
-  // Default (no question_type set) falls through to mc.
   const all: ActivityTab[] = [];
   if (quest.game_items?.length && quest.drop_zones?.length) all.push('drag');
   if (quest.code_fill_items?.length)                        all.push('code_fill');
@@ -108,14 +80,12 @@ function computeAvailableTabs(quest: Quest | null): ActivityTab[] {
 
   if (all.length === 0) return [];
 
-  // Put the designated primary tab first so it's the default active tab.
   if (primary && all.includes(primary)) {
     return [primary, ...all.filter(t => t !== primary)];
   }
   return all;
 }
 
-// ─── withTimeout — abort hung Supabase calls ──────────────────────────────
 function withTimeout<T>(thenable: PromiseLike<T>, ms = FETCH_TIMEOUT_MS): Promise<T> {
   return Promise.race([
     Promise.resolve(thenable),
@@ -125,7 +95,6 @@ function withTimeout<T>(thenable: PromiseLike<T>, ms = FETCH_TIMEOUT_MS): Promis
   ]);
 }
 
-// ─── XP Toast ─────────────────────────────────────────────────────────────
 const XPToast: React.FC<{
   visible:    boolean;
   xpGained:   number;
@@ -158,7 +127,6 @@ const XPToast: React.FC<{
   </div>
 );
 
-// ─── Hint Toast ───────────────────────────────────────────────────────────
 const HintToast: React.FC<{ visible: boolean; hintsUsed: number }> = ({ visible, hintsUsed }) => (
   <div style={{
     position: 'fixed', top: 68, right: 24,
@@ -181,7 +149,6 @@ const HintToast: React.FC<{ visible: boolean; hintsUsed: number }> = ({ visible,
   </div>
 );
 
-// ─── Locked Banner (after first full completion — offers retake) ─────────
 const LockedBanner: React.FC<{
   earnedXP: number; title: string; onRetake: () => void; onBack: () => void;
 }> = ({ earnedXP, title, onRetake, onBack }) => (
@@ -215,7 +182,6 @@ const LockedBanner: React.FC<{
   </div>
 );
 
-// ─── Tutorial / Theory phase ──────────────────────────────────────────────
 const TutorialLearnPhase: React.FC<{ quest: Quest; onStartGame: () => void }> = ({ quest, onStartGame }) => {
   const sections: TheorySection[] = Array.isArray(quest.theory_sections) ? quest.theory_sections : [];
   return (
@@ -234,12 +200,9 @@ const TutorialLearnPhase: React.FC<{ quest: Quest; onStartGame: () => void }> = 
   );
 };
 
-// ─── Side Panel (objectives + hints + XP reward) ──────────────────────────
 const GameSidePanel: React.FC<{
   quest:           Quest;
-  /** Hints visible for the current tab + current question. Composed by the
-   *  parent via composeHints() so the panel doesn't refilter — keeps the
-   *  per-question hint in sync with what the player is looking at. */
+  /** Hints for the active tab and question, composed by the parent. */
   tabHints:        HintItem[];
   hintsUsed:       number;
   totalHintsUsed:  number;
@@ -251,9 +214,6 @@ const GameSidePanel: React.FC<{
   isCompleted:     boolean;
   onTakeHint:      () => void;
   activeTab:       ActivityTab;
-  // When the quest is completed, the bottom button switches from "Take a
-  // Hint" to "Next Quest". `hasNextQuest=false` means this is the last quest
-  // in the phase — we still show a button, but it returns to the level page.
   hasNextQuest:    boolean;
   onNextQuest:     () => void;
 }> = ({ quest, tabHints, hintsUsed, totalHintsUsed, maxHints, earnedXP, rewardBaseXP, rewardPenaltyXP, rewardPenaltyCapped, isCompleted, onTakeHint, activeTab: _activeTab, hasNextQuest, onNextQuest }) => {
@@ -316,9 +276,6 @@ const GameSidePanel: React.FC<{
           </div>
         )}
         {isCompleted ? (
-          // Quest finished — replace the hint button with a "Next Quest"
-          // CTA. If there's no next quest in this phase, the button becomes
-          // "Back to Level" and routes to the phase page instead.
           <button onClick={onNextQuest} style={{
             width: '100%', padding: '9px 10px', borderRadius: 9, border: 'none',
             background: 'linear-gradient(135deg,#3fb950,#2ea043)',
@@ -357,9 +314,6 @@ const GameSidePanel: React.FC<{
   );
 };
 
-// ─── Resizable side-panel width (persists in localStorage) ───────────────
-// Defaults to 280px. Drag handle clamps within [SIDE_MIN, SIDE_MAX]. Width is
-// remembered across sessions per-user via a single key.
 const SIDE_DEFAULT = 280;
 const SIDE_MIN     = 220;
 const SIDE_MAX     = 520;
@@ -397,7 +351,6 @@ function useResizableSidePanel(containerRef: React.RefObject<HTMLDivElement | nu
 
     window.addEventListener('mousemove', onMove);
     window.addEventListener('mouseup', onUp);
-    // Block text selection / change cursor globally while dragging
     const prevUserSelect = document.body.style.userSelect;
     const prevCursor     = document.body.style.cursor;
     document.body.style.userSelect = 'none';
@@ -411,7 +364,6 @@ function useResizableSidePanel(containerRef: React.RefObject<HTMLDivElement | nu
     };
   }, [isResizing, containerRef]);
 
-  // Persist after the drag settles.
   useEffect(() => {
     if (isResizing) return;
     try { window.localStorage.setItem(SIDE_STORAGE, String(width)); } catch {/* ignore quota */}
@@ -422,7 +374,6 @@ function useResizableSidePanel(containerRef: React.RefObject<HTMLDivElement | nu
   return { width, isResizing, onResizeStart, resetWidth };
 }
 
-// ─── Main page ────────────────────────────────────────────────────────────
 export const LessonActivity: React.FC = () => {
   const navigate = useNavigate();
   const { questId } = useParams<{ questId: string }>();
@@ -450,17 +401,11 @@ export const LessonActivity: React.FC = () => {
   // leave this at 0 and the side panel falls back to the per-tab pool.
   const [currentItemIdx, setCurrentItemIdx] = useState(0);
 
-  // Next quest in the same phase (by sortorder). Used to power the
-  // "Next Quest" button that replaces "Take a Hint" once the quest is fully
-  // completed. `null` once we know there's no next quest in this phase.
   const [nextQuestId, setNextQuestId] = useState<string | null | undefined>(undefined);
 
   const [xpToast, setXpToast] = useState({ visible: false, amount: 0, repeat: false, levelUp: false, newLevel: undefined as number | undefined });
   const [hintToast, setHintToast] = useState({ visible: false });
 
-  // Stopwatch: counts up from when the user enters the game phase.
-  // The final elapsed seconds are saved to the DB on quest completion and
-  // shown on leaderboards and profiles.
   const [elapsed,        setElapsed]        = useState(0);
   const gameStartedAtRef = useRef<number | null>(null);
 
@@ -468,17 +413,15 @@ export const LessonActivity: React.FC = () => {
   const completedActivitiesRef = useRef<ActivityTab[]>([]);
   const completionPendingRef = useRef(false);
   const loadEpochRef = useRef(0);
-  const everCompletedRef       = useRef<ActivityTab[]>([]);  // tabs completed in any prior session
+  const everCompletedRef       = useRef<ActivityTab[]>([]);
   const hintsUsedRef           = useRef(0);
   // mission_progress.xp_gained as it stood when this quest was loaded. Used
   // to keep the row monotonic and prevent reloads from reopening phase-cap
   // headroom.
   const priorXpGainedRef       = useRef(0);
-  // True once this quest has been fully completed at least once (any session).
-  // Drives celebration suppression on subsequent retakes.
   const hasEverFullyCompletedRef = useRef(false);
-  const levelXpCapRef          = useRef(0);  // sum of basexp for all quests in this phase
-  const levelXpEarnedRef       = useRef(0);  // total xp_gained for this user in this phase
+  const levelXpCapRef          = useRef(0);
+  const levelXpEarnedRef       = useRef(0);
   const xpToastTimer           = useRef<ReturnType<typeof setTimeout> | null>(null);
   const hintToastTimer         = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -488,8 +431,6 @@ export const LessonActivity: React.FC = () => {
     setCompletedActivities(uniqueActivities);
   }, []);
 
-  // Resizable hint side-panel: bodyRef anchors the drag-clamp to the
-  // content row (so width math is independent of the page chrome).
   const bodyRef = useRef<HTMLDivElement>(null);
   const {
     width: sidePanelWidth,
@@ -498,22 +439,15 @@ export const LessonActivity: React.FC = () => {
     resetWidth: resetSidePanelWidth,
   } = useResizableSidePanel(bodyRef);
 
-  // Mobile: hint panel is hidden by default and toggled by a button
   const [mobilePanelOpen, setMobilePanelOpen] = useState(false);
 
-  // ── Load quest + this user's mission_progress row ─────────────────────
   const doFetch = useCallback(async () => {
     if (!user?.id || !questId) return;
     const loadEpoch = ++loadEpochRef.current;
     completionPendingRef.current = false;
     setLoading(true); setFetchError(null);
 
-    // RESET per-quest state — `/lesson/:questId` keeps the same component
-    // instance when the route param changes (e.g. "Next Quest" button), so
-    // without an explicit reset, isCompleted / hintsUsed / completedActivities
-    // from the previous quest leak into the new one. That made the Next-Quest
-    // button still appear on the freshly loaded quest, letting the user
-    // chain-click forward and skip quests they never finished.
+    // Route changes reuse this component, so reset progress and hints for each quest.
     setQuest(null);
     setIsCompleted(false);
     setEarnedXP(0);
@@ -613,7 +547,6 @@ export const LessonActivity: React.FC = () => {
       levelXpEarnedRef.current = phaseProgress.reduce((sum, row) => sum + (row.xp_gained ?? 0), 0);
       setNextQuestId(activeQuests[questIndex + 1]?.id ?? null);
 
-      // Pick the first available tab for this quest as the default.
       const tabs = computeAvailableTabs(quest);
       if (tabs.length > 0) setActiveTab(tabs[0]);
 
@@ -654,7 +587,7 @@ export const LessonActivity: React.FC = () => {
         if (loadedStatus === 'completed') {
           setIsCompleted(true);
           setEarnedXP(ex.xp_gained ?? quest.basexp ?? 0);
-          setAppPhase('game');  // show LockedBanner inside the game area
+          setAppPhase('game');
         }
       }
       setQuest(quest);
@@ -670,7 +603,6 @@ export const LessonActivity: React.FC = () => {
 
   useEffect(() => { doFetch(); }, [doFetch]);
 
-  // ── Realtime mission_progress sync (e.g. completion from another tab) ─
   useEffect(() => {
     if (!user?.id || !questId) return;
     const ch = supabase
@@ -694,7 +626,6 @@ export const LessonActivity: React.FC = () => {
     return () => { supabase.removeChannel(ch); };
   }, [user?.id, questId, isCompleted, quest?.basexp, syncCompletedActivities]);
 
-  // ── Derived: available tabs + hints scoped to current tab ─────────────
   const availableTabs = useMemo(() => computeAvailableTabs(quest), [quest]);
 
   const balloonQs = useMemo(() => {
@@ -737,15 +668,11 @@ export const LessonActivity: React.FC = () => {
     setCurrentItemIdx(0);
     setHintsUsed(0);
   }, [activeTab, quest?.id]);
-  // Was: Math.max(tabHints.length, 1) — that floor let users click "Take a
-  // hint" on a tab with zero hints, charging XP and revealing nothing. The
-  // real cap is exactly the number of hints available for this tab.
+  // The reveal limit equals the available hints to avoid charging for an empty reveal.
   const maxHints = tabHints.length;
 
-  // First-time vs repeat completion of this specific tab.
   const isRepeatTab = everCompletedRef.current.includes(activeTab);
 
-  // Display XP for the side panel (best estimate of what'll be awarded next).
   const levelRemaining = Math.max(0, levelXpCapRef.current - levelXpEarnedRef.current);
   const displayXP = isCompleted
     ? earnedXP
@@ -767,31 +694,26 @@ export const LessonActivity: React.FC = () => {
     hintsUsed: hintsUsedRef.current,
   });
 
-  // ── Active item index reported by MC / Balloon / CodeFill games ─────────
   // Resets `hintsUsed` to 0 on every item transition so each question has
   // its own reveal budget. hintsUsedRef remains cumulative for analytics.
   const handleItemChange = useCallback((idx: number) => {
     setCurrentItemIdx(prev => {
-      if (prev === idx) return prev;       // same item — no reset
-      setHintsUsed(0);                     // collapse reveals for the new question
+      if (prev === idx) return prev;
+      setHintsUsed(0);
       return idx;
     });
   }, []);
 
-  // ── Navigate to next quest (or back to phase page if this was the last) ─
   const handleNextQuest = useCallback(() => {
     if (nextQuestId) {
       navigate(`/lesson/${nextQuestId}`);
     } else {
-      // Last quest in the phase — go back to the level overview.
-      // Prefer the explicit phase route over navigate(-1) so direct-URL
-      // arrivals don't get sent back to an unrelated page.
+      // Use the phase route so direct lesson links return to the level overview.
       const dest = quest?.phase ? `/campaign/inside/${quest.phase}` : '/campaign';
       navigate(dest);
     }
   }, [nextQuestId, quest?.phase, navigate]);
 
-  // ── Take a hint ──────────────────────────────────────────────────────
   const handleTakeHint = useCallback(() => {
     if (!user?.id || !quest || isCompleted) return;
     if (hintsUsed >= maxHints) return;
@@ -806,7 +728,6 @@ export const LessonActivity: React.FC = () => {
     hintToastTimer.current = setTimeout(() => setHintToast({ visible: false }), 3500);
   }, [user?.id, quest, isCompleted, hintsUsed, maxHints]);
 
-  // ── Complete current activity ────────────────────────────────────────
   const handleComplete = useCallback(async (score: number, total: number) => {
     if (!user?.id || !quest) return;
     if (total < 1 || score !== total || completionPendingRef.current) return;
@@ -829,19 +750,15 @@ export const LessonActivity: React.FC = () => {
       hintsUsed: hintsUsedRef.current,
     });
 
-    // What we'll write to mission_progress.xp_gained. This row is the durable
-    // cap-accounting source and must be monotonic.
+    // Persisted xp_gained must stay monotonic for level-cap accounting.
     const xpRowValue     = persistedXpGained({
       levelCap:      levelXpCapRef.current,
       priorXpGained: priorXpGainedRef.current,
       xpDelta:       xpGainedNow,
     });
 
-    // Snapshot the lifetime-first completion flag before updating local state.
     const isLifetimeFirstFinish = allDone && !hasEverFullyCompletedRef.current;
-    // True only when this specific handleComplete call is what tips the quest
-    // to fully done for the first time. isCompleted is the React state from
-    // the previous render — still false here if we haven't called setIsCompleted yet.
+    // This flag records a first completion before the React state update.
     const isFirstFullFinish = allDone && !isCompleted;
 
     try {
@@ -870,28 +787,19 @@ export const LessonActivity: React.FC = () => {
       const newLevel   = rpcResult?.new_level;
 
       if (allDone) {
-        // RPC already set status='completed' and first_completed_at on first
-        // full completion. Reflect locally.
         setIsCompleted(true);
         if (completionTimeSeconds !== null) setElapsed(completionTimeSeconds);
         // Show the durable row value in the post-completion banner, not the
         // smaller retake event delta.
         setEarnedXP(xpRowValue);
         priorXpGainedRef.current = xpRowValue;
-        // Add tabs that we just completed to the everCompleted list so the
-        // post-retake UI knows what was historically done.
         everCompletedRef.current = [...new Set([...everCompletedRef.current, ...newFinished])];
 
-        // From this point on within the session, any further completions
-        // (retakes triggered without leaving the page) are retake runs.
         hasEverFullyCompletedRef.current = true;
 
       }
 
-      // XP toast — only show when XP was actually earned.
-      // Level-up flash is suppressed on retakes (isLifetimeFirstFinish=false)
-      // so a small retake bonus that happens to cross a level threshold
-      // doesn't re-trigger the celebration the user already saw.
+      // Celebrate level changes only on the first lifetime completion.
       if (xpGainedNow > 0) {
         setXpToast({
           visible:  true,
@@ -914,10 +822,6 @@ export const LessonActivity: React.FC = () => {
     }
   }, [user?.id, quest, activeTab, availableTabs, isCompleted, levelRemaining, syncCompletedActivities]);
 
-  // ── Quest-level stopwatch ─────────────────────────────────────────────
-  // Counts up from when the user first enters the game phase. Stops when
-  // the quest is marked completed. The final value is saved to the DB and
-  // surfaced on leaderboards and user profiles.
   useEffect(() => {
     if (appPhase !== 'game' || isCompleted) return;
     if (gameStartedAtRef.current === null) gameStartedAtRef.current = Date.now();
@@ -927,7 +831,6 @@ export const LessonActivity: React.FC = () => {
     return () => clearInterval(id);
   }, [appPhase, isCompleted]);
 
-  // ── Retake ───────────────────────────────────────────────────────────
   const handleRetake = useCallback(async () => {
     if (!user?.id || !quest) return;
     setFetchError(null);
@@ -957,8 +860,6 @@ export const LessonActivity: React.FC = () => {
     // The RPC preserves first_completed_at and previously credited XP.
     everCompletedRef.current         = [...completedActivitiesRef.current];
     syncCompletedActivities([]);
-    // The user just finished this quest at least once — every subsequent
-    // completion in this session is a retake. Suppress the celebration.
     hasEverFullyCompletedRef.current = true;
     setIsCompleted(false);
     setHintsUsed(0);
@@ -970,15 +871,12 @@ export const LessonActivity: React.FC = () => {
     const tabs = computeAvailableTabs(quest);
     if (tabs.length > 0) setActiveTab(tabs[0]);
     setAppPhase('tutorial');
-    // Do NOT call doFetch() here — it would overwrite everCompletedRef with the
-    // DB's completed_activities (which was just cleared to []), destroying the
-    // replay-XP context we set above. The quest data is already in state.
+    // Refetching would replace the retained retake history with the cleared activity list.
   }, [user?.id, quest, syncCompletedActivities]);
 
   const handleReset  = () => setResetSignal(s => s + 1);
   const handleGoBack = () => setAppPhase('tutorial');
 
-  // ── Render ───────────────────────────────────────────────────────────
   if (loading) return <FullPageMessage>Loading lesson…</FullPageMessage>;
   if (fetchError && !quest) return (
     <FullPageMessage>
@@ -996,7 +894,6 @@ export const LessonActivity: React.FC = () => {
     <div style={{ minHeight: '100vh', height: '100vh', display: 'flex', flexDirection: 'column', background: '#080c11', color: '#e6edf3', overflow: 'hidden' }}>
       <style>{ANIM_CSS}</style>
 
-      {/* Header */}
       <header className="la-header" style={{ height: 56, background: 'rgba(13,17,23,0.97)', borderBottom: '1px solid #21262d', display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '0 24px', flexShrink: 0 }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 10, minWidth: 0 }}>
           <button
@@ -1049,8 +946,7 @@ export const LessonActivity: React.FC = () => {
         </div>
       )}
 
-      {/* Body — overflowY:auto lets the layout scroll at high browser zoom
-           instead of clipping the bottom action bar */}
+      {/* Vertical scrolling keeps the action bar accessible at high zoom. */}
       <div ref={bodyRef} className="la-body" style={{ flex: 1, display: 'flex', overflow: 'hidden', minHeight: 0 }}>
         {appPhase === 'tutorial' ? (
           <TutorialLearnPhase
@@ -1062,7 +958,6 @@ export const LessonActivity: React.FC = () => {
           />
         ) : (
           <>
-            {/* Left: tab bar + active game */}
             <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minWidth: 0, overflowY: 'auto' }}>
               {!isCompleted && availableTabs.length > 1 && (
                 <div className="la-tab-bar" style={{ display: 'flex', gap: 4, padding: '10px 22px 0', borderBottom: '1px solid #21262d', flexShrink: 0 }}>
@@ -1073,9 +968,6 @@ export const LessonActivity: React.FC = () => {
                       <button key={t}
                         onClick={() => {
                           if (t === activeTab) return;
-                          // Reset the per-question index + hint reveals so the
-                          // side panel doesn't carry a stale "Q3" hint into a
-                          // tab whose first item is index 0.
                           setActiveTab(t);
                           setCurrentItemIdx(0);
                           setHintsUsed(0);
@@ -1102,7 +994,6 @@ export const LessonActivity: React.FC = () => {
                 </div>
               )}
 
-              {/* ── Stopwatch ── */}
               {!isCompleted && (
                 <div style={{ padding: '0 22px 8px', flexShrink: 0 }}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '6px 10px', borderRadius: 7, border: '1px solid #21262d' }}>
@@ -1146,9 +1037,6 @@ export const LessonActivity: React.FC = () => {
               </div>
             </div>
 
-            {/* Drag handle: thin column-resizer between the game pane and the
-                side panel. Highlights on hover and while dragging. Double-click
-                to reset to the default width. */}
             <div
               className="la-resize-handle"
               role="separator"
@@ -1167,7 +1055,6 @@ export const LessonActivity: React.FC = () => {
               onMouseLeave={e => { if (!isSideResizing) e.currentTarget.style.background = 'transparent'; }}
             />
 
-            {/* Mobile overlay — tap outside the side panel to close it */}
             {mobilePanelOpen && (
               <div
                 onClick={() => setMobilePanelOpen(false)}
@@ -1176,7 +1063,6 @@ export const LessonActivity: React.FC = () => {
               />
             )}
 
-            {/* Right: side panel — width is user-resizable, persisted to localStorage. */}
             <div className={`la-side-panel${mobilePanelOpen ? ' open' : ''}`} style={{ width: sidePanelWidth, flexShrink: 0, minHeight: 0, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
               <GameSidePanel
                 quest={quest}
@@ -1199,7 +1085,6 @@ export const LessonActivity: React.FC = () => {
         )}
       </div>
 
-      {/* Toasts */}
       <XPToast
         visible={xpToast.visible}
         xpGained={xpToast.amount}

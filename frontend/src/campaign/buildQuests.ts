@@ -1,18 +1,3 @@
-// frontend/src/campaign/buildQuests.ts
-// Pure gating logic for the per-phase dashboard. Extracted from
-// CampaignInside.tsx so it can be unit-tested without mounting the page.
-//
-// Gating model (linear, exploit-proof):
-//   • A quest is `completed` when mission_progress.status === 'completed'.
-//   • A quest is `active` when the previous quest in sortorder has been
-//     finished at least once (mission_progress.first_completed_at IS NOT NULL).
-//   • Otherwise `locked`.
-//
-// `first_completed_at` survives retakes (RPC uses COALESCE + DB trigger), so
-// retaking a quest never closes the gate on later quests. Replay XP cannot
-// grind unlocks because gating is decoupled from XP — only real "first finish"
-// timestamps move the gate.
-
 import type {
   Quest, MissionProgress, QuestRow, QuestUIStatus, LevelStats,
 } from '@/types/campaign';
@@ -22,8 +7,7 @@ export function buildQuests(quests: Quest[], progress: MissionProgress[]): {
   rows: QuestRow[];
   stats: LevelStats;
 } {
-  // Dedupe progress (UNIQUE constraint should make this a no-op, but keep
-  // the safety net for older rows).
+  // Prefer durable completion and recent progress when duplicate rows exist.
   const pMap: Record<string, MissionProgress> = {};
   for (const p of progress) {
     const existing = pMap[p.questid];

@@ -1,16 +1,9 @@
-// frontend/src/components/TheorySection.tsx
-// Renders one theory_sections[] entry. Handles every documented `type`:
-//   default · code · did_you_know · mistake · tip · diagram · summary · table
-// Each type has its own visual signature so the lesson reads like a
-// well-organized study guide rather than a wall of text.
-
 import React from 'react';
 import type { TheorySection } from '@/types/campaign';
 
 export const TheorySectionBlock: React.FC<{ sec: TheorySection }> = ({ sec }) => {
   const type = sec.type ?? 'default';
 
-  // ── Code block ────────────────────────────────────────────────────────────
   if (type === 'code') return (
     <div style={{ marginBottom: 16, borderRadius: 10, overflow: 'hidden', border: '1px solid #30363d' }}>
       <div style={{ background: '#161b22', padding: '8px 14px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', borderBottom: '1px solid #21262d' }}>
@@ -25,7 +18,6 @@ export const TheorySectionBlock: React.FC<{ sec: TheorySection }> = ({ sec }) =>
     </div>
   );
 
-  // ── Did-You-Know callout (purple) ────────────────────────────────────────
   if (type === 'did_you_know') return (
     <div style={{ marginBottom: 16, borderRadius: 10, padding: '16px 18px', background: 'rgba(163,113,247,0.07)', border: '1px solid rgba(163,113,247,0.25)' }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
@@ -37,7 +29,6 @@ export const TheorySectionBlock: React.FC<{ sec: TheorySection }> = ({ sec }) =>
     </div>
   );
 
-  // ── Common Mistakes (red) ────────────────────────────────────────────────
   if (type === 'mistake') return (
     <div style={{ marginBottom: 16, borderRadius: 10, padding: '16px 18px', background: 'rgba(248,81,73,0.06)', border: '1px solid rgba(248,81,73,0.25)' }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10 }}>
@@ -62,7 +53,6 @@ export const TheorySectionBlock: React.FC<{ sec: TheorySection }> = ({ sec }) =>
     </div>
   );
 
-  // ── Tips (yellow card grid) ──────────────────────────────────────────────
   if (type === 'tip') return (
     <div style={{ marginBottom: 16, borderRadius: 10, padding: '16px 18px', background: 'rgba(250,204,21,0.06)', border: '1px solid rgba(250,204,21,0.25)' }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10 }}>
@@ -85,7 +75,6 @@ export const TheorySectionBlock: React.FC<{ sec: TheorySection }> = ({ sec }) =>
     </div>
   );
 
-  // ── Diagram (image + caption) ────────────────────────────────────────────
   if (type === 'diagram') return (
     <div style={{ marginBottom: 16, borderRadius: 10, padding: '16px 18px', background: 'rgba(255,255,255,0.02)', border: '1px solid rgba(255,255,255,0.06)' }}>
       {sec.heading && <div style={{ fontSize: 14, fontWeight: 700, color: '#e6edf3', marginBottom: 10, fontFamily: 'Inter,sans-serif' }}>{sec.heading}</div>}
@@ -94,7 +83,6 @@ export const TheorySectionBlock: React.FC<{ sec: TheorySection }> = ({ sec }) =>
     </div>
   );
 
-  // ── Summary (green-tinted recap card) ────────────────────────────────────
   if (type === 'summary') return (
     <div style={{ marginBottom: 16, borderRadius: 10, padding: '16px 18px', background: 'rgba(63,185,80,0.06)', border: '1px solid rgba(63,185,80,0.25)' }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10 }}>
@@ -116,7 +104,6 @@ export const TheorySectionBlock: React.FC<{ sec: TheorySection }> = ({ sec }) =>
     </div>
   );
 
-  // ── Table ────────────────────────────────────────────────────────────────
   if (type === 'table') {
     const headers = sec.table_headers ?? [];
     const rows    = sec.table_rows    ?? [];
@@ -154,7 +141,6 @@ export const TheorySectionBlock: React.FC<{ sec: TheorySection }> = ({ sec }) =>
     );
   }
 
-  // ── Default — heading + body + bullets + items (term/definition rows) ────
   return (
     <div style={{ marginBottom: 16, borderRadius: 10, padding: '16px 18px', background: 'rgba(255,255,255,0.02)', border: '1px solid rgba(255,255,255,0.06)' }}>
       {sec.heading && <div style={{ fontSize: 14, fontWeight: 700, color: '#e6edf3', marginBottom: 8, fontFamily: 'Inter,sans-serif' }}>{sec.heading}</div>}

@@ -4,7 +4,6 @@ import { useAuth } from '@/components/AuthContext';
 import { executeSignupRecaptcha } from '@/services/recaptcha';
 
 
-// ── Reusable field component ──────────────────────────────────────────────────
 const Field: React.FC<{ label: string; error?: string; children: React.ReactNode }> = ({ label, error, children }) => (
   <div style={{ marginBottom: 20 }}>
     <label style={{
@@ -31,7 +30,6 @@ const getInputStyle = (hasError: boolean): React.CSSProperties => ({
   WebkitTextFillColor: '#e6edf3',
 });
 
-// ── Philippine DPA Consent Modal (RA 10173) ───────────────────────────────────
 const PrivacyConsentModal: React.FC<{ onAgree: () => void; onClose: () => void }> = ({ onAgree, onClose }) => {
   const [checked, setChecked] = useState({ collection: false, processing: false, rights: false, retention: false });
   const allChecked = Object.values(checked).every(Boolean);
@@ -50,7 +48,6 @@ const PrivacyConsentModal: React.FC<{ onAgree: () => void; onClose: () => void }
         display: 'flex', flexDirection: 'column', maxHeight: '92vh', overflow: 'hidden',
       }}>
 
-        {/* Header */}
         <div style={{ padding: '20px 26px 16px', borderBottom: '1px solid #21262d', flexShrink: 0 }}>
           <div style={{ display: 'flex', gap: 8, marginBottom: 10 }}>
             <div style={{ background: 'rgba(255,255,255,0.04)', border: '1px solid #30363d', borderRadius: 6, padding: '3px 9px', display: 'flex', alignItems: 'center', gap: 5 }}>
@@ -73,7 +70,6 @@ const PrivacyConsentModal: React.FC<{ onAgree: () => void; onClose: () => void }
           </div>
         </div>
 
-        {/* Scrollable body */}
         <div style={{ overflowY: 'auto', padding: '18px 26px', flex: 1, fontSize: 12, lineHeight: 1.75, color: '#8b949e' }}>
 
           <p style={{ margin: '0 0 18px' }}>
@@ -82,14 +78,12 @@ const PrivacyConsentModal: React.FC<{ onAgree: () => void; onClose: () => void }
             CodeSense informs you of the following before collecting any personal data.
           </p>
 
-          {/* Section 1 */}
           <S icon="🏢" title="1. Identity of the Personal Information Controller">
             <KV label="Name"    value="CodeSense" />
             <KV label="Purpose" value="Basic C++ Code Safety Learning Platform" />
             <p style={np}>CodeSense acts as the <b style={{ color: '#c9d1d9' }}>Personal Information Controller (PIC)</b> under Section 3(h) of RA 10173.</p>
           </S>
 
-          {/* Section 2 */}
           <S icon="📋" title="2. Personal Data We Collect">
             <p style={np}>Pursuant to the <b style={{ color: '#c9d1d9' }}>data minimization</b> principle (Sec. 11c, RA 10173), we collect only what is strictly necessary:</p>
             <DTable rows={[
@@ -97,7 +91,7 @@ const PrivacyConsentModal: React.FC<{ onAgree: () => void; onClose: () => void }
               ['Email address',            'Account recovery & notifications',           'Required'],
               ['Password (hashed)',         'Authentication — never stored in plaintext', 'Required'],
               ['XP & level progress',      'Gamified learning progression tracking',    'Required'],
-              ['Submitted source code',    'AI-powered code safety analysis',           'Required'],
+              ['Submitted source code',    'C++ code safety analysis',           'Required'],
               ['Sandbox run count',        'Usage statistics for your dashboard',       'Required'],
               ['Avatar image (optional)',  'Profile personalization',                   'Optional'],
             ]} />
@@ -107,7 +101,6 @@ const PrivacyConsentModal: React.FC<{ onAgree: () => void; onClose: () => void }
             </p>
           </S>
 
-          {/* Section 3 */}
           <S icon="⚖️" title="3. Purpose of Processing & Legal Basis">
             <p style={np}>Under <b style={{ color: '#c9d1d9' }}>Section 12 of RA 10173</b>, processing is lawful under:</p>
             {[
@@ -122,13 +115,12 @@ const PrivacyConsentModal: React.FC<{ onAgree: () => void; onClose: () => void }
             ))}
           </S>
 
-          {/* Section 4 */}
           <S icon="🔒" title="4. Data Sharing & Third-Party Disclosure">
             <p style={np}>CodeSense does <b style={{ color: '#f85149' }}>not sell, rent, or trade</b> your personal data. Limited sharing occurs only as follows:</p>
             {[
               ['Supabase (Database & Storage)',     'Stores your account data and avatar under strict data processing agreements.'],
               ['Google reCAPTCHA',                  'Processes browser and device signals to protect registration from automated abuse. Google’s Privacy Policy and Terms of Service apply.'],
-              ['AI Analysis Provider',              'Your submitted code is sent for analysis. No personally identifiable information accompanies the code payload.'],
+              ['CodeSense Analysis Service',              'Your submitted code is sent for analysis. No personally identifiable information accompanies the code payload.'],
               ['NPC & Competent Authorities',       'Disclosed only when required by Philippine law or lawful court order under Sec. 13 of RA 10173.'],
             ].map(([party, desc]) => (
               <div key={party} style={{ marginBottom: 10, paddingLeft: 10, borderLeft: '2px solid #30363d' }}>
@@ -138,7 +130,6 @@ const PrivacyConsentModal: React.FC<{ onAgree: () => void; onClose: () => void }
             ))}
           </S>
 
-          {/* Section 5 */}
           <S icon="🗂️" title="5. Data Retention Period">
             <p style={np}>Under the <b style={{ color: '#c9d1d9' }}>storage limitation</b> principle (Sec. 11e, RA 10173):</p>
             <DTable rows={[
@@ -149,7 +140,6 @@ const PrivacyConsentModal: React.FC<{ onAgree: () => void; onClose: () => void }
             ]} />
           </S>
 
-          {/* Section 6 */}
           <S icon="⚡" title="6. Your Rights as a Data Subject (Sec. 16, RA 10173)">
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 7 }}>
               {[
@@ -174,7 +164,6 @@ const PrivacyConsentModal: React.FC<{ onAgree: () => void; onClose: () => void }
             </p>
           </S>
 
-          {/* Section 7 */}
           <S icon="🛡️" title="7. Security Measures (Sec. 20, RA 10173)">
             {[
               'Passwords are hashed using bcrypt — never stored in plaintext.',
@@ -190,7 +179,6 @@ const PrivacyConsentModal: React.FC<{ onAgree: () => void; onClose: () => void }
             ))}
           </S>
 
-          {/* Section 8 */}
           <S icon="👶" title="8. Processing of Data of Minors">
             <p style={np}>
               If you are below 18 years of age, your parent or legal guardian must consent on your behalf per
@@ -199,7 +187,6 @@ const PrivacyConsentModal: React.FC<{ onAgree: () => void; onClose: () => void }
             </p>
           </S>
 
-          {/* Consent checkboxes */}
           <div style={{ marginTop: 20, padding: '16px 18px', background: 'rgba(76,175,80,0.04)', border: '1px solid rgba(76,175,80,0.2)', borderRadius: 11 }}>
             <p style={{ color: '#c9d1d9', fontSize: 12, fontWeight: 700, margin: '0 0 12px', letterSpacing: '0.3px' }}>
               📝 INFORMED CONSENT — Please confirm each of the following:
@@ -230,7 +217,6 @@ const PrivacyConsentModal: React.FC<{ onAgree: () => void; onClose: () => void }
           </p>
         </div>
 
-        {/* Footer buttons */}
         <div style={{ padding: '14px 26px 20px', borderTop: '1px solid #21262d', flexShrink: 0 }}>
           {!allChecked && (
             <p style={{ color: '#ffa726', fontSize: 11, textAlign: 'center', margin: '0 0 8px' }}>
@@ -273,7 +259,6 @@ const PrivacyConsentModal: React.FC<{ onAgree: () => void; onClose: () => void }
   );
 };
 
-// ── Small helper sub-components for the modal ─────────────────────────────────
 const S: React.FC<{ icon: string; title: string; children: React.ReactNode }> = ({ icon, title, children }) => (
   <div style={{ marginBottom: 20 }}>
     <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 9 }}>
@@ -310,7 +295,6 @@ const DTable: React.FC<{ rows: string[][] }> = ({ rows }) => (
 const np: React.CSSProperties = { color: '#8b949e', fontSize: 12, lineHeight: 1.7, margin: '0 0 10px' };
 
 
-// ── Main SignupPage component ─────────────────────────────────────────────────
 export const SignupPage: React.FC = () => {
   const navigate = useNavigate();
   const { signup, goBack } = useAuth();
@@ -329,8 +313,7 @@ export const SignupPage: React.FC = () => {
   const [isLoading,        setIsLoading]        = useState(false);
   const [focusedField,     setFocusedField]     = useState<string | null>(null);
 
-  // ── Bot-detection: reCAPTCHA v3 + honeypot + timing ─────────────────────────
-  const [honeypot, setHoneypot]         = useState('');  // bots fill this; humans don't
+  const [honeypot, setHoneypot]         = useState('');
   const formLoadTime = useRef(Date.now());
   const submitting = useRef(false);
 
@@ -347,9 +330,7 @@ export const SignupPage: React.FC = () => {
   const validateForm = (): boolean => {
     const errs: Record<string, string> = {};
 
-    // Bot detection: honeypot field must be empty
     if (honeypot) { setErrors({ submit: 'Automated signup detected.' }); return false; }
-    // Bot detection: form must take at least 4 seconds to fill
     if (Date.now() - formLoadTime.current < 4000) { setErrors({ submit: 'Please slow down and fill the form carefully.' }); return false; }
 
     if (!formData.username.trim())             errs.username = 'Player name is required';
@@ -386,7 +367,6 @@ const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
     navigate('/welcome');
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
-    // Handle specific errors from DatabaseService
     if      (msg === 'USERNAME_TAKEN')          setErrors({ username: 'This player name is already taken.' });
     else if (msg === 'EMAIL_TAKEN')             setErrors({ email: 'An account with this email already exists.' });
     else if (msg === 'EMAIL_ORPHANED')           setErrors({ email: 'This email is already registered. If this is your account, try logging in instead.' });
@@ -450,7 +430,6 @@ const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
           animation: 'fadeUp 0.3s ease-out',
         }}>
 
-          {/* Back button */}
           <button onClick={goBack} style={{
             background: 'transparent', border: 'none', color: '#484f58', cursor: 'pointer',
             fontSize: 13, padding: 0, display: 'flex', alignItems: 'center', gap: 6,
@@ -462,7 +441,6 @@ const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
             ← Back to Home
           </button>
 
-          {/* Header */}
           <div style={{ textAlign: 'center', marginBottom: 32 }}>
             <div style={{ fontSize: 40, marginBottom: 12, lineHeight: 1 }}>🛡️</div>
             <h1 style={{ color: '#e6edf3', fontSize: 26, fontWeight: 800, margin: '0 0 8px', letterSpacing: '-0.5px' }}>
@@ -473,35 +451,30 @@ const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
 
           <form id="signup-form" onSubmit={handleSubmit} noValidate>
 
-            {/* Player Name */}
             <Field label="Player Name" error={errors.username}>
               <input id="signup-username" type="text" name="username" value={formData.username} onChange={handleChange}
                 placeholder="e.g. CoderKnight" autoComplete="username"
                 style={inputStyle('username', !!errors.username)} {...focusProps('username')} />
             </Field>
 
-            {/* Email */}
             <Field label="Email Address" error={errors.email}>
               <input id="signup-email" type="email" name="email" value={formData.email} onChange={handleChange}
                 placeholder="e.g. yourname@gmail.com" autoComplete="email"
                 style={inputStyle('email', !!errors.email)} {...focusProps('email')} />
             </Field>
 
-            {/* Password */}
             <Field label="Secret Code (Password)" error={errors.password}>
               <input id="signup-password" type="password" name="password" value={formData.password} onChange={handleChange}
                 placeholder="At least 8 characters" autoComplete="new-password"
                 style={inputStyle('password', !!errors.password)} {...focusProps('password')} />
             </Field>
 
-            {/* Confirm Password */}
             <Field label="Confirm Code" error={errors.confirmPassword}>
               <input id="signup-confirm-password" type="password" name="confirmPassword" value={formData.confirmPassword} onChange={handleChange}
                 placeholder="Repeat your code" autoComplete="new-password"
                 style={inputStyle('confirmPassword', !!errors.confirmPassword)} {...focusProps('confirmPassword')} />
             </Field>
 
-            {/* ── Honeypot: invisible to humans, bots auto-fill it ── */}
             <div style={{ position: 'absolute', left: '-9999px', opacity: 0, pointerEvents: 'none' }} aria-hidden="true">
               <input
                 id="signup-website" name="website" type="text" tabIndex={-1} autoComplete="off"
@@ -509,7 +482,6 @@ const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
               />
             </div>
 
-            {/* User Type */}
             <Field label="I am a">
               <div style={{ display: 'flex', gap: 8 }}>
                 {(['student', 'professional'] as const).map(type => {
@@ -535,7 +507,6 @@ const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
               </div>
             </Field>
 
-            {/* Privacy checkbox */}
             <div style={{
               background: errors.privacy ? 'rgba(248,81,73,0.06)' : 'rgba(88,166,255,0.04)',
               border: `1px solid ${errors.privacy ? '#f85149' : '#21262d'}`,
@@ -562,7 +533,6 @@ const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
               )}
             </div>
 
-            {/* Submit error */}
             {errors.submit && (
               <div id="signup-error" role="alert" style={{
                 background: 'rgba(248,81,73,0.08)', border: '1px solid rgba(248,81,73,0.3)',
@@ -573,7 +543,6 @@ const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
               </div>
             )}
 
-            {/* Submit button */}
             <button id="signup-submit" type="submit" disabled={isLoading} aria-busy={isLoading} style={{
               width: '100%', padding: '13px',
               background: isLoading ? '#21262d' : 'linear-gradient(135deg, #238636 0%, #2ea043 100%)',
@@ -597,7 +566,6 @@ const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
               {' '}apply.
             </p>
 
-            {/* Sign-in link */}
             <p style={{ textAlign: 'center', marginTop: 20, color: '#484f58', fontSize: 13 }}>
               Already have an account?{' '}
               <button type="button" onClick={() => navigate('/login')}
@@ -609,7 +577,6 @@ const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
         </div>
       </div>
 
-      {/* ── Privacy Modal — RA 10173 / Philippine Data Privacy Act of 2012 ── */}
       {showPrivacyModal && (
         <PrivacyConsentModal
           onAgree={() => {

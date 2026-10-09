@@ -3,7 +3,6 @@ import { useNavigate } from 'react-router-dom'
 import { useAuth } from '@/components/AuthContext'
 import { resolveTier, tierColor, tierLabel } from '@/services/Roles'
 
-// ─── Types ───────────────────────────────────────────────────────────────────
 
 interface ManualSection {
   id: string
@@ -13,7 +12,6 @@ interface ManualSection {
   content: React.ReactNode
 }
 
-// ─── Rule table (defined FIRST so SECTIONS can reference it) ─────────────────
 
 const RULES: { code: string; severity: 'UNSAFE' | 'WARNING' | 'SAFE'; desc: string }[] = [
   { code: 'UNINITIALIZED_READ',     severity: 'UNSAFE',  desc: 'Variable read before a value is assigned in every reachable path.' },
@@ -58,7 +56,6 @@ const RuleTable: React.FC = () => (
   </table>
 )
 
-// ─── Roles access matrix (defined BEFORE SECTIONS) ───────────────────────────
 
 const ROLES_MATRIX: { feature: string; tiers: Record<string, boolean> }[] = [
   { feature: 'Sandbox + CFG',                   tiers: { Guest: true,  Student: true,  Professional: true,  Admin: true  } },
@@ -102,7 +99,6 @@ const RolesMatrix: React.FC = () => (
   </div>
 )
 
-// ─── Shared UI helpers ───────────────────────────────────────────────────────
 
 const Callout: React.FC<{ color: string; icon: string; title: string; children: React.ReactNode }> = ({ color, icon, title, children }) => (
   <div style={{
@@ -141,26 +137,23 @@ const Kbd: React.FC<{ children: React.ReactNode }> = ({ children }) => (
   }}>{children}</kbd>
 )
 
-// ─── Manual sections (defined AFTER shared components) ───────────────────────
 
 const SECTIONS: ManualSection[] = [
-  // ──────────────────────────────────────────────────────────────────────────
   {
     id: 'what-is',
     icon: '🧭',
     title: 'What CodeSense Is',
-    summary: 'One paragraph. No buzzwords.',
+    summary: 'How CodeSense analyzes C++.',
     content: (
       <>
         <p>
-          CodeSense is a <b>deterministic, rule-based C++ analyzer</b> wrapped
-          in a gamified learning environment. It does <u>not</u> run your code,
-          does <u>not</u> call an LLM, and does <u>not</u> use heuristics. Every
-          verdict — <span style={{ color: '#4caf50' }}>SAFE</span>,{' '}
+          CodeSense is a <b>deterministic, rule-based C++ analyzer</b> in a
+          gamified learning environment. It inspects your code without running
+          it. Each result — <span style={{ color: '#4caf50' }}>SAFE</span>,{' '}
           <span style={{ color: '#ffa726' }}>WARNING</span>,{' '}
-          <span style={{ color: '#f85149' }}>UNSAFE</span> — comes from a fixed
-          set of rules applied to the AST and CFG of your program. Same input →
-          same output. Always.
+          <span style={{ color: '#f85149' }}>UNSAFE</span> — comes from checks
+          applied to your program's abstract syntax tree (AST) and control-flow
+          graph (CFG).
         </p>
         <p>
           On top of the analyzer sit: a <b>flowchart-to-C++ Build Mode</b>, a{' '}
@@ -169,15 +162,14 @@ const SECTIONS: ManualSection[] = [
           <b>Notification bell</b> for system announcements, and tier-based{' '}
           <b>Roles &amp; Access</b> control.
         </p>
-        <Callout color="#4caf50" icon="✓" title="The promise:">
-          If a rule flags your code, you can trace exactly which rule fired, on
-          which line, and why. No black box.
+        <Callout color="#4caf50" icon="✓" title="Traceable results">
+          Each finding identifies the rule, the affected line, and the reason
+          it was flagged.
         </Callout>
       </>
     ),
   },
 
-  // ──────────────────────────────────────────────────────────────────────────
   {
     id: 'quick-start',
     icon: '🚀',
@@ -207,7 +199,6 @@ const SECTIONS: ManualSection[] = [
     ),
   },
 
-  // ──────────────────────────────────────────────────────────────────────────
   {
     id: 'pipeline',
     icon: '⚙️',
@@ -234,7 +225,6 @@ const SECTIONS: ManualSection[] = [
     ),
   },
 
-  // ──────────────────────────────────────────────────────────────────────────
   {
     id: 'tabs',
     icon: '🔍',
@@ -258,7 +248,6 @@ const SECTIONS: ManualSection[] = [
     ),
   },
 
-  // ──────────────────────────────────────────────────────────────────────────
   {
     id: 'rules',
     icon: '📜',
@@ -280,7 +269,6 @@ const SECTIONS: ManualSection[] = [
     ),
   },
 
-  // ──────────────────────────────────────────────────────────────────────────
   {
     id: 'cfg',
     icon: '🕸',
@@ -332,7 +320,6 @@ const SECTIONS: ManualSection[] = [
     ),
   },
 
-  // ──────────────────────────────────────────────────────────────────────────
   {
     id: 'build-mode',
     icon: '🧩',
@@ -424,7 +411,6 @@ const SECTIONS: ManualSection[] = [
     ),
   },
 
-  // ──────────────────────────────────────────────────────────────────────────
   {
     id: 'campaign',
     icon: '⚔️',
@@ -456,7 +442,6 @@ const SECTIONS: ManualSection[] = [
     ),
   },
 
-  // ──────────────────────────────────────────────────────────────────────────
   {
     id: 'ranks',
     icon: '🏆',
@@ -485,7 +470,6 @@ const SECTIONS: ManualSection[] = [
     ),
   },
 
-  // ──────────────────────────────────────────────────────────────────────────
   {
     id: 'achievements',
     icon: '🏅',
@@ -514,7 +498,6 @@ const SECTIONS: ManualSection[] = [
     ),
   },
 
-  // ──────────────────────────────────────────────────────────────────────────
   {
     id: 'profile',
     icon: '👤',
@@ -552,7 +535,6 @@ const SECTIONS: ManualSection[] = [
     ),
   },
 
-  // ──────────────────────────────────────────────────────────────────────────
   {
     id: 'leaderboard',
     icon: '🎖',
@@ -581,7 +563,6 @@ const SECTIONS: ManualSection[] = [
     ),
   },
 
-  // ──────────────────────────────────────────────────────────────────────────
   {
     id: 'dashboard',
     icon: '🏠',
@@ -605,7 +586,6 @@ const SECTIONS: ManualSection[] = [
     ),
   },
 
-  // ──────────────────────────────────────────────────────────────────────────
   {
     id: 'notifications',
     icon: '🔔',
@@ -633,7 +613,6 @@ const SECTIONS: ManualSection[] = [
     ),
   },
 
-  // ──────────────────────────────────────────────────────────────────────────
   {
     id: 'admin',
     icon: '🛡',
@@ -673,7 +652,6 @@ const SECTIONS: ManualSection[] = [
     ),
   },
 
-  // ──────────────────────────────────────────────────────────────────────────
   {
     id: 'maintenance',
     icon: '🚧',
@@ -692,7 +670,6 @@ const SECTIONS: ManualSection[] = [
     ),
   },
 
-  // ──────────────────────────────────────────────────────────────────────────
   {
     id: 'tiers',
     icon: '🔐',
@@ -709,7 +686,6 @@ const SECTIONS: ManualSection[] = [
     ),
   },
 
-  // ──────────────────────────────────────────────────────────────────────────
   {
     id: 'security',
     icon: '🔒',
@@ -748,7 +724,6 @@ const SECTIONS: ManualSection[] = [
     ),
   },
 
-  // ──────────────────────────────────────────────────────────────────────────
   {
     id: 'tutorials',
     icon: '🎓',
@@ -775,7 +750,6 @@ const SECTIONS: ManualSection[] = [
     ),
   },
 
-  // ──────────────────────────────────────────────────────────────────────────
   {
     id: 'shortcuts',
     icon: '⌨️',
@@ -800,7 +774,6 @@ const SECTIONS: ManualSection[] = [
     ),
   },
 
-  // ──────────────────────────────────────────────────────────────────────────
   {
     id: 'troubleshooting',
     icon: '🛠',
@@ -828,7 +801,6 @@ const SECTIONS: ManualSection[] = [
   },
 ]
 
-// ─── Main page ───────────────────────────────────────────────────────────────
 
 export const UserManualPage: React.FC = () => {
   const navigate = useNavigate()
@@ -838,7 +810,6 @@ export const UserManualPage: React.FC = () => {
 
   useEffect(() => {
     const els = [document.documentElement, document.body, document.getElementById('root')]
-    // Save original values before overriding
     const originals = els.map(el => el?.style.overflow ?? '')
     els.forEach(el => { if (el) el.style.overflow = 'auto' })
     return () => {
@@ -866,7 +837,6 @@ export const UserManualPage: React.FC = () => {
       background: 'linear-gradient(135deg, #0d1117 0%, #1a1f2e 100%)',
       color: 'white', fontFamily: "'IBM Plex Sans', system-ui, sans-serif",
     }}>
-      {/* Header */}
       <header className="um-header" style={{
         display: 'flex', justifyContent: 'space-between', alignItems: 'center',
         padding: '16px 32px', background: 'rgba(22,27,34,0.95)',
@@ -894,7 +864,6 @@ export const UserManualPage: React.FC = () => {
         maxWidth: 920, margin: '0 auto', padding: '32px 24px',
         display: 'grid', gridTemplateColumns: '220px 1fr', gap: 24,
       }}>
-        {/* Sidebar nav */}
         <nav className="um-sidebar" style={{ position: 'sticky', top: 80, alignSelf: 'start' }}>
           <div style={{ color: '#484f58', fontSize: 10, fontWeight: 700, letterSpacing: 1.5, textTransform: 'uppercase', marginBottom: 10, padding: '0 8px' }}>
             Contents
@@ -920,10 +889,7 @@ export const UserManualPage: React.FC = () => {
           ))}
         </nav>
 
-        {/* Content — FIX: conditionally render only the open section so the
-            fade-in animation actually fires on each tab switch. Previously,
-            sections used display:none which prevented CSS animations from
-            playing because the element was never repainted. */}
+        {/* Mount the active section to restart its entrance animation. */}
         <main className="um-content">
           {SECTIONS.map(s => {
             if (s.id !== openId) return null

@@ -5,10 +5,8 @@ import {
   type HintFormRow,
   type MCQuestionLite,
 } from './adminHelpers'
-import { supabase } from '@/services/supabase'
 import type { ActivityTab, Quest } from '@/types/campaign'
 
-// ─── Types ────────────────────────────────────────────────────────────────────
 
 /** Subset of the quests table returned by fetchExistingQuests */
 export interface ExistingQuest {
@@ -102,17 +100,6 @@ export interface AdminUser {
   sandbox_runs: number
 }
 
-export interface AuditEntry {
-  id: string
-  admin_id: string
-  target_user_id: string | null
-  action: string
-  details: unknown
-  created_at: string
-  admin?: { playername: string }
-  target?: { playername: string }
-}
-
 export interface Announcement {
   id: string
   title: string
@@ -132,7 +119,6 @@ export interface AdminUserChanges {
   banned_at?: string | null
 }
 
-// ─── Quest form types ─────────────────────────────────────────────────────────
 
 export interface QFormTheory    { id: string; type: string; heading: string; body: string; code: string; language: string; table_headers: string[]; table_rows: string[][] }
 export interface QFormMCQ       { id: string; question: string; options: [string,string,string,string]; correct: number; correctAnswers?: number[]; explanation: string; hint: string }
@@ -140,7 +126,6 @@ export interface QFormDragItem  { id: string; label: string; color: string }
 export interface QFormDropZone  { id: string; label: string; accepted: string }
 export interface QFormCodeFill  { id: string; code_lines: string; language: string; answers: string; hint: string; caption: string }
 
-// Multi-problem types
 export interface QFormDragProblem  { id: string; question: string; items: QFormDragItem[]; drop_zones: QFormDropZone[] }
 export interface QFormOrderItem    { id: string; label: string; description: string }
 export interface QFormOrderProblem { id: string; question: string; items: QFormOrderItem[] }
@@ -465,7 +450,6 @@ export const defaultLevelAccent = (level: number): string => {
   return colors[Math.max(0, level - 1) % colors.length];
 }
 
-// ─── Helpers ──────────────────────────────────────────────────────────────────
 
 export const fmt = (iso: string) =>
   new Date(iso).toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })
@@ -480,36 +464,14 @@ export const settingStringValue = (value: unknown): string => {
   }
 }
 
-export const errorMessage = (error: unknown): string =>
-  error instanceof Error ? error.message : String(error)
-
-export async function writeAuditLog(
-  adminId: string,
-  action: string,
-  targetUserId: string | undefined,
-  details: object | undefined
-): Promise<void> {
-  let lastErrorMessage = ''
-  for (let attempt = 1; attempt <= 2; attempt += 1) {
-    const { error } = await supabase.from('admin_audit_log').insert({
-      admin_id: adminId,
-      target_user_id: targetUserId ?? null,
-      action,
-      details: details ?? null,
-    })
-    if (!error) return
-
-    lastErrorMessage = error.message
-    console.warn('Admin audit log write failed', {
-      action,
-      adminId,
-      targetUserId: targetUserId ?? null,
-      attempt,
-      error: error.message,
-    })
+export const errorMessage = (error: unknown): string => {
+  if (error && typeof error === 'object' && 'message' in error && typeof error.message === 'string') {
+    return [
+      error.message,
+      'code' in error && typeof error.code === 'string' ? `Code: ${error.code}` : '',
+      'details' in error && typeof error.details === 'string' ? error.details : '',
+      'hint' in error && typeof error.hint === 'string' ? error.hint : '',
+    ].filter(Boolean).join(' ')
   }
-
-  throw new Error(
-    `Could not record admin audit action ${JSON.stringify(action)} after 2 attempts: ${lastErrorMessage}`,
-  )
+  return String(error)
 }

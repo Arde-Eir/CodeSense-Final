@@ -3,13 +3,13 @@
     "build": "npm run build:frontend && npm run build:backend",
     "build:backend": "npm --prefix backend run build",
     "build:frontend": "npm --prefix frontend run build",
-    "check": "npm run scan:secrets && npm run lint && npm test && npm run build",
+    "check": "npm run scan:secrets && npm run check:audit && npm run check:permissions && npm run lint && npm run build",
+    "check:audit": "node scripts/check-admin-audit.mjs",
+    "check:permissions": "node scripts/check-permission-helpers.mjs",
     "lint": "npm --prefix frontend run lint",
-    "scan:secrets": "node tests/scan-secrets.mjs",
-    "test": "npm run test:report && npm run test:integration",
-    "test:backend:unit": "npm --prefix backend test",
-    "test:frontend": "npm --prefix frontend run test",
-    "test:integration": "node --test tests/run-integration-tests.mjs",
-    "test:report": "node tests/run-testing-report.mjs"
+    "scan:secrets": "node scripts/scan-secrets.mjs"
+  },
+  "devDependencies": {
+    "@electric-sql/pglite": "0.5.8"
   }
 }

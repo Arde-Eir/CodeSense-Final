@@ -40,9 +40,6 @@ type ParserModule = {
 const parser = require('../analysis/parser') as ParserModule;
 const router = Router();
 
-// ---------------------------------------------------------------------------
-// Known stdlib identifiers that produce noisy "unused" warnings we suppress
-// ---------------------------------------------------------------------------
 const STD_LIB_SYMBOLS = [
   'cout', 'cin', 'endl', 'cerr', 'clog', 'string',
   'setw', 'setprecision', 'fixed', 'showpoint', 'left', 'right',
@@ -129,7 +126,6 @@ router.post('/analyze', (req, res) => {
     });
   }
 
-  // ─── PHASE 0: Unsupported Feature Detection ───────────────────────────────
   const UNSUPPORTED_PATTERNS: Array<{ re: RegExp; msg: string }> = [
     { re: /template\s*</,
       msg: 'Templates (template<...>) are not supported — the analyzer covers intro/intermediate C++ only.' },
@@ -165,7 +161,6 @@ router.post('/analyze', (req, res) => {
       column: 0,
     }));
 
-  // ─── PHASE 1: Lexical Analysis ─────────────────────────────────────────────
   const lexResult = tokenize(sourceCode);
 
   if (lexResult.errors.length > 0) {
@@ -225,7 +220,6 @@ router.post('/analyze', (req, res) => {
     });
   }
 
-  // ─── PHASE 2: Syntactic Analysis ──────────────────────────────────────────
   let ast: ASTNode | null = null;
   try {
     ast = parser.parse(sourceCode);
@@ -292,7 +286,6 @@ router.post('/analyze', (req, res) => {
   }
 
   try {
-    // ─── PHASE 3: Dependency Validation (FEU CP1/CP2 Strict Rules) ──────────
     const sourceForDependencyScan = stripCommentsAndLiterals(sourceCode);
     const usesIo = /\b(cout|cin|endl|cerr|clog|getline)\b/.test(sourceForDependencyScan);
     const usesStdPrefix = /\bstd::/.test(sourceForDependencyScan);
@@ -306,7 +299,6 @@ router.post('/analyze', (req, res) => {
         .map(directive => directive.name),
     );
 
-    // Helper: check if a header is in the directive list
     const hasHeader = (name: string) => includedHeaders.has(name);
 
     const depErrors: AnalysisError[] = [];
@@ -354,7 +346,6 @@ router.post('/analyze', (req, res) => {
       });
     }
 
-    // ─── PHASE 4: Semantic Analysis & Symbol Table ───────────────────────────
     const typeChecker = new TypeChecker();
     const typeResult = runAnalysisPhase('Type checker', () => typeChecker.check(ast));
 
@@ -399,32 +390,26 @@ router.post('/analyze', (req, res) => {
       });
     }
 
-    // ─── PHASE 5: Symbolic Execution (Safety Checks) ────────────────────────
     const executor = new SymbolicExecutor(typeResult.symbolTable);
     const safetyChecks: SafetyCheck[] = runAnalysisPhase(
       'Symbolic execution',
       () => executor.execute(ast),
     );
 
-    // ─── PHASE 6: Symbolic Execution — real value trace for the Math tab ──────
-    // Pull the rich value trace from the executor (concrete values tracked during execution)
     const symbolicExecution = executor.valueTrace.length > 0
       ? executor.valueTrace
       : buildSymbolicTrace(typeResult.symbolTable);
 
-    // ─── PHASE 7: Control Flow Graph ─────────────────────────────────────────
     const cfg = runAnalysisPhase(
       'Control-flow graph generation',
       () => new CFGGenerator().generate(ast),
     );
 
-    // ─── PHASE 8: Mentor Explanations ────────────────────────────────────────
     const mentorExplanations = runAnalysisPhase(
       'Mentor explanation generation',
       () => new Translator().translate(ast),
     );
 
-    // ─── PHASE 9: Cognitive + Cyclomatic Complexity ──────────────────────────
     const cleanAstForScoring = getCleanAST(ast);
     const complexityScore = runAnalysisPhase(
       'Cognitive complexity calculation',
@@ -435,7 +420,6 @@ router.post('/analyze', (req, res) => {
       () => new CyclomaticComplexity().calculate(cleanAstForScoring),
     );
 
-    // ─── PHASE 10: Gamification ──────────────────────────────────────────────
      const gameEngine = new GameEngine();
      const rawLevel = req.body.currentLevel;
       const currentLevel: 1 | 2 | 3 | 4 | 5 =
@@ -463,14 +447,13 @@ router.post('/analyze', (req, res) => {
     cfg,
     cognitiveComplexity: complexityScore,
     cyclomaticComplexity: cyclomaticResult,
-    // CRITICAL: Adding this string triggers the PASS status in your LogsTab UI
+    // LogsTab uses this status message to identify successful analysis.
     explanations: [
         "✅ **Status:** Analysis Successful",
         ...combinedWarnings.map(formatWarningExplanation),
         ...unsupportedWarnings.map(w => `⚠️ **Unsupported Feature:** ${w.message}`),
         ...mentorExplanations,
     ],
-    // OPTIONAL: If your frontend specifically looks for a 'logs' key, add it here
     logs: [
         { message: "Phase 1: Lexical & Syntactic analysis passed.", severity: "info" },
         { message: "Phase 2: Semantic validation successful.", severity: "info" },

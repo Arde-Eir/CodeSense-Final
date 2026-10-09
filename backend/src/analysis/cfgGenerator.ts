@@ -1,8 +1,4 @@
-/**
- * Control Flow Graph Generator
- * Implements the Sugiyama Framework for Hierarchical Graph Layout
- * Phase 3 (Output) — Step 1 of the analysis pipeline.
- */
+/** Builds control-flow graphs with Sugiyama hierarchical layout. */
 
 import {
   ASTNode,
@@ -36,13 +32,7 @@ export class CFGGenerator {
   private currentNodeId = 0;
   private mentor = new Translator();
 
-  /**
-   * FIX (user bug #3): A statement that unconditionally transfers control
-   * (return / throw / goto / break / continue) ends the current linear flow. Any
-   * sibling statements after it in the same block are UNREACHABLE and must
-   * NOT be wired into the CFG — otherwise we get visible arrows from
-   * "Return" to the next line, which is wrong in C++ semantics.
-   */
+  /** A control-transfer statement ends linear flow; later siblings are unreachable. */
   private isTerminator(stmt: ASTNode | undefined | null): boolean {
     if (!stmt) return false;
     const t = (stmt as any).type;
@@ -54,7 +44,7 @@ export class CFGGenerator {
     return false;
   }
 
-  // ── FIX 4: Track current function entry node and name for recursion back-edges
+  // Function entry context for recursive back-edges.
   private currentFunctionEntry: ControlFlowNode | null = null;
   private currentFunctionName: string = '';
   private currentContinueTarget: ControlFlowNode | null = null;
@@ -85,13 +75,7 @@ export class CFGGenerator {
     walk(ast);
   }
 
-  // ── PDF #3 fix: track the current function's EXIT node so a `return` inside
-  // a nested control-flow construct (if / while / switch / try) jumps straight
-  // to the function end, not to the local block-merge node. Without this, the
-  // `exit` parameter passed through the visitor is whatever the surrounding
-  // construct chose as its local merge — wiring a Return into the merge made
-  // the CFG show flow continuing into unreachable code (which the user
-  // reported as bug #3 in the bug report).
+  // Nested returns jump to the function exit, bypassing local merge nodes.
   private currentFunctionExit: ControlFlowNode | null = null;
 
   generate(ast: ASTNode): CFG {
@@ -103,10 +87,8 @@ export class CFGGenerator {
     const startNode = this.createNode('start', 'Start');
     const endNode   = this.createNode('end', 'End');
 
-    // The visit method returns the last logical node processed in the AST
     const lastNode = this.visit(ast, startNode, endNode);
 
-    // Final safety connection: Ensures the graph doesn't have "dangling" end statements
     if (lastNode && lastNode.id !== endNode.id) {
       const alreadyConnected = this.edges.some(
         e => e.from === lastNode.id && e.to === endNode.id
@@ -122,9 +104,6 @@ export class CFGGenerator {
     return { nodes: this.nodes, edges: this.edges };
   }
 
-  // =========================================================================
-  //  SUGIYAMA FRAMEWORK
-  // =========================================================================
 
   private applySugiyamaLayout(): void {
     this.breakCycles();
@@ -273,9 +252,6 @@ export class CFGGenerator {
     });
   }
 
-  // =========================================================================
-  //  GRAPH CONSTRUCTION
-  // =========================================================================
 
   private createNode(
     type: ControlFlowNode['type'],
@@ -289,7 +265,7 @@ export class CFGGenerator {
       try {
         tutorExplanation = this.mentor.translateBrief(astNode);
       } catch (_) {
-        // best-effort — never crash the CFG for a translation error
+        // Translation failures do not prevent CFG construction.
       }
     }
 
@@ -391,7 +367,7 @@ export class CFGGenerator {
     return (this as any)[methodName](node, current, exit);
   }
 
-  // Fallback — but ONLY if no method matched (prevents double-visit)
+  // Traverse children only when no visitor matched to avoid double visits.
   const anyNode = node as any;
   let lastNode = current;
   const siblings: ASTNode[] = Array.isArray(anyNode.body) ? anyNode.body
@@ -399,12 +375,11 @@ export class CFGGenerator {
                            : [];
   for (const stmt of siblings) {
     lastNode = this.visit(stmt, lastNode, exit);
-    if (this.isTerminator(stmt)) break; // FIX #3
+    if (this.isTerminator(stmt)) break;
   }
   return lastNode;
 }
 
-  // ── Program ───────────────────────────────────────────────────────────────
   private visitProgram(node: any, current: ControlFlowNode, exit: ControlFlowNode): ControlFlowNode {
     const body = (node.body || []) as ASTNode[];
     const mainFunction = body.find((stmt: any) => stmt?.type === 'FunctionDecl' && stmt.name === 'main') as FunctionDeclNode | undefined;
@@ -451,12 +426,11 @@ export class CFGGenerator {
     let lastNode = current;
     for (const stmt of body) {
       lastNode = this.visit(stmt, lastNode, exit);
-      if (this.isTerminator(stmt)) break; // FIX #3
+      if (this.isTerminator(stmt)) break;
     }
     return lastNode;
   }
 
-  // ── If ────────────────────────────────────────────────────────────────────
   private visitIfStatement(
     node: IfStatementNode,
     current: ControlFlowNode,
@@ -473,7 +447,7 @@ export class CFGGenerator {
     this.nextEdgeLabel = 'True';
     for (const stmt of (node.thenBranch || [])) {
       truePath = this.visit(stmt, truePath, merge);
-      if (this.isTerminator(stmt)) { trueReturned = true; break; } // FIX #3
+      if (this.isTerminator(stmt)) { trueReturned = true; break; }
     }
     // Only connect to merge if the branch didn't already terminate
     if (!trueReturned) this.connect(truePath, merge);
@@ -484,7 +458,7 @@ export class CFGGenerator {
       this.nextEdgeLabel = 'False';
       for (const stmt of node.elseBranch) {
         falsePath = this.visit(stmt, falsePath, merge);
-        if (this.isTerminator(stmt)) { falseReturned = true; break; } // FIX #3
+        if (this.isTerminator(stmt)) { falseReturned = true; break; }
       }
       if (!falseReturned) this.connect(falsePath, merge);
     } else {
@@ -493,7 +467,6 @@ export class CFGGenerator {
     return merge;
   }
 
-  // ── Switch ────────────────────────────────────────────────────────────────
   private visitSwitchStatement(
     node: SwitchStatementNode,
     current: ControlFlowNode,
@@ -536,7 +509,6 @@ export class CFGGenerator {
     return merge;
   }
 
-  // ── While ─────────────────────────────────────────────────────────────────
   private visitWhileLoop(
     node: WhileLoopNode,
     current: ControlFlowNode,
@@ -567,7 +539,6 @@ export class CFGGenerator {
     return afterLoop;
   }
 
-  // ── Do-While ──────────────────────────────────────────────────────────────
   private visitDoWhileLoop(
     node: DoWhileLoopNode,
     current: ControlFlowNode,
@@ -598,7 +569,6 @@ export class CFGGenerator {
     return afterLoop;
   }
 
-  // ── For ───────────────────────────────────────────────────────────────────
   private visitForLoop(
     node: ForLoopNode,
     current: ControlFlowNode,
@@ -651,7 +621,6 @@ export class CFGGenerator {
     return afterLoop;
   }
 
-  // ── Variable / Assignment ─────────────────────────────────────────────────
   private visitVariableDecl(node: any, current: ControlFlowNode): ControlFlowNode {
     // Build actual C++ declaration so flowchart → code round-trips correctly.
     const dims = Array.isArray(node.dimensions) && node.dimensions.length
@@ -689,7 +658,6 @@ export class CFGGenerator {
     return step;
   }
 
-  // ── Expressions ──────────────────────────────────────────────────────────
   private visitExpressionStatement(node: any, current: ControlFlowNode, exit: ControlFlowNode): ControlFlowNode {
     if (node.expression?.type === 'FunctionCall') {
       return this.visitFunctionCall(node.expression, current);
@@ -717,8 +685,7 @@ export class CFGGenerator {
     return step;
   }
 
-  // ── FIX 4: visitFunctionCall — draw a labeled recursive back-edge when
-  //   the call target matches the function we are currently inside.
+  // Recursive calls connect back to the current function entry.
   private visitFunctionCall(node: any, current: ControlFlowNode): ControlFlowNode {
     const functionName = String(node?.name ?? '');
     const callType = this.definedFunctions.has(String(node?.name ?? ''))
@@ -730,8 +697,7 @@ export class CFGGenerator {
     const step = this.createNode(callType, label, this.functionCallToString(node), node.line, node);
     this.connect(current, step);
 
-    // If this call targets the current function, add a "Recursive" back-edge
-    // to its entry node so the graph visually shows the self-loop.
+    // Show a recursive call as a back-edge to the function entry.
     if (functionName === this.currentFunctionName && this.currentFunctionEntry) {
       this.connect(step, this.currentFunctionEntry, 'Recursive');
       return step;
@@ -740,7 +706,6 @@ export class CFGGenerator {
     return step;
   }
 
-  // ── I/O ───────────────────────────────────────────────────────────────────
   private visitCoutStatement(node: any, current: ControlFlowNode): ControlFlowNode {
     // Grammar emits `values` as a left-associative BinaryOp tree (via CoutChain reduce),
     // so nodeToString handles it correctly as "a << b << c".
@@ -760,11 +725,8 @@ export class CFGGenerator {
     return step;
   }
 
-  // ── Functions ─────────────────────────────────────────────────────────────
 
-  // ── FIX 4: visitFunctionDecl — save/restore currentFunctionEntry and
-  //   currentFunctionName so nested function declarations don't clobber
-  //   each other, and recursive calls in the body can find the entry node.
+  // Preserve the outer function context across nested declarations.
   private visitFunctionDecl(
     node: FunctionDeclNode,
     current: ControlFlowNode,
@@ -816,11 +778,7 @@ export class CFGGenerator {
     const returnCode = returnValue ? `return ${returnValue}` : 'return';
     const ret = this.createNode('process', 'Return', returnCode, (node as any).line, node);
     this.connect(current, ret);
-    // PDF #3: route to the FUNCTION exit, not whatever local merge node the
-    // surrounding control-flow construct passed as `exit`. A return jumps to
-    // the function end, full stop — it must not appear to fall through into
-    // a sibling if-merge / loop-exit, etc. Fall back to `exit` only when
-    // we somehow find ourselves outside any function (defensive).
+    // Use the function exit for returns, or the supplied exit outside a function.
     const target = this.currentFunctionExit ?? exit;
     this.connect(ret, target);
     return ret;
@@ -834,12 +792,11 @@ export class CFGGenerator {
     let lastNode = current;
     for (const stmt of (node.statements || [])) {
       lastNode = this.visit(stmt, lastNode, exit);
-      if (this.isTerminator(stmt)) break; // FIX #3: unreachable code — stop
+      if (this.isTerminator(stmt)) break;
     }
     return lastNode;
   }
 
-  // ── Loop Control ─────────────────────────────────────────────────────────
   private visitLoopControl(node: any, current: ControlFlowNode, exit: ControlFlowNode): ControlFlowNode {
     const label = node.value === 'break' ? '🛑 Break' : '⏭️ Continue';
     const step = this.createNode('connector', label, node.value, node.line);
@@ -853,7 +810,6 @@ export class CFGGenerator {
     return step;
   }
 
-  // ── Range-Based For ──────────────────────────────────────────────────────
   private visitRangeBasedFor(
     node: any,
     current: ControlFlowNode,
@@ -881,7 +837,6 @@ export class CFGGenerator {
     return afterLoop;
   }
 
-  // ── Try / Catch ───────────────────────────────────────────────────────────
   private visitTryStatement(
     node: any,
     current: ControlFlowNode,
@@ -926,7 +881,6 @@ export class CFGGenerator {
     return throwNode;
   }
 
-  // ── Goto / Label ─────────────────────────────────────────────────────────
   private visitGotoStatement(node: any, current: ControlFlowNode): ControlFlowNode {
     const step = this.createNode('connector', `goto ${node.label}`, `goto ${node.label}`, node.line, node);
     this.connect(current, step);
@@ -939,7 +893,6 @@ export class CFGGenerator {
     return node.statement ? this.visit(node.statement, step, exit) : step;
   }
 
-  // ── CP2: Dynamic Memory ───────────────────────────────────────────────────
   private visitNewExpression(node: any, current: ControlFlowNode): ControlFlowNode {
     const label = node.size
       ? `Alloc: new ${node.baseType}[...]`
@@ -956,9 +909,6 @@ export class CFGGenerator {
     return step;
   }
 
-  // =========================================================================
-  //  NODE TO STRING
-  // =========================================================================
 
   private nodeToString(node: any): string {
     if (!node) return '';
@@ -1012,9 +962,7 @@ export class CFGGenerator {
       case 'InitializerList':
         return `{${(node.values || []).map((v: any) => this.nodeToString(v)).join(', ')}}`;
       default:
-        // Use `??` (nullish coalescing) — the previous `||` chain mis-handled
-        // valid string-zero or empty-string `name` fields and also leaked
-        // `String(undefined)` when `name` was truthy.
+        // Nullish coalescing preserves valid empty-string names.
         if (node.name) return String(node.name);
         if (node.value !== undefined && node.value !== null) return String(node.value);
         return node.type ?? '';

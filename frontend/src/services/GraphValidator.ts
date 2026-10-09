@@ -1,18 +1,6 @@
-/**
- * GraphValidator.ts
- * ─────────────────────────────────────────────────────────────────────────────
- * Validates a flowchart graph (nodes + edges) BEFORE code generation.
- *
- * Usage:
- *   import { validateGraph } from './GraphValidator';
- *   const result = validateGraph(nodes, edges);
- *   if (!result.isValid) { // show errors, block generation }
- */
-
 import type { Node, Edge } from '@xyflow/react';
 import { translateFlowchartInstruction } from './CodeGenerator';
 
-// ─── Public types ─────────────────────────────────────────────────────────────
 
 export type Severity = 'error' | 'warning';
 
@@ -31,7 +19,6 @@ export interface ValidationResult {
   all:      ValidationIssue[];
 }
 
-// ─── Helpers ──────────────────────────────────────────────────────────────────
 
 const str = (v: unknown): string => String(v ?? '').trim();
 
@@ -381,7 +368,6 @@ function finish(issues: ValidationIssue[]): ValidationResult {
   return { isValid: errors.length === 0, errors, warnings, all: issues };
 }
 
-// ─── Main validator ───────────────────────────────────────────────────────────
 
 export function validateGraph(nodes: Node[], edges: Edge[]): ValidationResult {
   const issues: ValidationIssue[] = [];
@@ -391,7 +377,6 @@ export function validateGraph(nodes: Node[], edges: Edge[]): ValidationResult {
     extra: { nodeIds?: string[]; edgeIds?: string[] } = {}
   ) => issues.push({ severity, code, message, ...extra });
 
-  // Build quick-lookup maps
   const nodeMap  = new Map(nodes.map(n => [n.id, n]));
   const executionEdges = edges.filter(e => !isCallConnectorEdge(e));
   const outEdges = new Map<string, Edge[]>(nodes.map(n => [n.id, []]));
@@ -433,14 +418,12 @@ export function validateGraph(nodes: Node[], edges: Edge[]): ValidationResult {
       { edgeIds: duplicateEdges.map(e => e.id) });
   }
 
-  // ── 1. Empty canvas ────────────────────────────────────────────────────────
   if (nodes.length === 0) {
     push('error', 'EMPTY_GRAPH',
       'Canvas is empty. Add at least a Start terminator, some nodes, and an End terminator.');
     return finish(issues);
   }
 
-  // ── 2. Start terminator ────────────────────────────────────────────────────
   const startNodes = nodes.filter(isStartTerminator);
   if (startNodes.length === 0) {
     push('error', 'NO_START_NODE',
@@ -451,9 +434,7 @@ export function validateGraph(nodes: Node[], edges: Edge[]): ValidationResult {
       { nodeIds: startNodes.map(n => n.id) });
   }
 
-  // ── 3. End terminator ──────────────────────────────────────────────────────
-  // A proper End terminator: type=terminator AND label is NOT "start".
-  // We do NOT require the label to be exactly "end" — any non-start terminator counts.
+  // Any terminator other than Start is an end node.
   const returnTerminators = nodes.filter(isReturnTerminator);
   if (returnTerminators.length > 0) {
     push('error', 'RETURN_USES_TERMINATOR_SHAPE',
@@ -467,7 +448,6 @@ export function validateGraph(nodes: Node[], edges: Edge[]): ValidationResult {
       'No "End" terminator found. Add an End node so the program has a defined exit point.');
   }
 
-  // ── 4. Isolated nodes (zero edges) ────────────────────────────────────────
   const isolated = nodes.filter(n => !connectedIds.has(n.id));
   if (isolated.length > 0) {
     push('error', 'ISOLATED_NODES',
@@ -476,7 +456,6 @@ export function validateGraph(nodes: Node[], edges: Edge[]): ValidationResult {
       { nodeIds: isolated.map(n => n.id) });
   }
 
-  // ── 5. Unreachable from Start ──────────────────────────────────────────────
   if (startNodes.length === 1) {
     const reachable    = reachableFrom(startNodes[0].id, edges);
     const isolatedSet  = new Set(isolated.map(n => n.id)); // already reported in rule 4
@@ -490,7 +469,6 @@ export function validateGraph(nodes: Node[], edges: Edge[]): ValidationResult {
     }
   }
 
-  // ── 6. Start node must have at least one outgoing edge ────────────────────
   if (startNodes.length === 1) {
     const startIn  = inEdges.get(startNodes[0].id) ?? [];
     const startOut = outEdges.get(startNodes[0].id) ?? [];
@@ -510,9 +488,6 @@ export function validateGraph(nodes: Node[], edges: Edge[]): ValidationResult {
     }
   }
 
-  // ── 7. End node validation ────────────────────────────────────────────────
-  //   7a. Must have at least one INCOMING edge (something flows into it)
-  //   7b. Must NOT have any OUTGOING edges (End is a terminal — nothing flows out)
   const targetIds = new Set(edges.map(e => e.target));
   for (const end of endNodes) {
     const endLbl = str(end.data?.label) || 'End';
@@ -537,13 +512,11 @@ export function validateGraph(nodes: Node[], edges: Edge[]): ValidationResult {
     }
   }
 
-  // ── 8. Decision node validation ───────────────────────────────────────────
   const decisionNodes = nodes.filter(n => n.type === 'decision');
   for (const d of decisionNodes) {
     const out = outEdges.get(d.id) ?? [];
     const lbl = str(d.data?.label) || 'unnamed Decision';
 
-    // 8a. No outgoing edges at all
     if (out.length === 0) {
       push('error', 'DECISION_NO_EDGES',
         `Decision "${lbl}" has no outgoing edges. ` +
@@ -552,17 +525,14 @@ export function validateGraph(nodes: Node[], edges: Edge[]): ValidationResult {
       continue; // remaining checks require edges
     }
 
-    // 8b. Decision exits:
-    // One exit is a valid one-arm if. Two exits produce if/else. More than two
-    // is ambiguous and would be silently truncated by the generator.
+    // One exit represents a one-arm if; more than two exits are ambiguous.
     if (out.length > 2) {
       push('error', 'DECISION_REQUIRES_TWO_BRANCHES',
         `Decision "${lbl}" has ${out.length} outgoing edge(s). Use one outgoing edge for a one-arm if, or exactly two edges labelled "true" and "false" for if/else.`,
         { nodeIds: [d.id], edgeIds: out.map(e => e.id) });
     }
 
-    // 8c. Two-way decisions must be labelled true/false. A one-way decision may
-    // be unlabelled; the generator treats it as the condition being true.
+    // Unlabelled one-arm decisions take the true branch. Two-arm decisions need labels.
     if (out.length > 1) {
       const unlabelled = out.filter(e => !isBranchLabel(str(e.label).toLowerCase()));
 
@@ -597,10 +567,7 @@ export function validateGraph(nodes: Node[], edges: Edge[]): ValidationResult {
       }
     }
 
-    // 8d. Empty / default condition
-    // A decision is considered "unconfigured" only when BOTH label AND code are
-    // placeholder/empty. If the user set code (e.g. "hp > 0") but left the
-    // label as "Condition", that is fine — the code field is what gets emitted.
+    // A real condition in either label or code configures the decision.
     const dCode  = str(d.data?.code);
     const dLabel = str(d.data?.label);
     const condition = dCode || dLabel;
@@ -611,7 +578,6 @@ export function validateGraph(nodes: Node[], edges: Edge[]): ValidationResult {
     }
   }
 
-  // ── 9. Non-decision nodes with no outgoing edge (dead ends) ───────────────
   const reachableFromStart = startNodes.length === 1
     ? reachableFrom(startNodes[0].id, edges)
     : null;
@@ -630,7 +596,6 @@ export function validateGraph(nodes: Node[], edges: Edge[]): ValidationResult {
       { nodeIds: deadEnds.map(n => n.id) });
   }
 
-  // ── 10. Dangling edges (point to deleted nodes) ────────────────────────────
   const dangling = edges.filter(e => !nodeMap.has(e.source) || !nodeMap.has(e.target));
   if (dangling.length > 0) {
     push('error', 'DANGLING_EDGES',
@@ -639,7 +604,6 @@ export function validateGraph(nodes: Node[], edges: Edge[]): ValidationResult {
       { edgeIds: dangling.map(e => e.id) });
   }
 
-  // ── 10b. Junction / Offset-shape structural checks ────────────────────────
   const junctionNodes = nodes.filter(n => n.type === 'junction');
   for (const j of junctionNodes) {
     const inCount = (inEdges.get(j.id) ?? []).length;
@@ -665,10 +629,7 @@ export function validateGraph(nodes: Node[], edges: Edge[]): ValidationResult {
     }
   }
 
-  // ── 10c. ISO linear shape cardinality ─────────────────────────────────────
-  // All supported non-decision action/data/reference shapes are deterministic
-  // sequence steps. They must not branch. Older generator behavior followed
-  // the first outgoing edge and silently ignored the rest.
+  // Non-decision action, data and reference shapes require a single outgoing path.
   const linearViolations = nodes.filter(n => LINEAR_NODE_TYPES.has(String(n.type ?? ''))).flatMap(n => {
     const out = outEdges.get(n.id) ?? [];
     if (out.length <= 1) return [];
@@ -683,7 +644,6 @@ export function validateGraph(nodes: Node[], edges: Edge[]): ValidationResult {
     );
   }
 
-  // ── 11. Pseudocode-style guidance ─────────────────────────────────────────
   const shapeMismatches = nodes
     .map(node => ({ node, message: shapeMismatchIssue(node) }))
     .filter((entry): entry is { node: Node; message: string } => !!entry.message);
@@ -710,7 +670,6 @@ export function validateGraph(nodes: Node[], edges: Edge[]): ValidationResult {
     );
   }
 
-  // ── 12. Placeholder nodes with no real code ───────────────────────────────
   const REQUIRED_CODE_NODE_TYPES = new Set(['process', 'io', 'manual_input', 'predefined',
                                             'delay', 'database', 'document']);
   const missingCode = nodes.filter(n => {
