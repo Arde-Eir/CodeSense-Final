@@ -1,5 +1,6 @@
 import React from 'react';
 import type { OrderItem } from '@/types/campaign';
+import './gameControls.css';
 
 interface Props {
   items:       OrderItem[];
@@ -69,11 +70,18 @@ const OrderingGameInner: React.FC<{ rawItems: OrderItem[]; onComplete: (score: n
   };
 
   const handleDragStart = (i: number) => setDragging(i);
+  const swapItems = (from: number, to: number): void => {
+    if (submitted) return;
+    if (from < 0 || from >= order.length || to < 0 || to >= order.length) {
+      throw new RangeError(`Cannot move ordering item from ${from} to ${to}; the puzzle contains ${order.length} items.`);
+    }
+    const next = [...order];
+    [next[from], next[to]] = [next[to], next[from]];
+    setOrder(next); setDragging(null); setChecked(false);
+  };
   const handleDrop = (i: number) => {
     if (dragging === null || dragging === i || submitted) return;
-    const next = [...order];
-    [next[dragging], next[i]] = [next[i], next[dragging]];
-    setOrder(next); setDragging(null); setChecked(false);
+    swapItems(dragging, i);
   };
 
   if (!rawItems.length) return (
@@ -83,24 +91,32 @@ const OrderingGameInner: React.FC<{ rawItems: OrderItem[]; onComplete: (score: n
   );
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+    <div className="ordering-game" data-testid="ordering-game" style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
       <div style={{ background: 'rgba(163,113,247,0.08)', border: '1px solid rgba(163,113,247,0.25)', borderRadius: 8, padding: '10px 14px', fontSize: 13, color: '#8b949e', fontFamily: 'Inter,sans-serif' }}>
         🔢 {question?.trim() || 'Drag the steps into the correct order'}
       </div>
+      <p className="game-control-help">Use the arrow buttons or drag steps to reorder them.</p>
       {order.map((item, i) => {
         const rowCorrect = checked ? item.correct_order === i + 1 : null;
         return (
-        <div key={item.id} draggable={!submitted}
+        <div key={item.id} className="ordering-row" data-testid={`ordering-row-${item.id}`} draggable={!submitted}
           onDragStart={() => handleDragStart(i)}
           onDragOver={e => e.preventDefault()}
           onDrop={() => handleDrop(i)}
+          onDragEnd={() => setDragging(null)}
           style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '12px 14px', borderRadius: 8, border: `1px solid ${checked ? rowCorrect ? '#238636' : '#da3633' : dragging === i ? '#a371f7' : '#30363d'}`, background: checked ? rowCorrect ? 'rgba(35,134,54,0.07)' : 'rgba(218,54,51,0.07)' : dragging === i ? 'rgba(163,113,247,0.08)' : '#0d1117', cursor: submitted ? 'default' : 'grab', transition: 'all .15s', userSelect: 'none' }}>
           <div style={{ width: 28, height: 28, borderRadius: 6, background: 'rgba(163,113,247,0.15)', border: '1px solid rgba(163,113,247,0.3)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 12, fontWeight: 700, color: '#a371f7', fontFamily: "'JetBrains Mono',monospace", flexShrink: 0 }}>{i + 1}</div>
-          <div style={{ flex: 1 }}>
+          <div style={{ flex: 1, minWidth: 0 }}>
             <div style={{ fontSize: 13, color: '#e6edf3', fontFamily: 'Inter,sans-serif', fontWeight: 600 }}>{item.label}</div>
             {item.description && <div style={{ fontSize: 11, color: '#8b949e', marginTop: 2, fontFamily: 'Inter,sans-serif' }}>{item.description}</div>}
           </div>
           {checked && <span style={{ fontSize: 16 }}>{rowCorrect ? '✅' : '❌'}</span>}
+          <div className="ordering-move-controls">
+            <button type="button" data-testid={`ordering-up-${item.id}`} aria-label={`Move ${item.label} up`}
+              disabled={submitted || i === 0} onClick={() => swapItems(i, i - 1)}>↑</button>
+            <button type="button" data-testid={`ordering-down-${item.id}`} aria-label={`Move ${item.label} down`}
+              disabled={submitted || i === order.length - 1} onClick={() => swapItems(i, i + 1)}>↓</button>
+          </div>
         </div>
         );
       })}

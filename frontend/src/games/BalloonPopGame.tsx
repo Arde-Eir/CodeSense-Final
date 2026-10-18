@@ -229,11 +229,6 @@ const BalloonPopSession: React.FC<Omit<Props, 'resetSignal'>> = ({ questions: pl
   }, [playableQuestions, syncUi]);
 
   const onClick      = useCallback((e: React.MouseEvent<HTMLCanvasElement>) => hit(e.clientX, e.clientY), [hit]);
-  const onTouchStart = useCallback((e: React.TouchEvent<HTMLCanvasElement>) => {
-    e.preventDefault();
-    const t = e.touches[0];
-    if (t) hit(t.clientX, t.clientY);
-  }, [hit]);
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -480,12 +475,11 @@ const BalloonPopSession: React.FC<Omit<Props, 'resetSignal'>> = ({ questions: pl
         data-testid="balloon-canvas"
         ref={canvasRef}
         onClick={onClick}
-        onTouchStart={onTouchStart}
         style={{
           position: 'absolute', inset: 0,
           width: '100%', height: '100%',
           cursor: ui.phase === 'playing' ? 'crosshair' : 'default',
-          touchAction: 'none',
+          touchAction: 'pan-y',
           display: 'block',
         }}
       />

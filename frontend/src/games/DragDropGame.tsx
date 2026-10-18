@@ -1,5 +1,6 @@
 import React from 'react';
 import type { GameItem, DropZone } from '@/types/campaign';
+import './gameControls.css';
 
 interface Props {
   items:       GameItem[];
@@ -18,6 +19,7 @@ const DragDropGameInner: React.FC<{
   const [dropped,       setDropped]       = React.useState<Record<string, string>>({});
   const [dragOver,      setDragOver]      = React.useState<string | null>(null);
   const [dragging,      setDragging]      = React.useState<string | null>(null);
+  const [selectedItem,  setSelectedItem]  = React.useState<string | null>(null);
   const [checked,       setChecked]       = React.useState(false);
   const [results,       setResults]       = React.useState<Record<string, boolean>>({});
   const [submitted,     setSubmitted]     = React.useState(false);
@@ -47,7 +49,18 @@ const DragDropGameInner: React.FC<{
   };
 
   const doReset = () => {
-    if (!submitted) { setDropped({}); setChecked(false); setResults({}); }
+    if (!submitted) { setDropped({}); setSelectedItem(null); setChecked(false); setResults({}); }
+  };
+
+  const placeItem = (zoneId: string, itemId: string): void => {
+    if (submitted) return;
+    setDropped(previous => ({
+      ...Object.fromEntries(Object.entries(previous).filter(([, placedId]) => placedId !== itemId)),
+      [zoneId]: itemId,
+    }));
+    setSelectedItem(null);
+    setDragOver(null);
+    setChecked(false);
   };
 
   if (!items.length || !zones.length) return (
@@ -62,7 +75,7 @@ const DragDropGameInner: React.FC<{
   );
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+    <div className="drag-game" data-testid="drag-game" style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
 
       <div style={{
         background: 'rgba(56,139,253,0.08)', border: '1px solid rgba(56,139,253,0.2)',
@@ -71,8 +84,9 @@ const DragDropGameInner: React.FC<{
       }}>
         🧩 {question?.trim() || 'Drag each term to its matching description'}
       </div>
+      <p className="game-control-help">Tap a term, then tap its matching description. You can also drag terms.</p>
 
-      <div style={{ display: 'flex', gap: 14 }}>
+      <div className="drag-column-labels" style={{ display: 'flex', gap: 14 }}>
         <div style={{
           width: 130, flexShrink: 0,
           fontSize: 10, color: '#484f58',
@@ -87,20 +101,24 @@ const DragDropGameInner: React.FC<{
         }}>DESCRIPTIONS</div>
       </div>
 
-      <div style={{ display: 'flex', gap: 14, alignItems: 'flex-start' }}>
+      <div className="drag-layout" style={{ display: 'flex', gap: 14, alignItems: 'flex-start' }}>
 
-        <div style={{
+        <div className="drag-terms" style={{
           width: 130, flexShrink: 0,
           display: 'flex', flexDirection: 'column', gap: 10,
         }}>
           {shuffledItems.map(item => {
             const used = usedIds.has(item.id);
             return (
-              <div
+              <button
+                type="button"
                 key={item.id}
                 data-testid={`drag-item-${item.id}`}
+                disabled={used || submitted}
+                aria-pressed={selectedItem === item.id}
+                onClick={() => setSelectedItem(previous => previous === item.id ? null : item.id)}
                 draggable={!used && !submitted}
-                onDragStart={() => { if (!used && !submitted) setDragging(item.id); }}
+                onDragStart={() => { if (!used && !submitted) { setDragging(item.id); setSelectedItem(null); } }}
                 onDragEnd={() => setDragging(null)}
                 style={{
                   padding: '10px 8px',
@@ -108,6 +126,7 @@ const DragDropGameInner: React.FC<{
                   textAlign: 'center',
                   border: `2px solid ${used ? '#2d333b' : item.color}`,
                   background: used ? 'rgba(255,255,255,0.02)' : `${item.color}18`,
+                  boxShadow: selectedItem === item.id ? `0 0 0 3px ${item.color}66` : 'none',
                   color: used ? '#2d333b' : item.color,
                   fontFamily: 'Inter,sans-serif',
                   fontSize: 12,
@@ -122,12 +141,12 @@ const DragDropGameInner: React.FC<{
                 }}
               >
                 {item.label}
-              </div>
+              </button>
             );
           })}
         </div>
 
-        <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 10 }}>
+        <div className="drag-zones" style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 10 }}>
           {zones.map(zone => {
             const droppedItem = items.find(i => i.id === dropped[zone.id]);
             const isOver  = dragOver === zone.id;
@@ -138,28 +157,24 @@ const DragDropGameInner: React.FC<{
             else if (checked && dropped[zone.id]) borderColor = correct ? '#238636' : '#da3633';
 
             return (
-              <div
+              <button
+                type="button"
                 key={zone.id}
                 data-testid={`drop-zone-${zone.id}`}
+                disabled={submitted}
+                aria-label={`${zone.label}. ${droppedItem ? `Matched: ${droppedItem.label}` : 'No term matched'}`}
+                onClick={() => { if (selectedItem !== null) placeItem(zone.id, selectedItem); }}
                 onDragOver={e => { e.preventDefault(); setDragOver(zone.id); }}
                 onDragLeave={() => setDragOver(null)}
                 onDrop={e => {
                   e.preventDefault();
                   if (dragging && !submitted) {
-                    setDropped(prev => {
-                      // Replacing a zone returns its displaced term to the unplaced pool.
-                      const next = { ...prev };
-                      for (const zid of Object.keys(next)) {
-                        if (next[zid] === dragging) { delete next[zid]; break; }
-                      }
-                      next[zone.id] = dragging;
-                      return next;
-                    });
-                    setDragOver(null); setChecked(false);
+                    placeItem(zone.id, dragging);
                   }
                 }}
                 style={{
                   display: 'flex', alignItems: 'center', gap: 12,
+                  width: '100%', textAlign: 'left', cursor: submitted ? 'default' : 'pointer',
                   padding: '12px 14px',
                   borderRadius: 8,
                   border: `1px solid ${borderColor}`,
@@ -172,7 +187,7 @@ const DragDropGameInner: React.FC<{
                   minHeight: 56,
                 }}
               >
-                <div style={{
+                <span style={{
                   width: 80, flexShrink: 0,
                   minHeight: 36,
                   borderRadius: 6,
@@ -191,10 +206,10 @@ const DragDropGameInner: React.FC<{
                   transition: 'all .15s',
                 }}>
                   {droppedItem?.label ?? '?'}
-                </div>
+                </span>
 
                 <span style={{
-                  flex: 1,
+                  flex: 1, minWidth: 0,
                   fontSize: 13, color: '#c9d1d9', lineHeight: 1.45,
                   fontFamily: 'Inter,sans-serif',
                   wordBreak: 'break-word',
@@ -207,7 +222,7 @@ const DragDropGameInner: React.FC<{
                     {correct ? '✅' : '❌'}
                   </span>
                 )}
-              </div>
+              </button>
             );
           })}
         </div>

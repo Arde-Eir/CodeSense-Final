@@ -13,7 +13,7 @@ import { BalloonPopGame } from '@/games/BalloonPopGame';
 
 import TheorySectionBlock from '@/components/TheorySection';
 import { TheoryProse } from '@/components/TheoryProse';
-import type { ActivityTab, HintItem, Quest, TheorySection } from '@/types/campaign';
+import type { ActivityTab, Quest, TheorySection } from '@/types/campaign';
 import { isCampaignPhase, levelForPhase, phaseForLevel } from '@/types/campaign';
 import { composeHints, type ItemHintInput } from '@/campaign/composeHints';
 import { generateAutoHints } from '@/campaign/generateAutoHints';
@@ -23,6 +23,8 @@ import {
 } from '@/campaign/retakeXp';
 import { readLevelXpCap } from '@/services/campaignXpSettings';
 import { LessonNavigation } from './LessonNavigation';
+import { GameSidePanel } from './GameSidePanel';
+import { MobileQuestHints } from './MobileQuestHints';
 
 const FETCH_TIMEOUT_MS   = 10_000;
 
@@ -106,7 +108,7 @@ const XPToast: React.FC<{
   levelledUp: boolean;
   newLevel?:  number;
 }> = ({ visible, xpGained, isRepeat, questTitle, levelledUp, newLevel }) => (
-  <div style={{
+  <div className="la-toast" style={{
     position: 'fixed', top: 68, left: '50%',
     transform: `translateX(-50%) translateY(${visible ? 0 : -20}px)`,
     opacity: visible ? 1 : 0, transition: 'all .3s ease',
@@ -131,7 +133,7 @@ const XPToast: React.FC<{
 );
 
 const HintToast: React.FC<{ visible: boolean; hintsUsed: number }> = ({ visible, hintsUsed }) => (
-  <div style={{
+  <div className="la-toast" style={{
     position: 'fixed', top: 68, right: 24,
     transform: `translateX(${visible ? 0 : 20}px)`,
     opacity: visible ? 1 : 0, transition: 'all .3s ease',
@@ -155,7 +157,7 @@ const HintToast: React.FC<{ visible: boolean; hintsUsed: number }> = ({ visible,
 const LockedBanner: React.FC<{
   earnedXP: number; title: string; onRetake: () => void; onBack: () => void;
 }> = ({ earnedXP, title, onRetake, onBack }) => (
-  <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 20, padding: 32, textAlign: 'center' }}>
+  <div className="la-completion" style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 20, padding: 32, textAlign: 'center' }}>
     <div style={{ width: 80, height: 80, borderRadius: '50%', background: 'rgba(63,185,80,0.12)', border: '2px solid rgba(63,185,80,0.4)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 36 }}>
       🏆
     </div>
@@ -172,7 +174,7 @@ const LockedBanner: React.FC<{
       🔒 Full XP was awarded on your first completion.<br />
       Replaying gives +{RETAKE_COMPLETION_XP} XP only, until the level cap is reached.
     </div>
-    <div style={{ display: 'flex', gap: 12 }}>
+    <div className="la-completion-actions" style={{ display: 'flex', gap: 12 }}>
       <button onClick={onBack}
         style={{ padding: '11px 28px', borderRadius: 9, border: '1px solid rgba(139,148,158,0.3)', background: 'transparent', color: '#8b949e', fontWeight: 700, fontSize: 13, cursor: 'pointer', fontFamily: 'Inter,sans-serif' }}>
         ← Back to Level
@@ -188,8 +190,8 @@ const LockedBanner: React.FC<{
 const TutorialLearnPhase: React.FC<{ quest: Quest; onStartGame: () => void }> = ({ quest, onStartGame }) => {
   const sections: TheorySection[] = Array.isArray(quest.theory_sections) ? quest.theory_sections : [];
   return (
-    <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
-      <div style={{ flex: 1, overflowY: 'auto', padding: '22px 28px' }}>
+    <div className="la-reading-phase" style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden', minWidth: 0, minHeight: 0 }}>
+      <div className="la-reading-scroll" style={{ flex: 1, overflowY: 'auto', padding: '22px 28px' }}>
         <article className="lesson-reading" data-testid="lesson-theory">
           <header className="lesson-reading-header">
             <div className="lesson-reading-eyebrow">Learn before you play</div>
@@ -204,124 +206,10 @@ const TutorialLearnPhase: React.FC<{ quest: Quest; onStartGame: () => void }> = 
           {sections.map((sec, index) => <section key={index} id={`lesson-section-${index}`} data-testid={`lesson-section-${index}`}><TheorySectionBlock sec={sec} /></section>)}
         </article>
       </div>
-      <div style={{ padding: '14px 28px', borderTop: '1px solid #21262d', flexShrink: 0, display: 'flex', justifyContent: 'flex-end' }}>
+      <div className="la-reading-actions" style={{ padding: '14px 28px', borderTop: '1px solid #21262d', flexShrink: 0, display: 'flex', justifyContent: 'flex-end' }}>
         <button onClick={onStartGame} style={{ padding: '12px 32px', borderRadius: 10, border: 'none', background: 'linear-gradient(135deg,#238636,#196127)', color: '#fff', fontWeight: 800, fontSize: 14, cursor: 'pointer', fontFamily: 'Inter,sans-serif', boxShadow: '0 4px 18px rgba(35,134,54,0.35)' }}>
           Start Activity 🎮
         </button>
-      </div>
-    </div>
-  );
-};
-
-const GameSidePanel: React.FC<{
-  quest:           Quest;
-  /** Hints for the active tab and question, composed by the parent. */
-  tabHints:        HintItem[];
-  hintsUsed:       number;
-  totalHintsUsed:  number;
-  maxHints:        number;
-  earnedXP:        number;
-  rewardBaseXP:    number;
-  rewardPenaltyXP: number;
-  rewardPenaltyCapped: boolean;
-  isCompleted:     boolean;
-  onTakeHint:      () => void;
-  activeTab:       ActivityTab;
-  hasNextQuest:    boolean;
-  onNextQuest:     () => void;
-}> = ({ quest, tabHints, hintsUsed, totalHintsUsed, maxHints, earnedXP, rewardBaseXP, rewardPenaltyXP, rewardPenaltyCapped, isCompleted, onTakeHint, activeTab: _activeTab, hasNextQuest, onNextQuest }) => {
-  const [activeHint, setActiveHint] = useState<number | null>(null);
-  const noHintsAvailable = tabHints.length === 0;
-  const allHintsUsed     = !noHintsAvailable && hintsUsed >= maxHints;
-  const buttonDisabled   = noHintsAvailable || allHintsUsed || isCompleted;
-  const unlocked: HintItem[] = tabHints.slice(0, hintsUsed);
-
-  useEffect(() => {
-    let cancelled = false;
-    queueMicrotask(() => {
-      if (!cancelled) setActiveHint(hintsUsed > 0 ? hintsUsed - 1 : null);
-    });
-    return () => { cancelled = true; };
-  }, [hintsUsed, _activeTab]);
-
-  return (
-    <div style={{ display: 'flex', flexDirection: 'column', height: '100%', borderLeft: '1px solid #21262d', background: '#0d1117' }}>
-      <div style={{ padding: '14px 18px', borderBottom: '1px solid #21262d', flexShrink: 0 }}>
-        <div style={{ fontSize: 9, color: '#484f58', fontFamily: "'JetBrains Mono',monospace", letterSpacing: '1.5px', textTransform: 'uppercase', marginBottom: 10 }}>OBJECTIVES</div>
-        {(quest.objectives ?? []).map((obj, i) => (
-          <div key={i} style={{ display: 'flex', alignItems: 'flex-start', gap: 8, marginBottom: 8 }}>
-            <span style={{ color: '#3fb950', fontSize: 11, marginTop: 1, flexShrink: 0 }}>✦</span>
-            <span style={{ fontSize: 12, color: '#8b949e', lineHeight: 1.5, fontFamily: 'Inter,sans-serif' }}>{obj}</span>
-          </div>
-        ))}
-      </div>
-      <div style={{ flex: 1, overflowY: 'auto', padding: '14px 18px' }}>
-        <div style={{ fontSize: 9, color: '#484f58', fontFamily: "'JetBrains Mono',monospace", letterSpacing: '1.5px', textTransform: 'uppercase', marginBottom: 10 }}>HINTS</div>
-        {unlocked.length === 0 && (
-          <div style={{ fontSize: 12, color: '#484f58', fontFamily: 'Inter,sans-serif', fontStyle: 'italic' }}>
-            {noHintsAvailable
-              ? 'No hints available for this activity.'
-              : `Hints are hidden until you use the button below. Each hint costs ${HINT_XP_COST} XP.`}
-          </div>
-        )}
-        {unlocked.map((hint, i) => (
-          <div key={i} style={{ marginBottom: 10, borderRadius: 8, border: '1px solid rgba(88,166,255,0.2)', background: 'rgba(88,166,255,0.05)', overflow: 'hidden' }}>
-            <button onClick={() => setActiveHint(activeHint === i ? null : i)} style={{ width: '100%', padding: '10px 12px', background: 'transparent', border: 'none', display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', textAlign: 'left' }}>
-              <span style={{ fontSize: 14 }}>{hint.icon ?? '💡'}</span>
-              <span style={{ fontSize: 12, fontWeight: 700, color: '#58a6ff', fontFamily: 'Inter,sans-serif', flex: 1 }}>{hint.title}</span>
-              <span style={{ fontSize: 10, color: '#484f58' }}>{activeHint === i ? '▲' : '▼'}</span>
-            </button>
-            {activeHint === i && (
-              <div style={{ padding: '0 12px 12px', fontSize: 12, color: '#8b949e', lineHeight: 1.6, fontFamily: 'Inter,sans-serif' }}>{hint.body}</div>
-            )}
-          </div>
-        ))}
-      </div>
-      <div style={{ padding: '14px 18px', borderTop: '1px solid #21262d', flexShrink: 0 }}>
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 }}>
-          <span style={{ fontSize: 10, color: '#484f58', fontFamily: "'JetBrains Mono',monospace", letterSpacing: '1px' }}>XP REWARD</span>
-          <span style={{ fontSize: 14, fontWeight: 800, color: '#facc15', fontFamily: "'JetBrains Mono',monospace" }}>{earnedXP} XP</span>
-        </div>
-        {!isCompleted && (
-          <div style={{ fontSize: 11, color: '#8b949e', fontFamily: 'Inter,sans-serif', marginBottom: 10, lineHeight: 1.5 }}>
-            Base {rewardBaseXP} XP · Hints used {totalHintsUsed} · -{rewardPenaltyXP} XP
-            {rewardPenaltyCapped ? ' (max penalty)' : ''}
-          </div>
-        )}
-        {isCompleted ? (
-          <button onClick={onNextQuest} style={{
-            width: '100%', padding: '9px 10px', borderRadius: 9, border: 'none',
-            background: 'linear-gradient(135deg,#3fb950,#2ea043)',
-            color: '#fff',
-            fontWeight: 800, fontSize: 11, letterSpacing: 0.4,
-            cursor: 'pointer',
-            fontFamily: 'Inter,sans-serif',
-            boxShadow: '0 4px 14px rgba(63,185,80,0.35)',
-            transition: 'all .15s',
-          }}
-          onMouseEnter={e => { e.currentTarget.style.transform = 'translateY(-1px)'; }}
-          onMouseLeave={e => { e.currentTarget.style.transform = 'none'; }}
-          >
-            {hasNextQuest ? 'NEXT QUEST →' : '✓ BACK TO LEVEL'}
-          </button>
-        ) : (
-          <button onClick={onTakeHint} disabled={buttonDisabled} style={{
-            width: '100%', padding: '9px 10px', borderRadius: 9, border: 'none',
-            background: buttonDisabled ? 'rgba(72,79,88,0.2)' : 'linear-gradient(135deg,#06b6d4,#0891b2)',
-            color: buttonDisabled ? '#484f58' : '#000',
-            fontWeight: 700, fontSize: 11,
-            cursor: buttonDisabled ? 'not-allowed' : 'pointer',
-            fontFamily: 'Inter,sans-serif',
-            boxShadow: buttonDisabled ? 'none' : '0 4px 14px rgba(6,182,212,.35)',
-            transition: 'all .15s',
-          }}>
-            {noHintsAvailable
-              ? 'No hints available'
-              : allHintsUsed
-                ? 'No more hints'
-                : `TAKE A HINT (-${HINT_XP_COST} XP) · ${maxHints - hintsUsed} left`}
-          </button>
-        )}
       </div>
     </div>
   );
@@ -447,6 +335,7 @@ export const LessonActivity: React.FC = () => {
   }, []);
 
   const bodyRef = useRef<HTMLDivElement>(null);
+  const lessonRef = useRef<HTMLDivElement>(null);
   const {
     width: sidePanelWidth,
     isResizing: isSideResizing,
@@ -455,6 +344,8 @@ export const LessonActivity: React.FC = () => {
   } = useResizableSidePanel(bodyRef);
 
   const [mobilePanelOpen, setMobilePanelOpen] = useState(false);
+  const mobileHintsButtonRef = useRef<HTMLButtonElement>(null);
+  const closeMobilePanel = useCallback((): void => setMobilePanelOpen(false), []);
 
   const doFetch = useCallback(async () => {
     if (!user?.id || !questId) return;
@@ -471,6 +362,7 @@ export const LessonActivity: React.FC = () => {
     setHintsUsed(0);
     setNextQuestId(undefined);
     setPreviousQuest(null);
+    setMobilePanelOpen(false);
     setAppPhase('tutorial');
     syncCompletedActivities([]);
     everCompletedRef.current         = [];
@@ -936,35 +828,58 @@ export const LessonActivity: React.FC = () => {
   );
   if (!quest) return <FullPageMessage>Lesson not found.</FullPageMessage>;
 
+  const helpPanel = (
+    <GameSidePanel
+      quest={quest}
+      tabHints={tabHints}
+      hintsUsed={hintsUsed}
+      totalHintsUsed={hintsUsedRef.current}
+      maxHints={maxHints}
+      earnedXP={displayXP}
+      rewardBaseXP={rewardDetails.baseReward}
+      rewardPenaltyXP={rewardDetails.penalty}
+      rewardPenaltyCapped={rewardDetails.capped}
+      isCompleted={isCompleted}
+      onTakeHint={handleTakeHint}
+      activeTab={activeTab}
+      hasNextQuest={!!nextQuestId}
+      onNextQuest={handleNextQuest}
+    />
+  );
   const phaseLabel = quest.phase
     ? `${quest.phase[0].toUpperCase() + quest.phase.slice(1)} · Level ${quest.level ?? 1}`
     : `Level ${quest.level ?? 1}`;
 
   return (
-    <div style={{ minHeight: '100vh', height: '100vh', display: 'flex', flexDirection: 'column', background: '#080c11', color: '#e6edf3', overflow: 'hidden' }}>
+    <div ref={lessonRef} className="la-root" style={{ display: 'flex', flexDirection: 'column', background: '#080c11', color: '#e6edf3', overflow: 'hidden' }}>
       <style>{ANIM_CSS}</style>
 
       <header className="la-header" style={{ height: 56, background: 'rgba(13,17,23,0.97)', borderBottom: '1px solid #21262d', display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '0 24px', flexShrink: 0 }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 10, minWidth: 0 }}>
+        <div className="la-header-context" style={{ display: 'flex', alignItems: 'center', gap: 10, minWidth: 0 }}>
           <LessonNavigation key={quest.id} phase={quest.phase!} previousQuest={previousQuest} savingProgress={savingProgress} />
           <span className="la-phase-label" style={{ fontSize: 11, color: '#484f58', fontFamily: "'JetBrains Mono',monospace", letterSpacing: '1px', flexShrink: 0 }}>{phaseLabel}</span>
           <span className="la-phase-label" style={{ color: '#21262d', flexShrink: 0 }}>›</span>
           <span className="la-quest-title" style={{ fontSize: 13, fontWeight: 700, color: '#e6edf3', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: 480 }}>{quest.title}</span>
         </div>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0 }}>
+        <div className="la-header-actions" style={{ display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0 }}>
           {appPhase === 'game' && !isCompleted && availableTabs.length > 0 && (
-            <button className="la-theory-btn" onClick={handleGoBack} style={{ background: 'transparent', border: '1px solid #30363d', color: '#8b949e', padding: '5px 12px', borderRadius: 6, fontSize: 11, cursor: 'pointer', fontFamily: "'JetBrains Mono',monospace" }}>
+            <button type="button" className="la-theory-btn" aria-label="Read lesson theory" onClick={handleGoBack} style={{ background: 'transparent', border: '1px solid #30363d', color: '#8b949e', padding: '5px 12px', borderRadius: 6, fontSize: 11, cursor: 'pointer', fontFamily: "'JetBrains Mono',monospace" }}>
               📖 <span className="la-btn-label">Theory</span>
             </button>
           )}
           {appPhase === 'game' && !isCompleted && (
-            <button className="la-reset-btn" onClick={handleReset} disabled={savingProgress} style={{ background: 'transparent', border: '1px solid rgba(218,54,51,0.3)', color: '#f85149', padding: '5px 12px', borderRadius: 6, fontSize: 11, cursor: 'pointer', fontFamily: "'JetBrains Mono',monospace" }}>
+            <button type="button" className="la-reset-btn" aria-label="Reset current activity" onClick={handleReset} disabled={savingProgress} style={{ background: 'transparent', border: '1px solid rgba(218,54,51,0.3)', color: '#f85149', padding: '5px 12px', borderRadius: 6, fontSize: 11, cursor: 'pointer', fontFamily: "'JetBrains Mono',monospace" }}>
               ↺ <span className="la-btn-label">Reset</span>
             </button>
           )}
           {appPhase === 'game' && (
             <button
+              ref={mobileHintsButtonRef}
+              type="button"
               className="la-mobile-hint-btn"
+              data-testid="mobile-hints-toggle"
+              aria-expanded={mobilePanelOpen}
+              aria-controls="campaign-hints-panel"
               onClick={() => setMobilePanelOpen(p => !p)}
               style={{ background: mobilePanelOpen ? 'rgba(88,166,255,0.15)' : 'transparent', border: `1px solid ${mobilePanelOpen ? 'rgba(88,166,255,0.4)' : '#30363d'}`, color: mobilePanelOpen ? '#58a6ff' : '#8b949e', padding: '5px 12px', borderRadius: 6, fontSize: 11, cursor: 'pointer', fontFamily: "'JetBrains Mono',monospace", alignItems: 'center', gap: 4 }}
             >💡 Hints</button>
@@ -995,14 +910,14 @@ export const LessonActivity: React.FC = () => {
           />
         ) : (
           <>
-            <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minWidth: 0, overflowY: 'auto' }}>
+            <div className="la-activity-column" style={{ flex: 1, display: 'flex', flexDirection: 'column', minWidth: 0, overflow: 'hidden' }}>
               {!isCompleted && availableTabs.length > 1 && (
                 <div className="la-tab-bar" style={{ display: 'flex', gap: 4, padding: '10px 22px 0', borderBottom: '1px solid #21262d', flexShrink: 0 }}>
                   {availableTabs.map(t => {
                     const isDoneTab  = completedActivities.includes(t);
                     const isSelected = activeTab === t;
                     return (
-                      <button key={t}
+                      <button key={t} data-testid={`activity-tab-${t}`} aria-pressed={isSelected}
                         disabled={savingProgress || failedCompletion !== null}
                         onClick={() => {
                           if (t === activeTab) return;
@@ -1044,7 +959,7 @@ export const LessonActivity: React.FC = () => {
                 </div>
               )}
 
-              <div className="la-game-area" style={{ flex: 1, padding: !isCompleted && activeTab === 'balloon' ? 0 : '16px 22px', display: 'flex', flexDirection: 'column', overflowY: 'auto', minHeight: 0 }}>
+              <div className={`la-game-area${!isCompleted && activeTab === 'balloon' ? ' la-balloon-area' : ''}`} style={{ flex: 1, padding: !isCompleted && activeTab === 'balloon' ? 0 : '16px 22px', display: 'flex', flexDirection: 'column', overflowY: 'auto', minHeight: 0 }}>
                 {isCompleted ? (
                   <LockedBanner
                     earnedXP={earnedXP}
@@ -1093,32 +1008,10 @@ export const LessonActivity: React.FC = () => {
               onMouseLeave={e => { if (!isSideResizing) e.currentTarget.style.background = 'transparent'; }}
             />
 
-            {mobilePanelOpen && (
-              <div
-                onClick={() => setMobilePanelOpen(false)}
-                style={{ position: 'fixed', inset: 0, zIndex: 199, background: 'rgba(0,0,0,0.72)' }}
-                className="la-mobile-overlay"
-              />
-            )}
-
-            <div className={`la-side-panel${mobilePanelOpen ? ' open' : ''}`} style={{ width: sidePanelWidth, flexShrink: 0, minHeight: 0, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
-              <GameSidePanel
-                quest={quest}
-                tabHints={tabHints}
-                hintsUsed={hintsUsed}
-                totalHintsUsed={hintsUsedRef.current}
-                maxHints={maxHints}
-                earnedXP={displayXP}
-                rewardBaseXP={rewardDetails.baseReward}
-                rewardPenaltyXP={rewardDetails.penalty}
-                rewardPenaltyCapped={rewardDetails.capped}
-                isCompleted={isCompleted}
-                onTakeHint={handleTakeHint}
-                activeTab={activeTab}
-                hasNextQuest={!!nextQuestId}
-                onNextQuest={handleNextQuest}
-              />
+            <div className="la-side-panel" style={{ width: sidePanelWidth, flexShrink: 0, minHeight: 0, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
+              {helpPanel}
             </div>
+            {mobilePanelOpen && <MobileQuestHints backgroundRef={lessonRef} triggerRef={mobileHintsButtonRef} onClose={closeMobilePanel}>{helpPanel}</MobileQuestHints>}
           </>
         )}
       </div>
@@ -1137,7 +1030,7 @@ export const LessonActivity: React.FC = () => {
 };
 
 const FullPageMessage: React.FC<{ children: React.ReactNode }> = ({ children }) => (
-  <div style={{ height: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#080c11', color: '#8b949e', fontSize: 14, fontFamily: 'Inter,sans-serif', flexDirection: 'column', gap: 12 }}>
+  <div style={{ minHeight: '100dvh', display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#080c11', color: '#8b949e', fontSize: 14, fontFamily: 'Inter,sans-serif', flexDirection: 'column', gap: 12 }}>
     {children}
   </div>
 );
@@ -1150,36 +1043,44 @@ const ANIM_CSS = `
   ::-webkit-scrollbar-thumb:hover { background: #30363d; }
 
   .la-mobile-hint-btn { display: none !important; }
-  .la-mobile-overlay  { display: none !important; }
+  .la-root { min-height: 100dvh; height: 100dvh; }
+  .la-header { position: relative; z-index: 100; }
+  .la-tab-bar { overflow-x: auto; }
+  .la-tab-bar > button { flex-shrink: 0; }
+  .la-side-scroll { overscroll-behavior: contain; scrollbar-gutter: stable; scrollbar-width: thin; scrollbar-color: #6e7681 #161b22; }
+  .la-side-scroll::-webkit-scrollbar { width: 8px; }
+  .la-side-scroll::-webkit-scrollbar-track { background: #161b22; }
+  .la-side-scroll::-webkit-scrollbar-thumb { background: #6e7681; border-radius: 4px; }
+  .la-side-scroll:focus-visible { outline: 2px solid #58a6ff; outline-offset: -2px; }
 
-  @media (max-width: 768px) {
+  @media (max-width: 1024px) {
+    .la-root { height: auto; overflow: visible !important; }
     .la-mobile-hint-btn { display: flex !important; }
-    .la-mobile-overlay  { display: block !important; }
     .la-resize-handle   { display: none !important; }
-    .la-header { padding: 0 14px !important; }
+    .la-side-panel { display: none !important; }
+    .la-header { position: sticky; top: 0; height: auto !important; min-height: 56px; padding: calc(8px + env(safe-area-inset-top)) 12px 8px !important; flex-wrap: wrap; gap: 8px; }
+    .la-header-context { flex: 1 1 100%; }
+    .la-header-actions { flex: 1 1 100%; display: grid !important; grid-template-columns: repeat(3, minmax(0, 1fr)); }
+    .la-header-actions > button { justify-content: center; width: 100%; }
     .la-phase-label { display: none !important; }
-    .la-quest-title { max-width: 140px !important; font-size: 12px !important; }
-    .la-btn-label { display: none !important; }
+    .la-quest-title { min-width: 0; max-width: none !important; white-space: normal !important; overflow-wrap: anywhere; font-size: 14px !important; line-height: 1.4; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; }
+    .la-root button { min-height: 44px; touch-action: manipulation; }
+    .la-root input { min-height: 44px; font-size: 16px !important; }
     .la-theory-btn { padding: 6px 8px !important; font-size: 14px !important; }
     .la-reset-btn  { padding: 6px 8px !important; font-size: 14px !important; }
-    .la-tab-bar  { padding: 10px 14px 0 !important; }
-    .la-game-area { padding: 12px 14px !important; }
-    .la-side-panel {
-      position: fixed !important;
-      right: 0 !important; top: 56px !important; bottom: 0 !important;
-      width: 92vw !important; max-width: 400px !important; z-index: 200;
-      box-shadow: -6px 0 32px rgba(0,0,0,0.8) !important;
-      transform: translateX(100%);
-      transition: transform 0.28s cubic-bezier(0.4,0,0.2,1);
-      overflow-y: auto;
-    }
-    .la-side-panel.open {
-      transform: translateX(0) !important;
-    }
-    .la-body {
-      overflow-y: auto !important;
-      overflow-x: hidden !important;
-    }
+    .la-body, .la-reading-phase, .la-reading-scroll, .la-activity-column, .la-game-area { flex: none !important; overflow: visible !important; min-width: 0; }
+    .la-body { display: block !important; }
+    .la-tab-bar  { padding: 8px 12px 0 !important; overscroll-behavior-x: contain; }
+    .la-tab-bar > button { flex: 0 0 auto; white-space: nowrap; font-size: 14px !important; }
+    .la-game-area { padding: 12px 14px !important; overflow-wrap: anywhere; }
+    .la-balloon-area { padding: 0 !important; }
+    .la-reading-scroll { padding: 16px 14px !important; min-width: 0; }
+    .la-reading-actions { padding: 12px 14px calc(12px + env(safe-area-inset-bottom)) !important; }
+    .la-reading-actions > button { width: 100%; }
+    .la-completion { padding: 20px 0 !important; }
+    .la-completion-actions { flex-direction: column; width: 100%; }
+    .la-completion-actions > button { width: 100%; }
+    .la-toast { min-width: 0 !important; max-width: calc(100vw - 24px); }
   }
 `;
 

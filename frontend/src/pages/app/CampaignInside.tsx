@@ -1,7 +1,7 @@
 // Quest access depends on the previous quest's first_completed_at, which survives retakes.
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { useNavigate, useParams } from 'react-router-dom';
+import { Link, useNavigate, useParams } from 'react-router-dom';
 import { useAuth } from '@/components/AuthContext';
 import { supabase } from '@/services/supabase';
 import type {
@@ -71,14 +71,14 @@ const StatBar: React.FC<{
   return (
     <div style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '9px 0' }}>
       <span style={{ fontSize: 18, flexShrink: 0, width: 24, textAlign: 'center' }}>{icon}</span>
-      <div style={{ flex: 1 }}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 5 }}>
-          <span style={{ fontSize: 11, color: '#c9d1d9', fontWeight: 600, fontFamily: "'IBM Plex Sans', sans-serif" }}>{label}</span>
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, justifyContent: 'space-between', alignItems: 'center', marginBottom: 5 }}>
+          <span className="ci-stat-label" style={{ fontSize: 11, color: '#c9d1d9', fontWeight: 600, fontFamily: "'IBM Plex Sans', sans-serif" }}>{label}</span>
           <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
             {maxed && (
               <span style={{ fontSize: 9, fontWeight: 800, color: '#e3b341', background: 'rgba(227,179,65,0.15)', border: '1px solid rgba(227,179,65,0.4)', borderRadius: 4, padding: '1px 5px', fontFamily: "'JetBrains Mono',monospace", letterSpacing: '0.5px' }}>MAX</span>
             )}
-            <span style={{ fontSize: 11, color, fontWeight: 800, fontFamily: "'JetBrains Mono', monospace" }}>{current}/{total}</span>
+            <span className="ci-stat-value" style={{ fontSize: 11, color, fontWeight: 800, fontFamily: "'JetBrains Mono', monospace" }}>{current}/{total}</span>
           </div>
         </div>
         <div style={{ height: 6, background: 'rgba(255,255,255,0.06)', borderRadius: 3, overflow: 'hidden' }}>
@@ -95,14 +95,14 @@ const SubTopicItem: React.FC<{ title: string; isDone: boolean }> = ({ title, isD
     borderBottom: '1px solid rgba(255,255,255,0.03)',
   }}>
     <div style={{
-      width: 16, height: 16, borderRadius: 4,
+      width: 16, height: 16, flexShrink: 0, borderRadius: 4,
       border: `1.5px solid ${isDone ? '#3fb950' : '#484f58'}`,
       background: isDone ? '#3fb95033' : 'transparent',
       display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 10,
     }}>
       {isDone && '✓'}
     </div>
-    <span style={{ fontSize: 11, color: isDone ? '#8b949e' : '#e6edf3', fontFamily: "'Inter', sans-serif" }}>
+    <span className="ci-subtopic" style={{ fontSize: 11, color: isDone ? '#8b949e' : '#e6edf3', fontFamily: "'Inter', sans-serif" }}>
       {title}
     </span>
   </div>
@@ -132,9 +132,16 @@ const QuestCard: React.FC<{
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', marginBottom: 12, opacity: isLocked ? 0.5 : 1 }}>
-      <div
-        onClick={() => !isLocked && setIsOpen(o => !o)}
+      <button
+        type="button"
+        className="ci-quest-toggle"
+        data-testid={`quest-toggle-${quest.id}`}
+        disabled={isLocked}
+        aria-expanded={isOpen}
+        aria-controls={`quest-details-${quest.id}`}
+        onClick={() => setIsOpen(o => !o)}
         style={{
+          width: '100%', textAlign: 'left', fontFamily: 'inherit',
           display: 'flex', alignItems: 'center', gap: 14, padding: '15px 20px',
           background: 'rgba(255,255,255,0.02)',
           borderTop:    `1.5px solid ${isOpen ? `${accent}66` : 'rgba(255,255,255,0.06)'}`,
@@ -145,23 +152,23 @@ const QuestCard: React.FC<{
           cursor: isLocked ? 'not-allowed' : 'pointer', transition: 'all 0.2s',
         }}
       >
-        <div style={{ width: 34, height: 34, borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(0,0,0,0.2)', border: `1px solid ${accent}`, color: accent, fontWeight: 800, fontSize: 12 }}>
+        <span style={{ width: 34, height: 34, flexShrink: 0, borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(0,0,0,0.2)', border: `1px solid ${accent}`, color: accent, fontWeight: 800, fontSize: 12 }}>
           {isLocked ? '🔒' : isDone ? '✓' : String(index + 1).padStart(2, '0')}
-        </div>
-        <div style={{ flex: 1, minWidth: 0 }}>
-          <div style={{ fontSize: 14, fontWeight: 700, color: '#e6edf3', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{quest.title}</div>
-          <div style={{ fontSize: 10, color: '#484f58', textTransform: 'uppercase', letterSpacing: '0.5px', marginTop: 2 }}>
+        </span>
+        <span style={{ flex: 1, minWidth: 0 }}>
+          <span className="ci-quest-title" style={{ display: 'block', fontSize: 14, fontWeight: 700, color: '#e6edf3' }}>{quest.title}</span>
+          <span className="ci-quest-meta" style={{ display: 'block', fontSize: 10, color: '#484f58', textTransform: 'uppercase', letterSpacing: '0.5px', marginTop: 2 }}>
             {reward} XP · {questTypeLabel(quest.question_type)}
             {quest.everCompleted && !isDone && <span style={{ color: '#3fb950', marginLeft: 8 }}>· FIRST FINISH ✓</span>}
-          </div>
-        </div>
-        <div style={{ transform: isOpen ? 'rotate(180deg)' : 'none', transition: '0.3s', opacity: 0.5 }}>▼</div>
-      </div>
+          </span>
+        </span>
+        <span aria-hidden="true" style={{ transform: isOpen ? 'rotate(180deg)' : 'none', transition: '0.3s', opacity: 0.5 }}>▼</span>
+      </button>
 
       {isOpen && !isLocked && (
-        <div style={{ padding: 20, background: 'rgba(13,17,23,0.6)', border: '1.5px solid rgba(255,255,255,0.06)', borderTop: 'none', borderRadius: '0 0 12px 12px' }}>
+        <div id={`quest-details-${quest.id}`} style={{ padding: 20, background: 'rgba(13,17,23,0.6)', border: '1.5px solid rgba(255,255,255,0.06)', borderTop: 'none', borderRadius: '0 0 12px 12px' }}>
           <div style={{ marginBottom: 18 }}>
-            <div style={{ fontSize: 10, fontWeight: 800, color: '#484f58', textTransform: 'uppercase', marginBottom: 10, letterSpacing: '1px' }}>Topics covered</div>
+            <div className="ci-panel-heading" style={{ fontSize: 10, fontWeight: 800, color: '#484f58', textTransform: 'uppercase', marginBottom: 10, letterSpacing: '1px' }}>Topics covered</div>
             {subTopics.map((topic, i) => (
               <SubTopicItem key={i} title={topic} isDone={isDone} />
             ))}
@@ -182,7 +189,7 @@ const ProgressPanel: React.FC<{ stats: LevelStats; hasNextLevel: boolean }> = ({
   const xpMaxed = stats.xpTotal > 0 && stats.xpEarned >= stats.xpTotal;
   return (
     <div style={{ background: 'rgba(255,255,255,.02)', border: '1.5px solid rgba(255,255,255,.06)', borderRadius: 13, padding: '18px 16px', animation: 'questIn .5s ease .15s both' }}>
-      <div style={{ fontSize: 9, fontWeight: 700, color: '#484f58', letterSpacing: '1.5px', textTransform: 'uppercase', marginBottom: 14, fontFamily: "'JetBrains Mono',monospace" }}>
+      <div className="ci-panel-heading" style={{ fontSize: 9, fontWeight: 700, color: '#484f58', letterSpacing: '1.5px', textTransform: 'uppercase', marginBottom: 14, fontFamily: "'JetBrains Mono',monospace" }}>
         Your Progress
         <span style={{ marginLeft: 8, display: 'inline-block', width: 6, height: 6, borderRadius: '50%', background: '#3fb950', boxShadow: '0 0 6px #3fb950', verticalAlign: 'middle' }} title="Live" />
       </div>
@@ -209,7 +216,7 @@ const ActivityTypesPanel: React.FC<{ quests: QuestRow[] }> = ({ quests }) => {
 
   return (
     <div style={{ background: 'rgba(255,255,255,.02)', border: '1.5px solid rgba(255,255,255,.06)', borderRadius: 13, padding: '14px 16px', animation: 'questIn .5s ease .22s both' }}>
-      <div style={{ fontSize: 9, fontWeight: 700, color: '#484f58', letterSpacing: '1.5px', textTransform: 'uppercase', marginBottom: 12, fontFamily: "'JetBrains Mono',monospace" }}>Activity Types</div>
+      <div className="ci-panel-heading" style={{ fontSize: 9, fontWeight: 700, color: '#484f58', letterSpacing: '1.5px', textTransform: 'uppercase', marginBottom: 12, fontFamily: "'JetBrains Mono',monospace" }}>Activity Types</div>
       {present.length === 0
         ? <div style={{ fontSize: 11, color: '#484f58', fontFamily: 'Inter,sans-serif' }}>No activities yet.</div>
         : present.map(t => (
@@ -217,10 +224,10 @@ const ActivityTypesPanel: React.FC<{ quests: QuestRow[] }> = ({ quests }) => {
             <span style={{ fontSize: 15, flexShrink: 0, marginTop: 1 }}>{ACTIVITY_ICON[t] ?? '🎮'}</span>
             <div style={{ flex: 1, minWidth: 0 }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', gap: 6 }}>
-                <span style={{ fontSize: 11, color: '#c9d1d9', fontWeight: 600, fontFamily: "'IBM Plex Sans',sans-serif" }}>{ACTIVITY_LABEL[t] ?? t}</span>
+                <span className="ci-activity-name" style={{ fontSize: 11, color: '#c9d1d9', fontWeight: 600, fontFamily: "'IBM Plex Sans',sans-serif" }}>{ACTIVITY_LABEL[t] ?? t}</span>
                 <span style={{ fontSize: 9, color: '#484f58', fontFamily: "'JetBrains Mono',monospace" }}>×{counts[t]}</span>
               </div>
-              <div style={{ fontSize: 10, color: '#484f58', fontFamily: "'IBM Plex Sans',sans-serif" }}>{ACTIVITY_DESC[t] ?? ''}</div>
+              <div className="ci-activity-description" style={{ fontSize: 10, color: '#484f58', fontFamily: "'IBM Plex Sans',sans-serif" }}>{ACTIVITY_DESC[t] ?? ''}</div>
             </div>
           </div>
         ))
@@ -232,8 +239,8 @@ const ActivityTypesPanel: React.FC<{ quests: QuestRow[] }> = ({ quests }) => {
 const QuestMixRow: React.FC<{ icon: string; label: string; value: string | number }> = ({ icon, label, value }) => (
   <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 7 }}>
     <span style={{ fontSize: 13, width: 18, textAlign: 'center' }}>{icon}</span>
-    <span style={{ fontSize: 11, color: '#c9d1d9', fontFamily: "'IBM Plex Sans',sans-serif" }}>{label}</span>
-    <span style={{ marginLeft: 'auto', fontSize: 11, color: '#e6edf3', fontWeight: 700, fontFamily: "'JetBrains Mono',monospace" }}>{value}</span>
+    <span className="ci-mix-label" style={{ fontSize: 11, color: '#c9d1d9', fontFamily: "'IBM Plex Sans',sans-serif" }}>{label}</span>
+    <span className="ci-mix-value" style={{ marginLeft: 'auto', fontSize: 11, color: '#e6edf3', fontWeight: 700, fontFamily: "'JetBrains Mono',monospace" }}>{value}</span>
   </div>
 );
 
@@ -248,7 +255,7 @@ const QuestMixPanel: React.FC<{ quests: QuestRow[]; totalXP: number }> = ({ ques
 
   return (
     <div style={{ background: 'rgba(255,255,255,.02)', border: '1.5px solid rgba(255,255,255,.06)', borderRadius: 13, padding: '14px 16px', animation: 'questIn .5s ease .3s both' }}>
-      <div style={{ fontSize: 9, fontWeight: 700, color: '#484f58', letterSpacing: '1.5px', textTransform: 'uppercase', marginBottom: 10, fontFamily: "'JetBrains Mono',monospace" }}>Quest Mix</div>
+      <div className="ci-panel-heading" style={{ fontSize: 9, fontWeight: 700, color: '#484f58', letterSpacing: '1.5px', textTransform: 'uppercase', marginBottom: 10, fontFamily: "'JetBrains Mono',monospace" }}>Quest Mix</div>
       <QuestMixRow icon="📚" label="Lessons"    value={lessons} />
       <QuestMixRow icon="🧠" label="Quizzes"    value={quizzes} />
       {balloons > 0 && <QuestMixRow icon="🎈" label="Balloon Pop" value={balloons} />}
@@ -445,8 +452,8 @@ export const CampaignInside: React.FC = () => {
       <style>{STYLE_CSS}</style>
 
       <div className="ci-root">
-        <header className="ci-header" style={{ height: 56, background: 'rgba(13,17,23,0.97)', borderBottom: '1px solid rgba(255,255,255,0.05)', display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '0 28px', position: 'sticky', top: 0, zIndex: 100, backdropFilter: 'blur(14px)' }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 10, minWidth: 0 }}>
+        <header className="ci-header" style={{ background: 'rgba(13,17,23,0.97)', borderBottom: '1px solid rgba(255,255,255,0.05)', display: 'flex', alignItems: 'center', justifyContent: 'space-between', position: 'sticky', top: 0, zIndex: 100, backdropFilter: 'blur(14px)' }}>
+          <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 10, minWidth: 0 }}>
             <span className="ci-header-logo" style={{ fontSize: 17, flexShrink: 0 }}>🗺️</span>
             <span className="ci-header-brand" style={{ fontFamily: "'JetBrains Mono', monospace", fontWeight: 700, fontSize: 13, flexShrink: 0 }}>CodeSense Journey</span>
             <span className="ci-header-sep" style={{ color: '#21262d', flexShrink: 0 }}>›</span>
@@ -454,84 +461,58 @@ export const CampaignInside: React.FC = () => {
               Level {levelNumber} · {phase[0].toUpperCase() + phase.slice(1)}
             </span>
           </div>
-          <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexShrink: 0 }}>
+          <div className="ci-header-actions" style={{ display: 'flex', flexWrap: 'wrap', gap: 10, alignItems: 'center', minWidth: 0 }}>
             <div className="ci-xp-pill" style={{ display: 'flex', alignItems: 'center', gap: 6, background: 'rgba(227,179,65,0.09)', border: '1px solid rgba(227,179,65,0.22)', borderRadius: 7, padding: '5px 12px' }}>
               <span style={{ fontSize: 11 }}>⚡</span>
               <span style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 11, color: '#e3b341', fontWeight: 700 }}>{userXP.toLocaleString()} XP</span>
             </div>
-            <button
-              onClick={() => navigate('/campaign')}
-              style={{ background: 'transparent', border: '1px solid rgba(255,255,255,0.08)', color: '#8b949e', padding: '5px 13px', borderRadius: 6, fontSize: 11, fontWeight: 600, cursor: 'pointer', fontFamily: "'JetBrains Mono', monospace", transition: 'all .15s' }}
-              onMouseEnter={e => { e.currentTarget.style.color = '#f85149'; e.currentTarget.style.borderColor = 'rgba(248,81,73,.35)'; }}
-              onMouseLeave={e => { e.currentTarget.style.color = '#8b949e'; e.currentTarget.style.borderColor = 'rgba(255,255,255,.08)'; }}>
+            <Link className="ci-header-link" to="/campaign" data-testid="level-back-to-campaign"
+              aria-label="Back to all campaign levels"
+            >
               ← Back
-            </button>
+            </Link>
+            <Link className="ci-header-link" to="/home" data-testid="level-exit-home">⌂ Home</Link>
           </div>
         </header>
 
-        <main style={{ maxWidth: 1000, margin: '0 auto', padding: '26px 20px 60px' }}>
+        <main className="ci-main">
           {error && (
             <div style={{ padding: '12px 16px', borderRadius: 10, background: 'rgba(218,54,51,0.1)', border: '1px solid rgba(218,54,51,0.3)', color: '#f85149', fontSize: 13, fontFamily: "'JetBrains Mono',monospace", marginBottom: 18 }}>
               ⚠️ {error} — <button onClick={fetchAll} style={{ background: 'none', border: 'none', color: '#58a6ff', cursor: 'pointer', fontSize: 13, fontFamily: "'JetBrains Mono',monospace" }}>retry</button>
             </div>
           )}
 
-          <div className="ci-hero" style={{ position: 'relative', borderRadius: 16, overflow: 'hidden', height: 162, marginBottom: 26, background: levelInfo.banner_url ? `url(${levelInfo.banner_url}) center/cover no-repeat` : `linear-gradient(135deg,${accent}18 0%, #101d28 55%, #0d1117 100%)`, border: '1px solid rgba(255,255,255,0.07)', boxShadow: '0 12px 48px rgba(0,0,0,.55)', animation: 'heroIn 0.5s ease' }}>
+          <div className="ci-hero" style={{ position: 'relative', borderRadius: 16, overflow: 'hidden', background: levelInfo.banner_url ? `url(${levelInfo.banner_url}) center/cover no-repeat` : `linear-gradient(135deg,${accent}18 0%, #101d28 55%, #0d1117 100%)`, border: '1px solid rgba(255,255,255,0.07)', boxShadow: '0 12px 48px rgba(0,0,0,.55)', animation: 'heroIn 0.5s ease' }}>
             <div style={{ position: 'absolute', inset: 0, opacity: 0.055, backgroundImage: `linear-gradient(${accent}99 1px,transparent 1px),linear-gradient(90deg,${accent}99 1px,transparent 1px)`, backgroundSize: '38px 38px' }} />
             <div style={{ position: 'absolute', left: 0, right: 0, height: '30%', opacity: 0.08, background: `linear-gradient(transparent,${accent}80,transparent)`, animation: 'scan 5s ease-in-out infinite', pointerEvents: 'none' }} />
             <div style={{ position: 'absolute', inset: 0, background: 'linear-gradient(90deg,rgba(8,12,17,.88) 0%,rgba(8,12,17,.35) 55%,transparent 100%)' }} />
-            <div style={{ position: 'relative', zIndex: 1, padding: '22px 28px', height: '100%', display: 'flex', flexDirection: 'column', justifyContent: 'flex-end' }}>
-              <div style={{ fontSize: 9, color: accent, fontFamily: "'JetBrains Mono',monospace", fontWeight: 700, letterSpacing: '2.5px', textTransform: 'uppercase', marginBottom: 8, opacity: 0.9 }}>{levelInfo.subtitle}</div>
-              <h1 style={{ fontSize: 'clamp(20px,2.8vw,28px)', fontWeight: 700, color: '#f0f6fc', letterSpacing: '-0.5px', lineHeight: 1.1, fontFamily: "'IBM Plex Sans',sans-serif" }}>{levelInfo.title}</h1>
-              {levelInfo.description && <p style={{ fontSize: 11, color: 'rgba(240,246,252,.5)', marginTop: 7, maxWidth: 460, lineHeight: 1.6, fontFamily: "'IBM Plex Sans',sans-serif" }}>{levelInfo.description}</p>}
-            </div>
-            <div style={{ position: 'absolute', top: 16, right: 16, zIndex: 2, display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 8 }}>
-              <div style={{ position: 'relative', height: 32, display: 'flex', alignItems: 'center' }}>
-  <div style={{
-    position: 'absolute', right: 0,
-    padding: '7px 16px', borderRadius: 7,
-    background: 'rgba(8,12,17,.55)',
-    border: '1.5px solid rgba(255,255,255,0.1)',
-    color: '#6e7681', fontSize: 11, fontWeight: 800,
-    letterSpacing: '0.4px', fontFamily: "'JetBrains Mono',monospace",
-    backdropFilter: 'blur(8px)', whiteSpace: 'nowrap',
-    opacity: loading ? 0 : allDone ? 0 : 1,
-    pointerEvents: allDone ? 'none' : 'auto',
-    transition: 'opacity 0.4s ease, transform 0.4s ease',
-    transform: allDone ? 'translateY(-6px)' : 'translateY(0)',
-  }}>
-    🔒 Finish all quests to advance
-  </div>
-
-  <button
-    onClick={goToNextLevel}
-    style={{
-      position: 'absolute', right: 0,
-      padding: '7px 16px', borderRadius: 7,
-      background: allDone ? `${accent}18` : 'transparent',
-      border: `1.5px solid ${accent}`,
-      color: accent, fontSize: 11, fontWeight: 800,
-      cursor: 'pointer', letterSpacing: '0.4px',
-      fontFamily: "'JetBrains Mono',monospace",
-      backdropFilter: 'blur(8px)', whiteSpace: 'nowrap',
-      opacity: loading ? 0 : allDone ? 1 : 0,
-      pointerEvents: allDone ? 'auto' : 'none',
-      transition: 'opacity 0.4s ease, transform 0.4s ease, background 0.2s',
-      transform: allDone ? 'translateY(0)' : 'translateY(6px)',
-      boxShadow: allDone ? `0 0 18px ${accent}33` : 'none',
-    }}
-    onMouseEnter={e => { e.currentTarget.style.background = `${accent}30`; e.currentTarget.style.boxShadow = `0 0 24px ${accent}55`; }}
-    onMouseLeave={e => { e.currentTarget.style.background = `${accent}18`; e.currentTarget.style.boxShadow = `0 0 18px ${accent}33`; }}>
-    {completionCta}
-  </button>
-</div>
-              <div style={{ fontSize: 10, color: 'rgba(240,246,252,.45)', fontFamily: "'JetBrains Mono',monospace", background: 'rgba(8,12,17,.6)', padding: '3px 10px', borderRadius: 5, backdropFilter: 'blur(6px)' }}>
-                {loading ? '…' : `${pctDone}% complete`}
+            <div className="ci-hero-content">
+              <div>
+                <div style={{ fontSize: 9, color: accent, fontFamily: "'JetBrains Mono',monospace", fontWeight: 700, letterSpacing: '2.5px', textTransform: 'uppercase', marginBottom: 8, opacity: 0.9 }}>{levelInfo.subtitle}</div>
+                <h1 style={{ fontSize: 'clamp(20px,2.8vw,28px)', fontWeight: 700, color: '#f0f6fc', letterSpacing: '-0.5px', lineHeight: 1.1, fontFamily: "'IBM Plex Sans',sans-serif" }}>{levelInfo.title}</h1>
+                {levelInfo.description && <p className="ci-hero-description" style={{ fontSize: 11, color: 'rgba(240,246,252,.5)', marginTop: 7, maxWidth: '65ch', lineHeight: 1.6, fontFamily: "'IBM Plex Sans',sans-serif" }}>{levelInfo.description}</p>}
+              </div>
+              <div className="ci-hero-actions">
+                {allDone ? (
+                  <button onClick={goToNextLevel}
+                    style={{ padding: '7px 16px', borderRadius: 7, background: `${accent}18`, border: `1.5px solid ${accent}`, color: accent, fontSize: 11, fontWeight: 800, cursor: 'pointer', letterSpacing: '0.4px', fontFamily: "'JetBrains Mono',monospace", backdropFilter: 'blur(8px)', boxShadow: `0 0 18px ${accent}33`, transition: 'background 0.2s, box-shadow 0.2s' }}
+                    onMouseEnter={e => { e.currentTarget.style.background = `${accent}30`; e.currentTarget.style.boxShadow = `0 0 24px ${accent}55`; }}
+                    onMouseLeave={e => { e.currentTarget.style.background = `${accent}18`; e.currentTarget.style.boxShadow = `0 0 18px ${accent}33`; }}>
+                    {completionCta}
+                  </button>
+                ) : (
+                  <div style={{ padding: '7px 16px', borderRadius: 7, background: 'rgba(8,12,17,.55)', border: '1.5px solid rgba(255,255,255,0.1)', color: '#6e7681', fontSize: 11, fontWeight: 800, letterSpacing: '0.4px', fontFamily: "'JetBrains Mono',monospace", backdropFilter: 'blur(8px)' }}>
+                    {loading ? 'Loading quests…' : '🔒 Finish all quests to advance'}
+                  </div>
+                )}
+                <div style={{ fontSize: 10, color: 'rgba(240,246,252,.45)', fontFamily: "'JetBrains Mono',monospace", background: 'rgba(8,12,17,.6)', padding: '3px 10px', borderRadius: 5, backdropFilter: 'blur(6px)' }}>
+                  {loading ? '…' : `${pctDone}% complete`}
+                </div>
               </div>
             </div>
           </div>
 
-          <div className="ci-two-col" style={{ display: 'grid', gridTemplateColumns: '1fr 252px', gap: 18, alignItems: 'start' }}>
+          <div className="ci-two-col">
             <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
                 <span style={{ fontSize: 11, color: '#484f58', fontFamily: "'JetBrains Mono',monospace", letterSpacing: '1px', textTransform: 'uppercase' }}>Lessons</span>
@@ -566,11 +547,11 @@ export const CampaignInside: React.FC = () => {
               <QuestMixPanel      quests={quests} totalXP={stats.xpTotal} />
 
               {!loading && !error && nextQuest && (
-                <button onClick={() => navigate(lessonPathForQuest(nextQuest))} style={{ width: '100%', padding: 12, borderRadius: 10, border: 'none', background: `linear-gradient(135deg,${accent},${accent}cc)`, color: '#080c11', fontSize: 12, fontWeight: 700, cursor: 'pointer', letterSpacing: '.3px', fontFamily: "'IBM Plex Sans',sans-serif", boxShadow: `0 4px 18px ${accent}40`, transition: 'all .2s', animation: 'questIn .5s ease .38s both', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6 }}
+                <button onClick={() => navigate(lessonPathForQuest(nextQuest))} style={{ width: '100%', padding: 12, borderRadius: 10, border: 'none', background: `linear-gradient(135deg,${accent},${accent}cc)`, color: '#080c11', fontSize: 12, fontWeight: 700, cursor: 'pointer', letterSpacing: '.3px', fontFamily: "'IBM Plex Sans',sans-serif", boxShadow: `0 4px 18px ${accent}40`, transition: 'all .2s', animation: 'questIn .5s ease .38s both', display: 'flex', flexWrap: 'wrap', alignItems: 'center', justifyContent: 'center', gap: 6 }}
                   onMouseEnter={e => { e.currentTarget.style.transform = 'translateY(-2px)'; e.currentTarget.style.boxShadow = `0 8px 26px ${accent}55`; }}
                   onMouseLeave={e => { e.currentTarget.style.transform = 'none'; e.currentTarget.style.boxShadow = `0 4px 18px ${accent}40`; }}>
                   <span style={{ flexShrink: 0 }}>▶ Continue —</span>
-                  <span style={{ minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{nextQuest.title}</span>
+                  <span style={{ minWidth: 0 }}>{nextQuest.title}</span>
                 </button>
               )}
 
@@ -600,39 +581,59 @@ const STYLE_CSS = `
   @keyframes scan      { 0% { transform: translateY(-80%); opacity: 0; } 20% { opacity: 1; } 80% { opacity: 1; } 100% { transform: translateY(300%); opacity: 0; } }
   * { box-sizing: border-box; margin: 0; padding: 0; }
   .ci-root { min-height: 100vh; background: #080c11; font-family: 'IBM Plex Sans', 'Segoe UI', system-ui, sans-serif; color: #e6edf3; }
+  .ci-header { min-height: 56px; padding: 10px clamp(14px, 3vw, 48px); flex-wrap: wrap; gap: 8px; }
+  .ci-header-link { display: inline-flex; align-items: center; justify-content: center; min-height: 44px; padding: 5px 13px; border: 1px solid #30363d; border-radius: 6px; color: #8b949e; font: 600 12px 'JetBrains Mono', monospace; text-decoration: none; touch-action: manipulation; }
+  .ci-header-link:focus-visible { outline: 2px solid #58a6ff; outline-offset: 3px; }
+  .ci-header-link:hover { color: #e6edf3; border-color: #8b949e; }
+  .ci-main { width: 100%; padding: 26px clamp(12px, 4vw, 64px) 60px; overflow-wrap: anywhere; }
+  .ci-hero { margin-bottom: 26px; }
+  .ci-hero-content {
+    position: relative; z-index: 1; min-height: 162px; padding: 22px 28px;
+    display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: end; gap: 24px;
+  }
+  .ci-hero-actions { display: flex; flex-direction: column; align-items: flex-end; align-self: start; gap: 8px; }
+  .ci-hero-actions > * { max-width: 100%; }
+  .ci-two-col { display: grid; grid-template-columns: minmax(0, 3fr) minmax(16rem, 1fr); gap: clamp(18px, 2vw, 32px); align-items: start; }
+  .ci-two-col > div, .ci-hero-content > div { min-width: 0; }
+  .ci-root button:focus-visible { outline: 2px solid #58a6ff; outline-offset: 3px; }
   ::-webkit-scrollbar { width: 5px; }
   ::-webkit-scrollbar-track { background: transparent; }
   ::-webkit-scrollbar-thumb { background: #21262d; border-radius: 3px; }
 
+  @media (max-width: 56rem) {
+    .ci-two-col, .ci-hero-content { grid-template-columns: minmax(0, 1fr); }
+    .ci-hero-actions { align-items: flex-start; }
+  }
+
   @media (max-width: 768px) {
-    .ci-header {
-      height: auto !important;
-      padding: 10px 14px !important;
-      flex-wrap: wrap !important;
-      gap: 8px !important;
-    }
     .ci-header-brand, .ci-header-sep { display: none !important; }
+    .ci-header-link { font-size: 14px; }
     .ci-xp-pill { padding: 5px 10px !important; }
     .ci-xp-pill span:last-child { font-size: 12px !important; }
 
-    .ci-root main {
-      padding: 14px 12px 48px !important;
-    }
-
-    .ci-hero {
-      height: 110px !important;
-      margin-bottom: 14px !important;
-    }
-    .ci-hero h1 { font-size: clamp(16px, 4vw, 22px) !important; }
-
-    .ci-two-col {
-      grid-template-columns: 1fr !important;
-      gap: 14px !important;
-    }
+    .ci-main { padding: 14px 12px 48px; }
+    .ci-hero { margin-bottom: 14px; }
+    .ci-hero-content { min-height: 0; padding: 18px; gap: 16px; }
+    .ci-two-col { gap: 14px; }
+    .ci-root button { min-height: 44px; font-size: 14px !important; touch-action: manipulation; }
+    .ci-quest-toggle { padding: 14px !important; gap: 10px !important; }
+    .ci-quest-title { font-size: 16px !important; line-height: 1.4; }
+    .ci-quest-meta { font-size: 12px !important; color: #8b949e !important; line-height: 1.5; }
+    .ci-hero-description, .ci-subtopic { font-size: 14px !important; line-height: 1.6; }
+    .ci-stat-label, .ci-stat-value, .ci-mix-value { font-size: 13px !important; }
+    .ci-activity-name, .ci-mix-label { font-size: 14px !important; }
+    .ci-activity-description { font-size: 12px !important; color: #8b949e !important; line-height: 1.5; }
+    .ci-panel-heading { font-size: 11px !important; color: #8b949e !important; }
+    .ci-hero-actions { align-items: stretch; }
+    .ci-hero-actions > div { align-self: flex-start; }
 
     .ci-root .ci-two-col > div:first-child > div {
       margin-bottom: 10px !important;
     }
+  }
+
+  @media (max-width: 480px) {
+    .ci-header-actions { width: 100%; justify-content: space-between; }
   }
 `;
 

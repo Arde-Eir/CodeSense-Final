@@ -6,6 +6,7 @@ import { useAuth } from '@/components/AuthContext';
 import { supabase } from '@/services/supabase';
 import type { Phase } from '@/types/campaign';
 import { isCampaignPhase, levelForPhase, phaseForLevel } from '@/types/campaign';
+import { CampaignHeader } from './CampaignHeader';
 
 interface LevelCardConfig {
   id:        number;
@@ -264,7 +265,7 @@ export const CampaignPage: React.FC = () => {
         className="campaign-root"
         style={{ opacity: visible ? 1 : 0, transition: 'opacity 0.4s ease' }}
       >
-        <Header userXP={userXP} onExit={() => navigate('/home')} />
+        <CampaignHeader userXP={userXP} />
 
         <main className="campaign-main">
           <HeroBanner />
@@ -304,24 +305,6 @@ export const CampaignPage: React.FC = () => {
     </>
   );
 };
-
-const Header: React.FC<{ userXP: number; onExit: () => void }> = ({ userXP, onExit }) => (
-  <div className="campaign-header">
-    <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-      <span style={{ fontSize: 18 }}>🎯</span>
-      <span style={{ fontFamily: "'IBM Plex Mono', monospace", fontWeight: 700, fontSize: 15, letterSpacing: '-0.3px' }}>
-        CodeSense Journey
-      </span>
-    </div>
-    <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-      <div className="xp-pill">
-        <span style={{ fontSize: 12 }}>⚡</span>
-        <span>{userXP.toLocaleString()} XP</span>
-      </div>
-      <button className="exit-btn" onClick={onExit}>← EXIT</button>
-    </div>
-  </div>
-);
 
 const HeroBanner: React.FC = () => (
   <div className="hero">
@@ -385,6 +368,13 @@ const LevelCard: React.FC<{
       onMouseMove={handleMouseMove}
       onMouseLeave={resetTilt}
       role="button"
+      tabIndex={unlocked ? 0 : -1}
+      onKeyDown={event => {
+        if (unlocked && (event.key === 'Enter' || event.key === ' ')) {
+          event.preventDefault();
+          onClick(event.currentTarget);
+        }
+      }}
       aria-disabled={!unlocked}
       aria-label={`${config.title} — ${config.subtitle}, ${badge[status].label.replace(/^[^\w]+/, '').trim()}`}
     >
@@ -475,19 +465,23 @@ const STYLE_CSS = `
     padding: 0 24px; position: sticky; top: 0; z-index: 100;
     box-shadow: 0 4px 20px rgba(0,0,0,0.5);
   }
+  .campaign-header-brand, .campaign-header-actions { display: flex; align-items: center; gap: 10px; min-width: 0; }
+  .campaign-header-actions { flex-shrink: 0; }
   .xp-pill {
     display: flex; align-items: center; gap: 8px;
     background: rgba(63,185,80,0.1); border: 1px solid rgba(63,185,80,0.25);
     border-radius: 8px; padding: 5px 12px;
     font-family: 'IBM Plex Mono', monospace; font-size: 12px; color: #3fb950; font-weight: 700;
   }
-  .exit-btn {
+  .campaign-exit-link {
+    display: inline-flex; align-items: center; justify-content: center; min-height: 44px;
+    flex-shrink: 0; text-decoration: none; touch-action: manipulation;
     background: transparent; border: 1px solid #444c56; color: #8b949e;
     padding: 7px 14px; border-radius: 6px; font-weight: 600; font-size: 11px;
     letter-spacing: 0.5px; cursor: pointer;
     font-family: 'IBM Plex Mono', monospace; transition: color 0.15s, border-color 0.15s;
   }
-  .exit-btn:hover { border-color: #f85149; color: #f85149; }
+  .campaign-exit-link:hover { border-color: #f85149; color: #f85149; }
 
   .hero {
     position: relative; border-radius: 16px; overflow: hidden;
@@ -630,6 +624,8 @@ const STYLE_CSS = `
 
   @media (max-width: 768px) {
     .campaign-header {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr);
       height: auto !important;
       padding: 12px 16px !important;
       flex-wrap: wrap !important;
@@ -659,13 +655,13 @@ const STYLE_CSS = `
       font-size: 13px !important;
       min-height: 40px !important;
     }
-    .exit-btn {
+    .campaign-exit-link {
       padding: 8px 14px !important;
       font-size: 12px !important;
-      min-height: 40px !important;
+      min-height: 44px !important;
     }
     .level-grid {
-      grid-template-columns: 1fr !important;
+      grid-template-columns: minmax(0, 1fr) !important;
       gap: 16px !important;
     }
     .level-card {
@@ -679,7 +675,8 @@ const STYLE_CSS = `
       font-size: 13px !important;
     }
     .level-card-blurb {
-      font-size: 12px !important;
+      font-size: 14px !important;
+      color: #8b949e;
       max-width: 100% !important;
     }
     .level-card-icon-slot {
@@ -705,7 +702,14 @@ const STYLE_CSS = `
     .level-card-head {
       gap: 10px !important;
     }
+    .campaign-header > div { min-width: 0; flex-wrap: wrap; }
+    .campaign-header-actions { width: 100%; justify-content: space-between; }
+    .level-card { overflow-wrap: anywhere; touch-action: manipulation; }
+    .level-card-head > div:first-child { min-width: 0; }
+    .level-card-title { flex-wrap: wrap; }
   }
+  .level-card:focus-visible, .campaign-exit-link:focus-visible { outline: 2px solid #58a6ff; outline-offset: 3px; }
+  @media (hover: none) { .level-card { transform: none !important; } }
 `;
 
 export default CampaignPage;

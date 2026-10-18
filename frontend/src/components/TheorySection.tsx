@@ -151,7 +151,7 @@ export const TheorySectionBlock: React.FC<{ sec: TheorySection }> = ({ sec }) =>
       {sec.items && sec.items.length > 0 && (
         <div style={{ marginTop: 10, display: 'flex', flexDirection: 'column', gap: 6 }}>
           {sec.items.map((it, i) => (
-            <div key={i} style={{ display: 'grid', gridTemplateColumns: 'minmax(120px, 30%) 1fr', gap: 12, padding: '8px 10px', borderRadius: 6, background: 'rgba(0,0,0,0.18)', border: '1px solid rgba(255,255,255,0.04)' }}>
+            <div key={i} className="theory-definition-row" style={{ display: 'grid', gridTemplateColumns: 'minmax(120px, 30%) 1fr', gap: 12, padding: '8px 10px', borderRadius: 6, background: 'rgba(0,0,0,0.18)', border: '1px solid rgba(255,255,255,0.04)' }}>
               <span style={{ fontSize: 12, fontWeight: 700, color: '#58a6ff', fontFamily: "'JetBrains Mono',monospace", lineHeight: 1.5, wordBreak: 'break-word' }}>{it.term}</span>
               <span style={{ fontSize: 12, color: '#8b949e', lineHeight: 1.6, fontFamily: 'Inter,sans-serif' }}>{it.definition}</span>
             </div>

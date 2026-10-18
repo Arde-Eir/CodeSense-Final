@@ -1,0 +1,49 @@
+.game-control-help {
+  color: #8b949e;
+  font: 12px/1.5 'Inter', sans-serif;
+}
+
+.drag-terms > button { width: 100%; }
+.drag-game button, .ordering-game button { touch-action: manipulation; }
+.drag-game button:focus-visible, .ordering-game button:focus-visible {
+  outline: 2px solid #58a6ff;
+  outline-offset: 3px;
+}
+
+.ordering-move-controls { display: flex; flex-shrink: 0; gap: 6px; }
+.ordering-move-controls > button {
+  min-width: 44px;
+  min-height: 44px;
+  border: 1px solid #484f58;
+  border-radius: 6px;
+  background: #161b22;
+  color: #e6edf3;
+  font-size: 20px;
+  cursor: pointer;
+}
+.ordering-move-controls > button:disabled { opacity: 0.4; cursor: default; }
+
+@media (max-width: 600px) {
+  .game-control-help { font-size: 14px; }
+  .drag-column-labels { display: none !important; }
+  .drag-layout { flex-direction: column; }
+  .drag-terms {
+    width: 100% !important;
+    display: grid !important;
+    grid-template-columns: repeat(auto-fit, minmax(min(100%, 7rem), 1fr));
+  }
+  .drag-zones { width: 100%; }
+  .drag-zones > button { display: grid !important; grid-template-columns: minmax(0, 1fr) auto; gap: 10px !important; }
+  .drag-zones > button > span:first-child { width: auto !important; min-width: 0; max-width: 100%; justify-self: start; padding: 8px 12px !important; }
+  .drag-zones > button > span:nth-child(2) { grid-column: 1 / -1; }
+  .drag-zones > button > span:nth-child(3) { grid-column: 2; grid-row: 1; }
+  .drag-game button, .ordering-game button { min-height: 44px; }
+  .drag-terms > button { font-size: 14px !important; }
+  .drag-zones > button > span:nth-child(2) { font-size: 14px !important; }
+  .ordering-row {
+    display: grid !important;
+    grid-template-columns: 28px minmax(0, 1fr);
+    overflow-wrap: anywhere;
+  }
+  .ordering-move-controls { grid-column: 2; }
+}

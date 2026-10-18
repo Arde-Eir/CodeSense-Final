@@ -47,6 +47,13 @@ test('campaign navigation chooses explicit routes, dismisses without navigating,
       assert.equal(select('campaign-navigation-panel'), null)
     }
 
+    await render('touch-focus', previousQuest, false)
+    await click('campaign-navigation-toggle')
+    await act(async () => dom.window.document.activeElement.dispatchEvent(new dom.window.FocusEvent('focusout', { bubbles: true, relatedTarget: null })))
+    assert.ok(select('campaign-navigation-panel'), 'Touch focus loss must not remove a destination before its click completes')
+    await click('navigate-home')
+    assert.equal(select('current-route').textContent, '/home')
+
     await render('dismiss', previousQuest, false)
     await click('campaign-navigation-toggle')
     await act(async () => dom.window.document.activeElement.dispatchEvent(new dom.window.KeyboardEvent('keydown', { key: 'Escape', bubbles: true })))

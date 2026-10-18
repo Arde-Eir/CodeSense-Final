@@ -3,6 +3,7 @@
   margin: 0 auto;
   padding: 12px 0 32px;
   font-family: 'IBM Plex Sans', 'Segoe UI', sans-serif;
+  overflow-wrap: anywhere;
 }
 
 .lesson-reading-header {
@@ -94,3 +95,11 @@
 .theory-prose code { color: #9bd9ff; background: #203044; padding: 2px 5px; border-radius: 4px; font-size: .9em; }
 .theory-prose pre { margin: 14px 0; padding: 16px; border: 1px solid #2b3b4d; border-radius: 9px; background: #090f17; overflow-x: auto; }
 .theory-prose pre code { padding: 0; background: none; color: #d3e4f5; white-space: pre; }
+
+@media (max-width: 600px) {
+  .lesson-reading-header { padding: 18px 16px; }
+  .theory-card { padding: 16px; }
+  .lesson-contents a { display: flex; align-items: center; min-height: 44px; font-size: 14px; }
+  .theory-definition-row { grid-template-columns: minmax(0, 1fr) !important; gap: 6px !important; }
+  .theory-definition-row > span { min-width: 0; font-size: 14px !important; }
+}

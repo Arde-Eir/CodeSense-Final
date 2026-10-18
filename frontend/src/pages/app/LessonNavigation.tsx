@@ -29,7 +29,7 @@ export const LessonNavigation: FC<{
 
   return (
     <div ref={containerRef} className="la-navigation"
-      onBlur={event => { if (!event.currentTarget.contains(event.relatedTarget)) close(); }}
+      onBlur={event => { if (event.relatedTarget instanceof Node && !event.currentTarget.contains(event.relatedTarget)) close(); }}
       onKeyDown={event => {
         if (event.key === 'Escape' && isOpen) {
           event.preventDefault();
@@ -40,7 +40,7 @@ export const LessonNavigation: FC<{
       <button ref={buttonRef} type="button" data-testid="campaign-navigation-toggle"
         className="la-navigation-toggle" title="Campaign navigation" aria-label="Campaign navigation"
         aria-expanded={isOpen} aria-controls={menuId} disabled={savingProgress}
-        onClick={() => setOpen(previous => !previous)}>←</button>
+        onClick={() => setOpen(previous => !previous)}><span aria-hidden="true">←</span><span className="la-navigation-label">Navigate</span></button>
       {isOpen && (
         <nav id={menuId} className="la-navigation-panel" aria-label="Campaign destinations" data-testid="campaign-navigation-panel">
           <div className="la-navigation-heading">Go to</div>

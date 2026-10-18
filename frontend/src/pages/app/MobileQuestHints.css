@@ -1,0 +1,30 @@
+.quest-hints-overlay { position: fixed; inset: 0; z-index: 2000; display: flex; justify-content: flex-end; }
+.quest-hints-backdrop { position: absolute; inset: 0; width: 100%; border: 0; border-radius: 0; padding: 0; background: #000b; touch-action: manipulation; }
+.quest-hints-sheet {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  width: min(100%, 480px);
+  height: 100dvh;
+  min-height: 0;
+  padding-top: env(safe-area-inset-top);
+  background: #0d1117;
+  color: #e6edf3;
+  box-shadow: -8px 0 32px #0008;
+  font-family: 'IBM Plex Sans', 'Segoe UI', sans-serif;
+}
+.quest-hints-heading { display: flex; align-items: center; justify-content: space-between; flex-shrink: 0; gap: 12px; padding: 12px 16px; border-bottom: 1px solid #30363d; }
+.quest-hints-heading h2 { margin: 0; font-size: 16px; line-height: 1.4; }
+.quest-hints-heading button { flex-shrink: 0; min-height: 44px; padding: 8px 12px; border: 1px solid #484f58; border-radius: 8px; background: #161b22; color: #e6edf3; font-size: 14px; }
+.quest-hints-content { display: flex; flex: 1; min-height: 0; overflow: hidden; }
+.quest-hints-sheet .la-side-content { border-left: 0 !important; }
+.quest-hints-sheet .la-side-scroll { display: flex; flex-direction: column; }
+.quest-hints-sheet .la-hints { order: -1; border-bottom: 1px solid #21262d; }
+.quest-hints-sheet .la-objectives, .quest-hints-sheet .la-hints { flex-shrink: 0; padding: 18px 16px !important; }
+.quest-hints-sheet .la-help-label { font-size: 12px !important; color: #8b949e !important; }
+.quest-hints-sheet .la-help-text { min-width: 0; font-size: 15px !important; line-height: 1.65 !important; }
+.quest-hints-sheet .la-reward-footer { padding: 12px 16px calc(12px + env(safe-area-inset-bottom)) !important; }
+.quest-hints-sheet .la-reward-footer button { min-height: 48px; font-size: 14px !important; line-height: 1.5; }
+.quest-hints-sheet button { cursor: pointer; touch-action: manipulation; }
+.quest-hints-sheet button:disabled { cursor: default; }
+.quest-hints-sheet button:focus-visible { outline: 2px solid #58a6ff; outline-offset: 2px; }
