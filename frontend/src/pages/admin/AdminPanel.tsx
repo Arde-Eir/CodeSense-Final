@@ -26,6 +26,7 @@ import {
   AdminUsersTab,
 } from './AdminCoreTabs'
 import { AdminLiveSupport } from './AdminLiveSupport'
+import { LevelXpSettings } from './LevelXpSettings'
 
 import {
   campaignDifficultyFromForm,
@@ -1384,6 +1385,7 @@ export const AdminPanel: React.FC = () => {
                                   </button>
                                 </div>
                               )}
+                              {user && <LevelXpSettings key={questForm.level} level={questForm.level} userId={user.id} />}
                             </div>
                           </div>
                         </div>

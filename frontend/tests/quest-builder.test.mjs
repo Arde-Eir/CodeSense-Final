@@ -19,6 +19,8 @@ const { BalloonPopGame } = await server.ssrLoadModule('/src/games/BalloonPopGame
 const { composeHints } = await server.ssrLoadModule('/src/campaign/composeHints.ts')
 const { generateAutoHints } = await server.ssrLoadModule('/src/campaign/generateAutoHints.ts')
 const { generateQuestHintRows } = await server.ssrLoadModule('/src/admin/questHints.ts')
+const { buildQuests } = await server.ssrLoadModule('/src/campaign/buildQuests.ts')
+const { computeActivityXP, computeHintPenalty, persistedXpGained, requireXpAmount } = await server.ssrLoadModule('/src/campaign/retakeXp.ts')
 
 const richTopics = [
   { heading: 'Values and Types', definitions: ['An integer is a data type for whole numbers.', 'A decimal is a numeric value with a fractional part.', 'A boolean is a data type with true or false values.', 'A character is a single text symbol.'], code: 'int score = 10;' },
@@ -51,6 +53,52 @@ void display(int values[3]) {
 }
 Summary
 Arrays store related values together. Use an index to read an element.`
+
+test('the saved builder reward and configured level limit drive campaign progress and completion XP', () => {
+  const quest = { ...questPreviewFromForm({ ...defaultQF(), basexp: 900, level: 3, sortorder: 1 }), id: 'arrays' }
+  const initial = buildQuests([quest], [], 1200)
+  const firstReward = computeActivityXP({ baseXp: initial.rows[0].basexp, isCompleted: false, isFullCompletion: true, levelRemaining: initial.stats.xpTotal - initial.stats.xpEarned, hintsUsed: 0 })
+  assert.equal(firstReward, 900)
+  const xpGained = persistedXpGained({ levelCap: 1200, priorXpGained: 0, xpDelta: firstReward })
+  const progress = { questid: quest.id, status: 'completed', first_completed_at: '2026-10-18T00:00:00Z', xp_gained: xpGained }
+  const reloaded = buildQuests([quest], [progress], 1200)
+  assert.equal(reloaded.stats.xpEarned, 900)
+  assert.equal(reloaded.stats.xpTotal, 1200)
+  assert.equal(reloaded.rows[0].everCompleted, true)
+  assert.equal(computeActivityXP({ baseXp: quest.basexp, isCompleted: true, isFullCompletion: true, levelRemaining: 300, hintsUsed: 0 }), 20)
+
+  const nextQuest = { ...quest, id: 'pointers', sortorder: 2 }
+  const next = buildQuests([quest, nextQuest], [progress], 1200)
+  assert.equal(next.rows[1].uiStatus, 'active')
+  assert.equal(computeActivityXP({ baseXp: next.rows[1].basexp, isCompleted: false, isFullCompletion: true, levelRemaining: next.stats.xpTotal - next.stats.xpEarned, hintsUsed: 0 }), 300)
+})
+
+test('hint deductions use the configured quest reward and completion respects zero limits', () => {
+  const inputs = { baseXp: 900, isCompleted: false, isFullCompletion: true, levelRemaining: 3000, hintsUsed: 1 }
+  assert.equal(computeActivityXP(inputs), 875)
+  assert.equal(computeActivityXP({ ...inputs, hintsUsed: 100 }), 450)
+  assert.equal(computeHintPenalty({ ...inputs, hintsUsed: 100 }).maxPenalty, 450)
+  assert.equal(computeActivityXP({ ...inputs, isCompleted: true }), 10)
+  assert.equal(computeActivityXP({ ...inputs, isFullCompletion: false }), 0)
+  assert.equal(computeActivityXP({ ...inputs, levelRemaining: 0 }), 0)
+  assert.equal(computeActivityXP({ ...inputs, baseXp: 0 }), 0)
+  for (const value of [-1, 1.5, NaN, Infinity, 2_147_483_648, '900', null]) {
+    assert.throws(() => requireXpAmount(value, 'XP'), RangeError)
+  }
+})
+
+test('lowering a level limit or deactivating a quest preserves previously earned XP', () => {
+  const activeQuest = { ...questPreviewFromForm(defaultQF()), id: 'active' }
+  const progress = [{ questid: 'inactive', status: 'completed', first_completed_at: '2026-10-18T00:00:00Z', xp_gained: 900 }]
+  const lowered = buildQuests([activeQuest], progress, 500)
+  assert.equal(lowered.stats.xpEarned, 900)
+  assert.equal(lowered.stats.xpTotal, 500)
+  assert.equal(lowered.stats.finished, 0)
+  assert.equal(persistedXpGained({ levelCap: 500, priorXpGained: 900, xpDelta: 0 }), 900)
+  assert.equal(persistedXpGained({ levelCap: 0, priorXpGained: 900, xpDelta: 0 }), 900)
+  const raised = buildQuests([activeQuest], progress, 1500)
+  assert.equal(computeActivityXP({ baseXp: 900, isCompleted: false, isFullCompletion: true, levelRemaining: raised.stats.xpTotal - raised.stats.xpEarned, hintsUsed: 0 }), 600)
+})
 
 test('an array lesson generates all five valid activities with code beside its explanation', () => {
   const draft = generateQuestDraftFromText(arrayLesson, 'arrays.pdf')

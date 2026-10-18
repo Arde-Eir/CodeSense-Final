@@ -10,7 +10,8 @@ import type {
 } from '@/types/campaign';
 import { defaultLevelInfoForPhase, isCampaignPhase, levelForPhase, phaseForLevel } from '@/types/campaign';
 import { buildQuests } from '@/campaign/buildQuests';
-import { FIRST_COMPLETION_XP, RETAKE_COMPLETION_XP, levelXpCapForPhase } from '@/campaign/retakeXp';
+import { computeActivityXP, requireXpAmount } from '@/campaign/retakeXp';
+import { readLevelXpCap } from '@/services/campaignXpSettings';
 
 const ACTIVITY_ICON: Record<string, string> = {
   drag_drop:       '🃏',
@@ -108,8 +109,8 @@ const SubTopicItem: React.FC<{ title: string; isDone: boolean }> = ({ title, isD
 );
 
 const QuestCard: React.FC<{
-  quest: QuestRow; index: number; onClick: () => void;
-}> = ({ quest, index, onClick }) => {
+  quest: QuestRow; index: number; levelRemaining: number; onClick: () => void;
+}> = ({ quest, index, levelRemaining, onClick }) => {
   const [isOpen, setIsOpen] = useState(false);
   const isDone   = quest.uiStatus === 'completed';
   const isLocked = quest.uiStatus === 'locked';
@@ -122,11 +123,12 @@ const QuestCard: React.FC<{
     return ['Foundational concepts covered in this lesson'];
   })();
 
+  const reward = computeActivityXP({ baseXp: quest.basexp, isCompleted: quest.everCompleted, isFullCompletion: true, levelRemaining, hintsUsed: 0 });
   const cta = isDone
     ? 'Review / Retake'
     : quest.everCompleted
-      ? `Resume Quest +${RETAKE_COMPLETION_XP} XP`
-      : `Start Quest +${FIRST_COMPLETION_XP} XP`;
+      ? `Resume Quest +${reward} XP`
+      : `Start Quest +${reward} XP`;
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', marginBottom: 12, opacity: isLocked ? 0.5 : 1 }}>
@@ -149,7 +151,7 @@ const QuestCard: React.FC<{
         <div style={{ flex: 1, minWidth: 0 }}>
           <div style={{ fontSize: 14, fontWeight: 700, color: '#e6edf3', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{quest.title}</div>
           <div style={{ fontSize: 10, color: '#484f58', textTransform: 'uppercase', letterSpacing: '0.5px', marginTop: 2 }}>
-            {quest.everCompleted ? RETAKE_COMPLETION_XP : FIRST_COMPLETION_XP} XP · {questTypeLabel(quest.question_type)}
+            {reward} XP · {questTypeLabel(quest.question_type)}
             {quest.everCompleted && !isDone && <span style={{ color: '#3fb950', marginLeft: 8 }}>· FIRST FINISH ✓</span>}
           </div>
         </div>
@@ -235,11 +237,10 @@ const QuestMixRow: React.FC<{ icon: string; label: string; value: string | numbe
   </div>
 );
 
-const QuestMixPanel: React.FC<{ quests: QuestRow[] }> = ({ quests }) => {
+const QuestMixPanel: React.FC<{ quests: QuestRow[]; totalXP: number }> = ({ quests, totalXP }) => {
   const lessons  = quests.filter(q => activityTypesForQuest(q).some(t => t === 'drag_drop' || t === 'code_fill' || t === 'ordering')).length;
   const quizzes  = quests.filter(q => activityTypesForQuest(q).includes('multiple_choice')).length;
   const balloons = quests.filter(q => activityTypesForQuest(q).includes('pop_balloon')).length;
-  const totalXP = levelXpCapForPhase(quests[0]?.phase);
   const seen    = new Set<string>();
   for (const q of quests) {
     activityTypesForQuest(q).forEach(t => seen.add(t));
@@ -346,6 +347,9 @@ export const CampaignInside: React.FC = () => {
         setLevelInfo(defaultLevelInfoForPhase(phase));
       }
 
+      const levelXpCap = await readLevelXpCap(phase);
+      if (fetchId !== fetchIdRef.current) return;
+
       const nextPhase = phaseForLevel(levelNumber + 1);
       const { data: nextQuests, error: nextQuestError } = await supabase
         .from('quests')
@@ -363,13 +367,13 @@ export const CampaignInside: React.FC = () => {
         .select('id,title,description,difficulty,level,phase,basexp,requiredxp,sortorder,isactive,question_type,objectives,hints,game_items,drop_zones,ordering_items,mc_questions,code_fill_items,tutorial_title,tutorial_body,tutorial_image,theory_sections')
         .eq('phase', phase)
         .eq('mode', 'campaign')
-        .eq('isactive', true)
         .order('sortorder', { ascending: true })
         .order('id', { ascending: true });
       if (fetchId !== fetchIdRef.current) return;
       if (qErr) throw qErr;
       if (!qData) throw new Error('The current level quest query returned no data.');
       const qList = qData as unknown as Quest[];
+      for (const quest of qList) requireXpAmount(quest.basexp, `XP Reward for quest ${quest.id}`);
 
       let mp: MissionProgress[] = [];
       if (qList.length > 0) {
@@ -384,7 +388,7 @@ export const CampaignInside: React.FC = () => {
         mp = pData as MissionProgress[];
       }
 
-      const built = buildQuests(qList, mp);
+      const built = buildQuests(qList.filter(quest => quest.isactive), mp, levelXpCap);
       setQuests(built.rows);
       setStats(built.stats);
       setHasNextLevel(nextQuests.length > 0);
@@ -551,7 +555,7 @@ export const CampaignInside: React.FC = () => {
                     </span>
                   </div>
                 : quests.map((q, i) => (
-                    <QuestCard key={q.id} quest={q} index={i} onClick={() => navigate(lessonPathForQuest(q))} />
+                    <QuestCard key={q.id} quest={q} index={i} levelRemaining={Math.max(0, stats.xpTotal - stats.xpEarned)} onClick={() => navigate(lessonPathForQuest(q))} />
                   ))
               }
             </div>
@@ -559,7 +563,7 @@ export const CampaignInside: React.FC = () => {
             <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
               <ProgressPanel      stats={stats} hasNextLevel={hasNextLevel} />
               <ActivityTypesPanel quests={quests} />
-              <QuestMixPanel      quests={quests} />
+              <QuestMixPanel      quests={quests} totalXP={stats.xpTotal} />
 
               {!loading && !error && nextQuest && (
                 <button onClick={() => navigate(lessonPathForQuest(nextQuest))} style={{ width: '100%', padding: 12, borderRadius: 10, border: 'none', background: `linear-gradient(135deg,${accent},${accent}cc)`, color: '#080c11', fontSize: 12, fontWeight: 900, cursor: 'pointer', letterSpacing: '.3px', fontFamily: "'Syne',sans-serif", boxShadow: `0 4px 18px ${accent}40`, transition: 'all .2s', animation: 'questIn .5s ease .38s both', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6 }}

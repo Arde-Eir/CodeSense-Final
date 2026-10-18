@@ -1,7 +1,6 @@
 import type { ActivityTab, CorePhase, Phase } from '@/types/campaign';
 import { levelForPhase } from '@/types/campaign';
 
-export const FIRST_COMPLETION_XP = 200;
 export const RETAKE_COMPLETION_XP = 20;
 export const HINT_XP_COST = 25;
 export const HINT_PENALTY_CAP_RATIO = 0.5;
@@ -21,6 +20,8 @@ export function levelXpCapForPhase(phase: Phase | null | undefined): number {
 }
 
 export interface RetakeXpInputs {
+  /** Saved quests.basexp for the first full completion. */
+  baseXp:           number;
   /** Durable quest completion flag. true means this completion is a retake. */
   isCompleted:      boolean;
   /** True when all required quest activities are complete. */
@@ -28,18 +29,26 @@ export interface RetakeXpInputs {
   /** Remaining headroom on the phase's XP cap. 0 means cap is hit. */
   levelRemaining:   number;
   /** Cumulative hints revealed during this attempt. */
-  hintsUsed?:        number;
+  hintsUsed:        number;
 }
 
-export function computeHintPenalty(inp: Pick<RetakeXpInputs, 'isCompleted' | 'hintsUsed'>): {
+export function requireXpAmount(value: unknown, label: string): number {
+  if (typeof value !== 'number' || !Number.isInteger(value) || value < 0 || value > 2_147_483_647) {
+    throw new RangeError(`${label} must be a whole number between 0 and 2147483647; received ${String(value)}.`);
+  }
+  return value;
+}
+
+export function computeHintPenalty(inp: Pick<RetakeXpInputs, 'baseXp' | 'isCompleted' | 'hintsUsed'>): {
   baseReward: number;
   penalty: number;
   maxPenalty: number;
   capped: boolean;
 } {
-  const baseReward = inp.isCompleted ? RETAKE_COMPLETION_XP : FIRST_COMPLETION_XP;
+  const questReward = requireXpAmount(inp.baseXp, 'Quest XP Reward');
+  const baseReward = inp.isCompleted ? RETAKE_COMPLETION_XP : questReward;
   const maxHintPenalty = Math.floor(baseReward * HINT_PENALTY_CAP_RATIO);
-  const rawPenalty = Math.max(0, inp.hintsUsed ?? 0) * HINT_XP_COST;
+  const rawPenalty = Math.max(0, inp.hintsUsed) * HINT_XP_COST;
   const hintPenalty = Math.min(rawPenalty, maxHintPenalty);
   return {
     baseReward,
@@ -70,7 +79,7 @@ export interface PersistXpInputs {
  *  The row is monotonic and capped so reloads cannot reopen cap headroom. */
 export function persistedXpGained(inp: PersistXpInputs): number {
   const cap = Math.max(0, inp.levelCap);
-  return Math.min(cap, Math.max(inp.priorXpGained, inp.priorXpGained + Math.max(0, inp.xpDelta)));
+  return Math.max(inp.priorXpGained, Math.min(cap, inp.priorXpGained + Math.max(0, inp.xpDelta)));
 }
 
 /** True when at least one tab in `newFinished` was previously completed —

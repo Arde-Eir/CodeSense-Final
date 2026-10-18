@@ -18,9 +18,11 @@ import { isCampaignPhase, levelForPhase, phaseForLevel } from '@/types/campaign'
 import { composeHints, type ItemHintInput } from '@/campaign/composeHints';
 import { generateAutoHints } from '@/campaign/generateAutoHints';
 import {
-  computeActivityXP, computeHintPenalty, persistedXpGained, levelXpCapForPhase,
+  computeActivityXP, computeHintPenalty, persistedXpGained, requireXpAmount,
   RETAKE_COMPLETION_XP, HINT_XP_COST, HINT_PENALTY_CAP_RATIO,
 } from '@/campaign/retakeXp';
+import { readLevelXpCap } from '@/services/campaignXpSettings';
+import { LessonNavigation } from './LessonNavigation';
 
 const FETCH_TIMEOUT_MS   = 10_000;
 
@@ -414,6 +416,7 @@ export const LessonActivity: React.FC = () => {
   const [currentItemIdx, setCurrentItemIdx] = useState(0);
 
   const [nextQuestId, setNextQuestId] = useState<string | null | undefined>(undefined);
+  const [previousQuest, setPreviousQuest] = useState<Pick<Quest, 'id' | 'title'> | null>(null);
 
   const [xpToast, setXpToast] = useState({ visible: false, amount: 0, repeat: false, levelUp: false, newLevel: undefined as number | undefined });
   const [hintToast, setHintToast] = useState({ visible: false });
@@ -467,6 +470,7 @@ export const LessonActivity: React.FC = () => {
     setEarnedXP(0);
     setHintsUsed(0);
     setNextQuestId(undefined);
+    setPreviousQuest(null);
     setAppPhase('tutorial');
     syncCompletedActivities([]);
     everCompletedRef.current         = [];
@@ -492,11 +496,12 @@ export const LessonActivity: React.FC = () => {
       if (quest.mode !== 'campaign' || !quest.isactive || !isCampaignPhase(quest.phase)) {
         throw new Error('This lesson is not an active Campaign quest.');
       }
+      requireXpAmount(quest.basexp, `XP Reward for quest ${quest.id}`);
 
       const { data: phaseQuests, error: phaseError } = await withTimeout(
         supabase
           .from('quests')
-          .select('id,sortorder,isactive')
+          .select('id,title,sortorder,isactive')
           .eq('phase', quest.phase)
           .eq('mode', 'campaign')
           .order('sortorder', { ascending: true })
@@ -508,6 +513,7 @@ export const LessonActivity: React.FC = () => {
       const activeQuests = phaseQuests.filter(row => row.isactive);
       const questIndex = activeQuests.findIndex(row => row.id === quest.id);
       if (questIndex < 0) throw new Error('This Campaign quest is no longer available.');
+      let previousQuest: Pick<Quest, 'id' | 'title'> | null = activeQuests[questIndex - 1] ?? null;
 
       const phaseIds = phaseQuests.map(row => row.id);
       const { data: phaseProgress, error: phaseProgressError } = await withTimeout(
@@ -531,10 +537,12 @@ export const LessonActivity: React.FC = () => {
         const { data: previousQuests, error: previousError } = await withTimeout(
           supabase
             .from('quests')
-            .select('id')
+            .select('id,title')
             .eq('phase', previousPhase)
             .eq('mode', 'campaign')
             .eq('isactive', true)
+            .order('sortorder', { ascending: false })
+            .order('id', { ascending: false })
         );
         if (loadEpoch !== loadEpochRef.current) return;
         if (previousError) throw new Error(`Could not check the previous level: ${previousError.message}`);
@@ -555,9 +563,18 @@ export const LessonActivity: React.FC = () => {
         if (previousQuests.some(row => !finishedPrevious.has(row.id))) {
           throw new Error('Finish the previous Campaign level before opening this lesson.');
         }
+        if (questIndex === 0) previousQuest = previousQuests[0];
       }
 
-      levelXpCapRef.current = levelXpCapForPhase(quest.phase);
+      if (previousQuest && (typeof previousQuest.id !== 'string' || !previousQuest.id ||
+        typeof previousQuest.title !== 'string' || !previousQuest.title.trim())) {
+        throw new TypeError(`The previous Campaign quest for ${quest.id} has an invalid id or title.`);
+      }
+      setPreviousQuest(previousQuest ? { id: previousQuest.id, title: previousQuest.title } : null);
+
+      const levelXpCap = await withTimeout(readLevelXpCap(quest.phase));
+      if (loadEpoch !== loadEpochRef.current) return;
+      levelXpCapRef.current = levelXpCap;
       levelXpEarnedRef.current = phaseProgress.reduce((sum, row) => sum + (row.xp_gained ?? 0), 0);
       setNextQuestId(activeQuests[questIndex + 1]?.id ?? null);
 
@@ -690,18 +707,21 @@ export const LessonActivity: React.FC = () => {
     ? earnedXP
     : isRepeatTab
       ? computeActivityXP({
+          baseXp: quest?.basexp ?? 0,
           isCompleted: true,
           isFullCompletion: true,
           levelRemaining,
           hintsUsed: hintsUsedRef.current,
         })
       : computeActivityXP({
+          baseXp: quest?.basexp ?? 0,
           isCompleted: false,
           isFullCompletion: true,
           levelRemaining,
           hintsUsed: hintsUsedRef.current,
         });
   const rewardDetails = computeHintPenalty({
+    baseXp: quest?.basexp ?? 0,
     isCompleted: isRepeatTab,
     hintsUsed: hintsUsedRef.current,
   });
@@ -759,8 +779,9 @@ export const LessonActivity: React.FC = () => {
     const allDone = availableTabs.every(t => newFinished.includes(t));
     // XP is only awarded on full quest completion. Use the durable
     // is-completed flag (`first_completed_at` loaded into this ref) to choose
-    // 200 XP first-time vs 20 XP retake, then clamp by the fixed level cap.
+    // saved quest reward vs 20 XP retake, then clamp by the saved level cap.
     const xpGainedNow = computeActivityXP({
+      baseXp: quest.basexp,
       isCompleted:    hasEverFullyCompletedRef.current,
       isFullCompletion: allDone,
       levelRemaining,
@@ -925,24 +946,7 @@ export const LessonActivity: React.FC = () => {
 
       <header className="la-header" style={{ height: 56, background: 'rgba(13,17,23,0.97)', borderBottom: '1px solid #21262d', display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '0 24px', flexShrink: 0 }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 10, minWidth: 0 }}>
-          <button
-            onClick={() => navigate(-1)}
-            title="Back to level"
-            style={{
-              background: 'rgba(255,255,255,0.1)',
-              border: '1px solid rgba(255,255,255,0.25)',
-              color: '#e6edf3',
-              cursor: 'pointer',
-              fontSize: 18,
-              width: 38, height: 38,
-              borderRadius: '50%',
-              display: 'flex', alignItems: 'center', justifyContent: 'center',
-              flexShrink: 0,
-              transition: 'all .15s',
-            }}
-            onMouseEnter={e => { e.currentTarget.style.background = 'rgba(255,255,255,0.2)'; e.currentTarget.style.borderColor = 'rgba(255,255,255,0.45)'; }}
-            onMouseLeave={e => { e.currentTarget.style.background = 'rgba(255,255,255,0.1)'; e.currentTarget.style.borderColor = 'rgba(255,255,255,0.25)'; }}
-          >←</button>
+          <LessonNavigation key={quest.id} phase={quest.phase!} previousQuest={previousQuest} savingProgress={savingProgress} />
           <span className="la-phase-label" style={{ fontSize: 11, color: '#484f58', fontFamily: "'JetBrains Mono',monospace", letterSpacing: '1px', flexShrink: 0 }}>{phaseLabel}</span>
           <span className="la-phase-label" style={{ color: '#21262d', flexShrink: 0 }}>›</span>
           <span className="la-quest-title" style={{ fontSize: 13, fontWeight: 700, color: '#e6edf3', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: 480 }}>{quest.title}</span>

@@ -1,9 +1,9 @@
 import type {
   Quest, MissionProgress, QuestRow, QuestUIStatus, LevelStats,
 } from '@/types/campaign';
-import { levelXpCapForPhase } from './retakeXp';
+import { requireXpAmount } from './retakeXp';
 
-export function buildQuests(quests: Quest[], progress: MissionProgress[]): {
+export function buildQuests(quests: Quest[], progress: MissionProgress[], levelXpCap: number): {
   rows: QuestRow[];
   stats: LevelStats;
 } {
@@ -41,8 +41,8 @@ export function buildQuests(quests: Quest[], progress: MissionProgress[]): {
   });
 
   const finished = rows.filter(r => r.everCompleted).length;
-  const xpEarned = rows.reduce((s, r) => s + r.xpGained, 0);
-  const xpTotal  = levelXpCapForPhase(rows[0]?.phase);
+  const xpEarned = Object.values(pMap).reduce((sum, row) => sum + row.xp_gained, 0);
+  const xpTotal = requireXpAmount(levelXpCap, 'Level XP limit');
 
   let streak = 0;
   for (const r of rows) {
