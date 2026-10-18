@@ -73,7 +73,7 @@ const StatBar: React.FC<{
       <span style={{ fontSize: 18, flexShrink: 0, width: 24, textAlign: 'center' }}>{icon}</span>
       <div style={{ flex: 1 }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 5 }}>
-          <span style={{ fontSize: 11, color: '#c9d1d9', fontWeight: 600, fontFamily: "'Syne', sans-serif" }}>{label}</span>
+          <span style={{ fontSize: 11, color: '#c9d1d9', fontWeight: 600, fontFamily: "'IBM Plex Sans', sans-serif" }}>{label}</span>
           <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
             {maxed && (
               <span style={{ fontSize: 9, fontWeight: 800, color: '#e3b341', background: 'rgba(227,179,65,0.15)', border: '1px solid rgba(227,179,65,0.4)', borderRadius: 4, padding: '1px 5px', fontFamily: "'JetBrains Mono',monospace", letterSpacing: '0.5px' }}>MAX</span>
@@ -192,7 +192,7 @@ const ProgressPanel: React.FC<{ stats: LevelStats; hasNextLevel: boolean }> = ({
       <div style={{ height: 1, background: 'rgba(255,255,255,.04)', margin: '3px 0' }} />
       <StatBar icon="🔥" label="Streak"       current={stats.streak}   total={stats.total}   color="#f0883e" />
       {xpMaxed && (
-        <div style={{ marginTop: 12, padding: '8px 12px', borderRadius: 8, background: 'rgba(227,179,65,0.08)', border: '1px solid rgba(227,179,65,0.3)', fontSize: 11, color: '#e3b341', fontFamily: "'Syne',sans-serif", textAlign: 'center', lineHeight: 1.5 }}>
+        <div style={{ marginTop: 12, padding: '8px 12px', borderRadius: 8, background: 'rgba(227,179,65,0.08)', border: '1px solid rgba(227,179,65,0.3)', fontSize: 11, color: '#e3b341', fontFamily: "'IBM Plex Sans',sans-serif", textAlign: 'center', lineHeight: 1.5 }}>
           ⚡ Level XP maxed!{hasNextLevel ? ' Advance to the next level to earn more.' : ' You\'ve earned all available XP in this level.'}
         </div>
       )}
@@ -217,10 +217,10 @@ const ActivityTypesPanel: React.FC<{ quests: QuestRow[] }> = ({ quests }) => {
             <span style={{ fontSize: 15, flexShrink: 0, marginTop: 1 }}>{ACTIVITY_ICON[t] ?? '🎮'}</span>
             <div style={{ flex: 1, minWidth: 0 }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', gap: 6 }}>
-                <span style={{ fontSize: 11, color: '#c9d1d9', fontWeight: 600, fontFamily: "'Syne',sans-serif" }}>{ACTIVITY_LABEL[t] ?? t}</span>
+                <span style={{ fontSize: 11, color: '#c9d1d9', fontWeight: 600, fontFamily: "'IBM Plex Sans',sans-serif" }}>{ACTIVITY_LABEL[t] ?? t}</span>
                 <span style={{ fontSize: 9, color: '#484f58', fontFamily: "'JetBrains Mono',monospace" }}>×{counts[t]}</span>
               </div>
-              <div style={{ fontSize: 10, color: '#484f58', fontFamily: "'Syne',sans-serif" }}>{ACTIVITY_DESC[t] ?? ''}</div>
+              <div style={{ fontSize: 10, color: '#484f58', fontFamily: "'IBM Plex Sans',sans-serif" }}>{ACTIVITY_DESC[t] ?? ''}</div>
             </div>
           </div>
         ))
@@ -232,7 +232,7 @@ const ActivityTypesPanel: React.FC<{ quests: QuestRow[] }> = ({ quests }) => {
 const QuestMixRow: React.FC<{ icon: string; label: string; value: string | number }> = ({ icon, label, value }) => (
   <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 7 }}>
     <span style={{ fontSize: 13, width: 18, textAlign: 'center' }}>{icon}</span>
-    <span style={{ fontSize: 11, color: '#c9d1d9', fontFamily: "'Syne',sans-serif" }}>{label}</span>
+    <span style={{ fontSize: 11, color: '#c9d1d9', fontFamily: "'IBM Plex Sans',sans-serif" }}>{label}</span>
     <span style={{ marginLeft: 'auto', fontSize: 11, color: '#e6edf3', fontWeight: 700, fontFamily: "'JetBrains Mono',monospace" }}>{value}</span>
   </div>
 );
@@ -482,8 +482,8 @@ export const CampaignInside: React.FC = () => {
             <div style={{ position: 'absolute', inset: 0, background: 'linear-gradient(90deg,rgba(8,12,17,.88) 0%,rgba(8,12,17,.35) 55%,transparent 100%)' }} />
             <div style={{ position: 'relative', zIndex: 1, padding: '22px 28px', height: '100%', display: 'flex', flexDirection: 'column', justifyContent: 'flex-end' }}>
               <div style={{ fontSize: 9, color: accent, fontFamily: "'JetBrains Mono',monospace", fontWeight: 700, letterSpacing: '2.5px', textTransform: 'uppercase', marginBottom: 8, opacity: 0.9 }}>{levelInfo.subtitle}</div>
-              <h1 style={{ fontSize: 'clamp(20px,2.8vw,28px)', fontWeight: 900, color: '#f0f6fc', letterSpacing: '-0.5px', lineHeight: 1.1, fontFamily: "'Syne',sans-serif" }}>{levelInfo.title}</h1>
-              {levelInfo.description && <p style={{ fontSize: 11, color: 'rgba(240,246,252,.5)', marginTop: 7, maxWidth: 460, lineHeight: 1.6, fontFamily: "'Syne',sans-serif" }}>{levelInfo.description}</p>}
+              <h1 style={{ fontSize: 'clamp(20px,2.8vw,28px)', fontWeight: 700, color: '#f0f6fc', letterSpacing: '-0.5px', lineHeight: 1.1, fontFamily: "'IBM Plex Sans',sans-serif" }}>{levelInfo.title}</h1>
+              {levelInfo.description && <p style={{ fontSize: 11, color: 'rgba(240,246,252,.5)', marginTop: 7, maxWidth: 460, lineHeight: 1.6, fontFamily: "'IBM Plex Sans',sans-serif" }}>{levelInfo.description}</p>}
             </div>
             <div style={{ position: 'absolute', top: 16, right: 16, zIndex: 2, display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 8 }}>
               <div style={{ position: 'relative', height: 32, display: 'flex', alignItems: 'center' }}>
@@ -566,7 +566,7 @@ export const CampaignInside: React.FC = () => {
               <QuestMixPanel      quests={quests} totalXP={stats.xpTotal} />
 
               {!loading && !error && nextQuest && (
-                <button onClick={() => navigate(lessonPathForQuest(nextQuest))} style={{ width: '100%', padding: 12, borderRadius: 10, border: 'none', background: `linear-gradient(135deg,${accent},${accent}cc)`, color: '#080c11', fontSize: 12, fontWeight: 900, cursor: 'pointer', letterSpacing: '.3px', fontFamily: "'Syne',sans-serif", boxShadow: `0 4px 18px ${accent}40`, transition: 'all .2s', animation: 'questIn .5s ease .38s both', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6 }}
+                <button onClick={() => navigate(lessonPathForQuest(nextQuest))} style={{ width: '100%', padding: 12, borderRadius: 10, border: 'none', background: `linear-gradient(135deg,${accent},${accent}cc)`, color: '#080c11', fontSize: 12, fontWeight: 700, cursor: 'pointer', letterSpacing: '.3px', fontFamily: "'IBM Plex Sans',sans-serif", boxShadow: `0 4px 18px ${accent}40`, transition: 'all .2s', animation: 'questIn .5s ease .38s both', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6 }}
                   onMouseEnter={e => { e.currentTarget.style.transform = 'translateY(-2px)'; e.currentTarget.style.boxShadow = `0 8px 26px ${accent}55`; }}
                   onMouseLeave={e => { e.currentTarget.style.transform = 'none'; e.currentTarget.style.boxShadow = `0 4px 18px ${accent}40`; }}>
                   <span style={{ flexShrink: 0 }}>▶ Continue —</span>
@@ -577,9 +577,9 @@ export const CampaignInside: React.FC = () => {
               {!loading && allDone && (
                 <div style={{ padding: '14px 14px 12px', borderRadius: 10, textAlign: 'center', background: 'rgba(63,185,80,.08)', border: '1px solid rgba(63,185,80,.3)', animation: 'questIn .5s ease .38s both' }}>
                   <div style={{ fontSize: 22, marginBottom: 6 }}>🏆</div>
-                  <div style={{ fontSize: 12, fontWeight: 700, color: '#3fb950', fontFamily: "'Syne',sans-serif" }}>Level {levelNumber} Complete!</div>
+                  <div style={{ fontSize: 12, fontWeight: 700, color: '#3fb950', fontFamily: "'IBM Plex Sans',sans-serif" }}>Level {levelNumber} Complete!</div>
                   <div style={{ fontSize: 10, color: '#484f58', marginTop: 4, fontFamily: "'JetBrains Mono',monospace" }}>Total XP earned: {stats.xpEarned}</div>
-                  <div style={{ fontSize: 10, color: '#8b949e', marginTop: 8, fontFamily: "'Syne',sans-serif" }}>
+                  <div style={{ fontSize: 10, color: '#8b949e', marginTop: 8, fontFamily: "'IBM Plex Sans',sans-serif" }}>
                     Use <span style={{ color: accent, fontWeight: 700 }}>{completionCta}</span> above.
                   </div>
                 </div>
@@ -593,13 +593,13 @@ export const CampaignInside: React.FC = () => {
 };
 
 const STYLE_CSS = `
-  @import url('https://fonts.googleapis.com/css2?family=Syne:wght@400;600;700;800;900&family=JetBrains+Mono:wght@400;600;700&display=swap');
+  @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600;700&display=swap');
   @keyframes questIn   { from { opacity: 0; transform: translateX(-10px); } to { opacity: 1; transform: translateX(0); } }
   @keyframes heroIn    { from { opacity: 0; transform: translateY(-8px); }  to { opacity: 1; transform: translateY(0); } }
   @keyframes shimPulse { 0%, 100% { opacity: .35; } 50% { opacity: .7; } }
   @keyframes scan      { 0% { transform: translateY(-80%); opacity: 0; } 20% { opacity: 1; } 80% { opacity: 1; } 100% { transform: translateY(300%); opacity: 0; } }
   * { box-sizing: border-box; margin: 0; padding: 0; }
-  .ci-root { min-height: 100vh; background: #080c11; font-family: 'Syne',sans-serif; color: #e6edf3; }
+  .ci-root { min-height: 100vh; background: #080c11; font-family: 'IBM Plex Sans', 'Segoe UI', system-ui, sans-serif; color: #e6edf3; }
   ::-webkit-scrollbar { width: 5px; }
   ::-webkit-scrollbar-track { background: transparent; }
   ::-webkit-scrollbar-thumb { background: #21262d; border-radius: 3px; }
