@@ -1,5 +1,7 @@
 import React from 'react';
 import type { TheorySection } from '@/types/campaign';
+import { TheoryProse } from './TheoryProse';
+import './TheorySection.css';
 
 export const TheorySectionBlock: React.FC<{ sec: TheorySection }> = ({ sec }) => {
   const type = sec.type ?? 'default';
@@ -25,7 +27,7 @@ export const TheorySectionBlock: React.FC<{ sec: TheorySection }> = ({ sec }) =>
         <span style={{ fontSize: 10, fontWeight: 800, color: '#a371f7', fontFamily: "'JetBrains Mono',monospace", letterSpacing: '2px', textTransform: 'uppercase' }}>DID YOU KNOW?</span>
       </div>
       {sec.heading && <div style={{ fontSize: 14, fontWeight: 700, color: '#c9d1d9', marginBottom: 6, fontFamily: 'Inter,sans-serif' }}>{sec.heading}</div>}
-      {sec.body && <p style={{ fontSize: 13, color: '#8b949e', lineHeight: 1.75, margin: 0, fontFamily: 'Inter,sans-serif' }}>{sec.body}</p>}
+      {sec.body && <TheoryProse text={sec.body} />}
     </div>
   );
 
@@ -36,7 +38,7 @@ export const TheorySectionBlock: React.FC<{ sec: TheorySection }> = ({ sec }) =>
         <span style={{ fontSize: 10, fontWeight: 800, color: '#f85149', fontFamily: "'JetBrains Mono',monospace", letterSpacing: '2px', textTransform: 'uppercase' }}>WATCH OUT</span>
       </div>
       {sec.heading && <div style={{ fontSize: 14, fontWeight: 700, color: '#c9d1d9', marginBottom: 10, fontFamily: 'Inter,sans-serif' }}>{sec.heading}</div>}
-      {sec.body && <p style={{ fontSize: 13, color: '#8b949e', lineHeight: 1.75, margin: '0 0 10px', fontFamily: 'Inter,sans-serif' }}>{sec.body}</p>}
+      {sec.body && <TheoryProse text={sec.body} />}
       {sec.mistakes?.map((m, i) => (
         <div key={i} style={{ marginBottom: 10, padding: '10px 12px', borderRadius: 8, background: 'rgba(0,0,0,0.2)' }}>
           <div style={{ display: 'flex', alignItems: 'flex-start', gap: 8, marginBottom: 6 }}>
@@ -60,7 +62,7 @@ export const TheorySectionBlock: React.FC<{ sec: TheorySection }> = ({ sec }) =>
         <span style={{ fontSize: 10, fontWeight: 800, color: '#facc15', fontFamily: "'JetBrains Mono',monospace", letterSpacing: '2px', textTransform: 'uppercase' }}>TIPS</span>
       </div>
       {sec.heading && <div style={{ fontSize: 14, fontWeight: 700, color: '#c9d1d9', marginBottom: 10, fontFamily: 'Inter,sans-serif' }}>{sec.heading}</div>}
-      {sec.body && <p style={{ fontSize: 13, color: '#8b949e', lineHeight: 1.75, margin: '0 0 10px', fontFamily: 'Inter,sans-serif' }}>{sec.body}</p>}
+      {sec.body && <TheoryProse text={sec.body} />}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(180px, 1fr))', gap: 10 }}>
         {sec.tips?.map((t, i) => (
           <div key={i} style={{ padding: '10px 12px', borderRadius: 8, background: 'rgba(0,0,0,0.2)', border: '1px solid rgba(255,255,255,0.04)' }}>
@@ -90,7 +92,7 @@ export const TheorySectionBlock: React.FC<{ sec: TheorySection }> = ({ sec }) =>
         <span style={{ fontSize: 10, fontWeight: 800, color: '#3fb950', fontFamily: "'JetBrains Mono',monospace", letterSpacing: '2px', textTransform: 'uppercase' }}>QUICK RECAP</span>
       </div>
       {sec.heading && <div style={{ fontSize: 14, fontWeight: 700, color: '#c9d1d9', marginBottom: 8, fontFamily: 'Inter,sans-serif' }}>{sec.heading}</div>}
-      {sec.body && <p style={{ fontSize: 13, color: '#8b949e', lineHeight: 1.75, margin: '0 0 8px', fontFamily: 'Inter,sans-serif' }}>{sec.body}</p>}
+      {sec.body && <TheoryProse text={sec.body} />}
       {sec.bullets && (
         <ul style={{ paddingLeft: 4, margin: '4px 0 0', listStyle: 'none' }}>
           {sec.bullets.map((b, i) => (
@@ -142,9 +144,9 @@ export const TheorySectionBlock: React.FC<{ sec: TheorySection }> = ({ sec }) =>
   }
 
   return (
-    <div style={{ marginBottom: 16, borderRadius: 10, padding: '16px 18px', background: 'rgba(255,255,255,0.02)', border: '1px solid rgba(255,255,255,0.06)' }}>
-      {sec.heading && <div style={{ fontSize: 14, fontWeight: 700, color: '#e6edf3', marginBottom: 8, fontFamily: 'Inter,sans-serif' }}>{sec.heading}</div>}
-      {sec.body && <p style={{ fontSize: 13, color: '#8b949e', lineHeight: 1.75, margin: 0, fontFamily: 'Inter,sans-serif' }}>{sec.body}</p>}
+    <div className="theory-card">
+      {sec.heading && <h3>{sec.heading}</h3>}
+      {sec.body && <TheoryProse text={sec.body} />}
       {sec.bullets && <ul style={{ paddingLeft: 18, margin: '8px 0 0' }}>{sec.bullets.map((b, i) => <li key={i} style={{ fontSize: 13, color: '#8b949e', lineHeight: 1.7, fontFamily: 'Inter,sans-serif' }}>{b}</li>)}</ul>}
       {sec.items && sec.items.length > 0 && (
         <div style={{ marginTop: 10, display: 'flex', flexDirection: 'column', gap: 6 }}>

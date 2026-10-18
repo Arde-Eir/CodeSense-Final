@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState, useCallback } from 'react';
+import React, { useEffect, useEffectEvent, useRef, useState, useCallback } from 'react';
 import type { MCQ } from '@/types/campaign';
 import { normalizeMCQList } from './normalizeMCQ';
 
@@ -91,14 +91,14 @@ function getCorrectIndices(question: MCQ): number[] {
 interface Props {
   questions:    MCQ[];
   onComplete:   (score: number, total: number) => void;
-  resetSignal?: number;
+  resetSignal: number;
   /** Notifies the parent of the active question index so the side panel can
    *  show this question's per-item hint. */
   onItemChange?: (index: number) => void;
 }
 
-export const BalloonPopGame: React.FC<Props> = ({ questions, onComplete, resetSignal, onItemChange }) => {
-  const playableQuestions = React.useMemo(() => normalizeMCQList(questions), [questions]);
+const BalloonPopSession: React.FC<Omit<Props, 'resetSignal'>> = ({ questions: playableQuestions, onComplete, onItemChange }) => {
+  const finishGame = useEffectEvent((score: number, total: number) => onComplete(score, total));
   const canvasRef    = useRef<HTMLCanvasElement>(null);
   const rafRef       = useRef<number>(0);
   const t0Ref        = useRef<number>(0);
@@ -236,19 +236,6 @@ export const BalloonPopGame: React.FC<Props> = ({ questions, onComplete, resetSi
   }, [hit]);
 
   useEffect(() => {
-    if (!resetSignal) return;
-    cancelCompletion();
-    completedRef.current = false;
-    Object.assign(gs.current, {
-      lives: TOTAL_LIVES, qIdx: 0, score: 0,
-      phase: 'playing', explanation: '', correctLabel: '', shake: 0,
-    });
-    gs.current.correctPopped.clear();
-    loadQuestion(0);
-    syncUi();
-  }, [resetSignal, loadQuestion, syncUi, cancelCompletion]);
-
-  useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
     const ctx = canvas.getContext('2d')!;
@@ -257,16 +244,20 @@ export const BalloonPopGame: React.FC<Props> = ({ questions, onComplete, resetSi
       const dpr = Math.min(window.devicePixelRatio || 1, 2);
       const W   = canvas.offsetWidth;
       const H   = canvas.offsetHeight;
+      if (W === 0 || H === 0) return;
+      const previousW = gs.current.W;
+      const previousH = gs.current.H;
       canvas.width  = W * dpr;
       canvas.height = H * dpr;
       ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
       gs.current.W = W;
       gs.current.H = H;
-      if (gs.current.phase === 'playing') {
-        gs.current.balloons = spawnBalloons(
-          playableQuestions[gs.current.qIdx]?.options ?? [],
-          gs.current.qIdx, W, H,
-        );
+      if (previousW > 0 && previousH > 0) {
+        gs.current.balloons = gs.current.balloons.map(balloon => ({
+          ...balloon,
+          x: balloon.x * W / previousW,
+          y: balloon.y * H / previousH,
+        }));
       }
     };
 
@@ -322,7 +313,7 @@ export const BalloonPopGame: React.FC<Props> = ({ questions, onComplete, resetSi
               const score = g.score;
               completionTimer.current = setTimeout(() => {
                 completionTimer.current = null;
-                onComplete(score, playableQuestions.length);
+                finishGame(score, playableQuestions.length);
               }, 400);
             }
           } else {
@@ -475,7 +466,7 @@ export const BalloonPopGame: React.FC<Props> = ({ questions, onComplete, resetSi
   );
 
   return (
-    <div style={{
+    <div data-testid="balloon-game" data-phase={ui.phase} data-question-index={ui.qIdx} style={{
       position: 'relative',
       width: '100%',
       aspectRatio: '4 / 3',
@@ -486,6 +477,7 @@ export const BalloonPopGame: React.FC<Props> = ({ questions, onComplete, resetSi
       userSelect: 'none',
     }}>
       <canvas
+        data-testid="balloon-canvas"
         ref={canvasRef}
         onClick={onClick}
         onTouchStart={onTouchStart}
@@ -645,6 +637,11 @@ export const BalloonPopGame: React.FC<Props> = ({ questions, onComplete, resetSi
       `}</style>
     </div>
   );
+};
+
+export const BalloonPopGame: React.FC<Props> = ({ questions, onComplete, resetSignal, onItemChange }) => {
+  const playableQuestions = React.useMemo(() => normalizeMCQList(questions), [questions]);
+  return <BalloonPopSession key={JSON.stringify([resetSignal, playableQuestions])} questions={playableQuestions} onComplete={onComplete} onItemChange={onItemChange} />;
 };
 
 export default BalloonPopGame;

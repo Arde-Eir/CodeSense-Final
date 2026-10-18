@@ -13,10 +13,9 @@ import {
   loadHintsForEdit, serializeHints, HINT_ACTIVITY_OPTIONS,
   validateQuestBuilderForm,
   type HintActivityScope,
-  type HintFormRow,
 } from '@/admin/adminHelpers'
 import { extractTextFromPdf, generateQuestDraftFromText } from '@/admin/questAutoGenerator'
-import { generateAutoHints } from '@/campaign/generateAutoHints'
+import { generateQuestHintRows } from '@/admin/questHints'
 import { assertAdminAuditReady, readAuditLogs, type AuditEntry } from '@/admin/adminAudit'
 import { isCampaignPhase, levelForPhase, phaseForLevel, PHASE_DEFAULTS } from '@/types/campaign'
 import {
@@ -44,7 +43,6 @@ import {
   parseHintLines,
   parseLineList,
   questActivityLabels,
-  questPreviewFromForm,
   selectedTabsForForm,
   settingStringValue,
   storedChoiceQuestionToForm,
@@ -309,17 +307,7 @@ export const AdminPanel: React.FC = () => {
       return
     }
 
-    const previewQuest = questPreviewFromForm(questForm)
-    const rows: HintFormRow[] = tabs.flatMap(tab =>
-      generateAutoHints(previewQuest, tab).map((hint, i) => ({
-        id: `h_auto_${tab}_${Date.now()}_${i}_${Math.random().toString(36).slice(2, 6)}`,
-        title: hint.title,
-        body: hint.body,
-        icon: hint.icon ?? '',
-        activity: tab,
-        _extra: {},
-      }))
-    )
+    const rows = generateQuestHintRows(questForm, `h_auto_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`)
 
     qSet({ hints: replace ? rows : [...questForm.hints, ...rows] })
     const skipped = emptyTabs.length ? ` Skipped empty: ${emptyTabs.map(tabLabel).join(', ')}.` : ''
@@ -360,8 +348,14 @@ export const AdminPanel: React.FC = () => {
         drop_zones: [],
       }))
       setReplaceTarget('')
+      const missingActivities: string[] = []
+      if (!draft.act_mc) missingActivities.push('Quiz needs distinct definitions or code examples with answerable blanks.')
+      if (!draft.act_balloon) missingActivities.push('Balloon Pop needs questions with short answer labels from the material.')
+      if (!draft.act_drag) missingActivities.push('Drag & Drop needs at least two distinct definitions in the material.')
+      if (!draft.act_ordering) missingActivities.push('Ordering needs a numbered list or at least three topics or definitions in the material.')
+      if (!draft.act_codefill) missingActivities.push('Code Fill needs a C++ declaration, statement, or complete function in the material.')
       setAutoQuestResult({ kind: 'success', message:
-        `Generated ${draft.theory_sections.length} theory section(s), ${draft.objectives.length} objective(s), ${draft.mc_questions.length} quiz question(s), ${draft.drag_problems[0]?.items.length ?? 0} drag match(es), ${draft.ordering_problems[0]?.items.length ?? 0} ordering item(s), and ${draft.code_fill_items.length} code-fill item(s). Only activities supported by the extracted text are enabled. Review the answer keys against the PDF before saving.`,
+        `Generated ${draft.theory_sections.length} theory section(s), ${draft.mc_questions.length} quiz question(s), ${draft.balloon_questions.length} Balloon Pop question(s), ${draft.drag_problems.length} drag puzzle(s) with ${draft.drag_problems.reduce((sum, problem) => sum + problem.items.length, 0)} matches, ${draft.ordering_problems.length} ordering puzzle(s), ${draft.code_fill_items.length} code-fill item(s), and ${draft.hints.length} question-specific hints. ${missingActivities.join(' ')} Review the answer keys against the PDF before saving.`,
       })
       showToast('PDF quest draft generated. Review it, then save.', 'success')
     } catch (error: unknown) {
@@ -1531,9 +1525,12 @@ export const AdminPanel: React.FC = () => {
                                 <button className="btn btn-xs btn-outline-secondary" onClick={() => generateQuestHints(true)}>Replace with Generated</button>
                               </div>
                             </div>
-                            <div className="text-muted mb-2" style={{ fontSize: '11px' }}>Use activity scope when a hint should appear only for one game tab. Generated hints are copied into this form for every selected activity that already has content; empty activities are skipped.</div>
+                            <div className="text-muted mb-2" style={{ fontSize: '11px' }}>Generated hints belong to a specific question or puzzle in each selected game. Empty activities are skipped. Regenerate hints after adding or reordering questions.</div>
                             {questForm.hints.map((h, i) => (
                               <div key={h.id} className="border rounded p-2 mb-2" style={{ fontSize: '12px' }}>
+                                {typeof h._extra.item_index === 'number' && Number.isInteger(h._extra.item_index) && h._extra.item_index >= 0 && (
+                                  <div className="text-muted mb-1">{h.activity === 'drag' || h.activity === 'ordering' ? 'Puzzle' : 'Question'} {h._extra.item_index + 1}</div>
+                                )}
                                 <div className="row g-1 mb-1">
                                   <div className="col-7">
                                     <input className="form-control form-control-sm" placeholder="Hint title" value={h.title}

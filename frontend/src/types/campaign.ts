@@ -45,11 +45,13 @@ export interface HintItem {
   /** Optional — restricts this hint to a single activity tab. Untagged hints
    *  show on every tab as a fallback. */
   activity?: ActivityTab;
+  /** Zero-based question or puzzle index within its activity. */
+  item_index?: number;
 }
 
-export interface GameItem  { id: string; label: string; color: string; }
-export interface DropZone  { id: string; label: string; accepted: string; }
-export interface OrderItem { id: string; label: string; description?: string; correct_order: number; /** Optional per-item hint shown in the side panel when this item is the active one. */ hint?: string; }
+export interface GameItem  { id: string; label: string; color: string; problem_id?: string; question?: string; }
+export interface DropZone  { id: string; label: string; accepted: string; problem_id?: string; }
+export interface OrderItem { id: string; label: string; description?: string; correct_order: number; problem_id?: string; question?: string; /** Optional per-item hint shown in the side panel when this item is the active one. */ hint?: string; }
 export interface MCQ       { id: string; question: string; options: string[]; correct: number; /** Optional multi-answer indices, used by Balloon Pop while preserving `correct` for legacy MC questions. */ correctAnswers?: number[]; correct_answers?: number[]; correct_indices?: number[]; explanation: string; mode?: 'balloon' | 'mc'; /** Optional per-question hint shown in the side panel when this question is active. */ hint?: string | string[] | HintItem | HintItem[]; }
 
 export interface CodeFillItem {

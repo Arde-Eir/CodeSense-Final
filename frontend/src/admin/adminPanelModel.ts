@@ -310,14 +310,16 @@ export const campaignDifficultyToForm = (
 }
 
 export const questPreviewFromForm = (form: QuestFormState): Quest => {
-  const dragItems = form.drag_problems.flatMap(p => p.items)
-  const dropZones = form.drag_problems.flatMap(p => p.drop_zones)
+  const dragItems = form.drag_problems.flatMap(p => p.items.map(item => ({ ...item, problem_id: p.id, question: p.question })))
+  const dropZones = form.drag_problems.flatMap(p => p.drop_zones.map(zone => ({ ...zone, problem_id: p.id })))
   const orderingItems = form.ordering_problems.flatMap(p =>
     p.items.map((item, index) => ({
       id: item.id,
       label: item.label,
       description: item.description,
-      correct_order: index,
+      correct_order: index + 1,
+      problem_id: p.id,
+      question: p.question,
     }))
   )
 
@@ -376,7 +378,7 @@ export const questPreviewFromForm = (form: QuestFormState): Quest => {
     tutorial_title: form.tutorial_title || null,
     tutorial_body: form.tutorial_body || null,
     tutorial_image: null,
-    theory_sections: null,
+    theory_sections: form.theory_sections.map(section => ({ heading: section.heading, body: section.body, code: section.code })),
   }
 }
 

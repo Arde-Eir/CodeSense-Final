@@ -6,6 +6,7 @@ interface Props {
   zones:       DropZone[];
   onComplete:  (score: number, total: number) => void;
   resetSignal: number;
+  onItemChange?: (index: number) => void;
 }
 
 const DragDropGameInner: React.FC<{
@@ -293,11 +294,13 @@ function buildDragProblems(items: GameItem[], zones: DropZone[]): DragProblem[] 
   }).filter(problem => problem.items.length > 0 || problem.zones.length > 0);
 }
 
-const MultiProblemDragDropGame: React.FC<Props> = ({ items, zones, onComplete, resetSignal }) => {
+const MultiProblemDragDropGame: React.FC<Props> = ({ items, zones, onComplete, resetSignal, onItemChange }) => {
   const problems = React.useMemo(() => buildDragProblems(items, zones), [items, zones]);
   const [idx, setIdx] = React.useState(0);
   const scoreRef = React.useRef(0);
   const totalRef = React.useRef(0);
+
+  React.useEffect(() => { onItemChange?.(idx); }, [idx, onItemChange]);
 
   React.useEffect(() => {
     setIdx(0);

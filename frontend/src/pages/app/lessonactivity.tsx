@@ -12,6 +12,7 @@ import { MCGame        } from '@/games/MCGame';
 import { BalloonPopGame } from '@/games/BalloonPopGame';
 
 import TheorySectionBlock from '@/components/TheorySection';
+import { TheoryProse } from '@/components/TheoryProse';
 import type { ActivityTab, HintItem, Quest, TheorySection } from '@/types/campaign';
 import { isCampaignPhase, levelForPhase, phaseForLevel } from '@/types/campaign';
 import { composeHints, type ItemHintInput } from '@/campaign/composeHints';
@@ -187,9 +188,19 @@ const TutorialLearnPhase: React.FC<{ quest: Quest; onStartGame: () => void }> = 
   return (
     <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
       <div style={{ flex: 1, overflowY: 'auto', padding: '22px 28px' }}>
-        {quest.tutorial_title && <h2 style={{ fontSize: 20, fontWeight: 800, color: '#e6edf3', marginBottom: 8, fontFamily: 'Inter,sans-serif' }}>{quest.tutorial_title}</h2>}
-        {quest.tutorial_body  && <p  style={{ fontSize: 13, color: '#8b949e', lineHeight: 1.8, marginBottom: 20, fontFamily: 'Inter,sans-serif' }}>{quest.tutorial_body}</p>}
-        {sections.map((sec, i) => <TheorySectionBlock key={i} sec={sec} />)}
+        <article className="lesson-reading" data-testid="lesson-theory">
+          <header className="lesson-reading-header">
+            <div className="lesson-reading-eyebrow">Learn before you play</div>
+            <h2>{quest.tutorial_title || quest.title}</h2>
+            {quest.tutorial_body && <TheoryProse text={quest.tutorial_body} />}
+            {sections.length > 1 && (
+              <nav className="lesson-contents" aria-label="Lesson sections">
+                {sections.map((sec, index) => sec.heading && <a key={index} href={`#lesson-section-${index}`} data-testid={`lesson-section-link-${index}`}>{sec.heading}</a>)}
+              </nav>
+            )}
+          </header>
+          {sections.map((sec, index) => <section key={index} id={`lesson-section-${index}`} data-testid={`lesson-section-${index}`}><TheorySectionBlock sec={sec} /></section>)}
+        </article>
       </div>
       <div style={{ padding: '14px 28px', borderTop: '1px solid #21262d', flexShrink: 0, display: 'flex', justifyContent: 'flex-end' }}>
         <button onClick={onStartGame} style={{ padding: '12px 32px', borderRadius: 10, border: 'none', background: 'linear-gradient(135deg,#238636,#196127)', color: '#fff', fontWeight: 800, fontSize: 14, cursor: 'pointer', fontFamily: 'Inter,sans-serif', boxShadow: '0 4px 18px rgba(35,134,54,0.35)' }}>
@@ -384,6 +395,8 @@ export const LessonActivity: React.FC = () => {
   const [quest,       setQuest]       = useState<Quest | null>(null);
   const [loading,     setLoading]     = useState(true);
   const [fetchError,  setFetchError]  = useState<string | null>(null);
+  const [savingProgress, setSavingProgress] = useState(false);
+  const [failedCompletion, setFailedCompletion] = useState<{ activity: ActivityTab; score: number; total: number } | null>(null);
 
   const [appPhase,     setAppPhase]     = useState<'tutorial' | 'game'>('tutorial');
   const [activeTab,    setActiveTab]    = useState<ActivityTab>('drag');
@@ -397,8 +410,7 @@ export const LessonActivity: React.FC = () => {
   const [completedActivities, setCompletedActivities] = useState<ActivityTab[]>([]);
   // Current item index inside the active tab (0 = first question / item).
   // Reported up by MCGame / BalloonPopGame / CodeFillGame via onItemChange.
-  // Ordering and DragDrop don't have a meaningful "current item" so they
-  // leave this at 0 and the side panel falls back to the per-tab pool.
+  // Ordering and DragDrop report the current puzzle index.
   const [currentItemIdx, setCurrentItemIdx] = useState(0);
 
   const [nextQuestId, setNextQuestId] = useState<string | null | undefined>(undefined);
@@ -445,6 +457,8 @@ export const LessonActivity: React.FC = () => {
     if (!user?.id || !questId) return;
     const loadEpoch = ++loadEpochRef.current;
     completionPendingRef.current = false;
+    setSavingProgress(false);
+    setFailedCompletion(null);
     setLoading(true); setFetchError(null);
 
     // Route changes reuse this component, so reset progress and hints for each quest.
@@ -616,7 +630,7 @@ export const LessonActivity: React.FC = () => {
         const acts     = Array.isArray(payload.new?.completed_activities)
           ? payload.new.completed_activities as ActivityTab[]
           : null;
-        if (acts) syncCompletedActivities(acts);
+        if (acts) syncCompletedActivities([...completedActivitiesRef.current, ...acts]);
         if (newStatus === 'completed' && !isCompleted) {
           setIsCompleted(true);
           setEarnedXP(payload.new?.xp_gained ?? quest?.basexp ?? 0);
@@ -642,9 +656,7 @@ export const LessonActivity: React.FC = () => {
     return (quest.question_type ?? '').toLowerCase() === 'pop_balloon' ? [] : quest.mc_questions;
   }, [quest?.mc_questions, quest?.question_type]);
 
-  // Per-question hint for the active item (MC / balloon / code-fill only).
-  // Ordering and DragDrop don't surface a current-item index — their hint
-  // is always undefined so the side panel falls back to the per-tab pool.
+  // Authored question hints are combined with hints scoped to the current puzzle.
   const currentItemHint = useMemo<ItemHintInput>(() => {
     if (!quest) return undefined;
     if (activeTab === 'mc')        return mcQs[currentItemIdx]?.hint ?? undefined;
@@ -654,8 +666,8 @@ export const LessonActivity: React.FC = () => {
   }, [quest, activeTab, currentItemIdx, mcQs, balloonQs]);
 
   const authoredHints = useMemo(
-    () => composeHints(quest?.hints, activeTab, currentItemHint),
-    [quest?.hints, activeTab, currentItemHint]
+    () => composeHints(quest?.hints, activeTab, currentItemHint, currentItemIdx),
+    [quest?.hints, activeTab, currentItemHint, currentItemIdx]
   );
   const tabHints = useMemo(
     () => authoredHints.length > 0
@@ -728,16 +740,21 @@ export const LessonActivity: React.FC = () => {
     hintToastTimer.current = setTimeout(() => setHintToast({ visible: false }), 3500);
   }, [user?.id, quest, isCompleted, hintsUsed, maxHints]);
 
-  const handleComplete = useCallback(async (score: number, total: number) => {
+  const saveActivityCompletion = useCallback(async (activity: ActivityTab, score: number, total: number) => {
     if (!user?.id || !quest) return;
     if (total < 1 || score !== total || completionPendingRef.current) return;
-    if (completedActivitiesRef.current.includes(activeTab)) return;
+    if (completedActivitiesRef.current.includes(activity)) {
+      setFailedCompletion(null);
+      setFetchError(null);
+      return;
+    }
     completionPendingRef.current = true;
+    setSavingProgress(true);
     const loadEpoch = loadEpochRef.current;
     setFetchError(null);
 
-    const wasAlreadyDone = everCompletedRef.current.includes(activeTab);
-    const newFinished    = [...new Set([...completedActivitiesRef.current, activeTab])] as ActivityTab[];
+    const wasAlreadyDone = everCompletedRef.current.includes(activity);
+    const newFinished    = [...new Set([...completedActivitiesRef.current, activity])] as ActivityTab[];
 
     const allDone = availableTabs.every(t => newFinished.includes(t));
     // XP is only awarded on full quest completion. Use the durable
@@ -779,8 +796,9 @@ export const LessonActivity: React.FC = () => {
         p_completion_time_seconds: completionTimeSeconds,
       });
       if (loadEpoch !== loadEpochRef.current) return;
-      if (rpcErr) throw new Error(`Could not save Campaign quest ${quest.id}: ${rpcErr.message}`);
-      syncCompletedActivities(newFinished);
+      if (rpcErr) throw new Error(`Could not save Campaign quest ${quest.id}, activity ${activity} (${rpcErr.code}): ${rpcErr.message}. ${rpcErr.details} ${rpcErr.hint}`.trim());
+      setFailedCompletion(null);
+      syncCompletedActivities([...completedActivitiesRef.current, ...newFinished]);
       levelXpEarnedRef.current += xpGainedNow;
 
       const levelledUp = rpcResult?.levelled_up === true;
@@ -814,13 +832,20 @@ export const LessonActivity: React.FC = () => {
 
     } catch (err) {
       if (loadEpoch !== loadEpochRef.current) return;
-      console.error('complete_campaign_quest failed', err);
+      console.error('Campaign progress save failed', { questId: quest.id, activity, score, total, error: err });
       setFetchError(err instanceof Error ? err.message : 'Could not save your progress');
-      setResetSignal(signal => signal + 1);
+      setFailedCompletion({ activity, score, total });
     } finally {
-      if (loadEpoch === loadEpochRef.current) completionPendingRef.current = false;
+      if (loadEpoch === loadEpochRef.current) {
+        completionPendingRef.current = false;
+        setSavingProgress(false);
+      }
     }
-  }, [user?.id, quest, activeTab, availableTabs, isCompleted, levelRemaining, syncCompletedActivities]);
+  }, [user?.id, quest, availableTabs, isCompleted, levelRemaining, syncCompletedActivities]);
+
+  const handleComplete = useCallback((score: number, total: number) => {
+    void saveActivityCompletion(activeTab, score, total);
+  }, [activeTab, saveActivityCompletion]);
 
   useEffect(() => {
     if (appPhase !== 'game' || isCompleted) return;
@@ -874,7 +899,11 @@ export const LessonActivity: React.FC = () => {
     // Refetching would replace the retained retake history with the cleared activity list.
   }, [user?.id, quest, syncCompletedActivities]);
 
-  const handleReset  = () => setResetSignal(s => s + 1);
+  const handleReset = () => {
+    setFailedCompletion(null);
+    setFetchError(null);
+    setResetSignal(s => s + 1);
+  };
   const handleGoBack = () => setAppPhase('tutorial');
 
   if (loading) return <FullPageMessage>Loading lesson…</FullPageMessage>;
@@ -925,7 +954,7 @@ export const LessonActivity: React.FC = () => {
             </button>
           )}
           {appPhase === 'game' && !isCompleted && (
-            <button className="la-reset-btn" onClick={handleReset} style={{ background: 'transparent', border: '1px solid rgba(218,54,51,0.3)', color: '#f85149', padding: '5px 12px', borderRadius: 6, fontSize: 11, cursor: 'pointer', fontFamily: "'JetBrains Mono',monospace" }}>
+            <button className="la-reset-btn" onClick={handleReset} disabled={savingProgress} style={{ background: 'transparent', border: '1px solid rgba(218,54,51,0.3)', color: '#f85149', padding: '5px 12px', borderRadius: 6, fontSize: 11, cursor: 'pointer', fontFamily: "'JetBrains Mono',monospace" }}>
               ↺ <span className="la-btn-label">Reset</span>
             </button>
           )}
@@ -942,7 +971,11 @@ export const LessonActivity: React.FC = () => {
       {fetchError && (
         <div role="alert" style={{ padding: '10px 24px', background: 'rgba(248,81,73,0.12)', borderBottom: '1px solid rgba(248,81,73,0.35)', color: '#ffaba8', fontSize: 12 }}>
           Could not save or load Campaign progress: {fetchError}
-          <button onClick={doFetch} style={{ marginLeft: 12, border: '1px solid currentColor', borderRadius: 5, background: 'transparent', color: 'inherit', cursor: 'pointer', padding: '3px 8px' }}>Reload progress</button>
+          {failedCompletion ? (
+            <button data-testid="retry-activity-save" disabled={savingProgress} onClick={() => void saveActivityCompletion(failedCompletion.activity, failedCompletion.score, failedCompletion.total)} style={{ marginLeft: 12, border: '1px solid currentColor', borderRadius: 5, background: 'transparent', color: 'inherit', cursor: 'pointer', padding: '3px 8px' }}>Retry saving progress</button>
+          ) : (
+            <button onClick={doFetch} style={{ marginLeft: 12, border: '1px solid currentColor', borderRadius: 5, background: 'transparent', color: 'inherit', cursor: 'pointer', padding: '3px 8px' }}>Reload progress</button>
+          )}
         </div>
       )}
 
@@ -966,6 +999,7 @@ export const LessonActivity: React.FC = () => {
                     const isSelected = activeTab === t;
                     return (
                       <button key={t}
+                        disabled={savingProgress || failedCompletion !== null}
                         onClick={() => {
                           if (t === activeTab) return;
                           setActiveTab(t);
@@ -1027,10 +1061,10 @@ export const LessonActivity: React.FC = () => {
                   </div>
                 ) : (
                   <>
-                    {activeTab === 'drag'      && <DragDropGame   items={quest.game_items ?? []} zones={quest.drop_zones ?? []} onComplete={handleComplete} resetSignal={resetSignal} />}
+                    {activeTab === 'drag'      && <DragDropGame   items={quest.game_items ?? []} zones={quest.drop_zones ?? []} onComplete={handleComplete} resetSignal={resetSignal} onItemChange={handleItemChange} />}
                     {activeTab === 'code_fill' && <CodeFillGame   items={quest.code_fill_items ?? []} onComplete={handleComplete} resetSignal={resetSignal} onItemChange={handleItemChange} />}
                     {activeTab === 'balloon'   && <BalloonPopGame questions={balloonQs} onComplete={handleComplete} resetSignal={resetSignal} onItemChange={handleItemChange} />}
-                    {activeTab === 'ordering'  && <OrderingGame   items={quest.ordering_items ?? []} onComplete={handleComplete} resetSignal={resetSignal} />}
+                    {activeTab === 'ordering'  && <OrderingGame   items={quest.ordering_items ?? []} onComplete={handleComplete} resetSignal={resetSignal} onItemChange={handleItemChange} />}
                     {activeTab === 'mc'        && <MCGame         questions={mcQs} onComplete={handleComplete} resetSignal={resetSignal} onItemChange={handleItemChange} />}
                   </>
                 )}

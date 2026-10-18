@@ -5,6 +5,7 @@ interface Props {
   items:       OrderItem[];
   onComplete:  (score: number, total: number) => void;
   resetSignal: number;
+  onItemChange?: (index: number) => void;
 }
 
 const OrderingGameInner: React.FC<{ rawItems: OrderItem[]; onComplete: (score: number, total: number) => void; resetSignal: number; question?: string }> = ({ rawItems, onComplete, resetSignal, question }) => {
@@ -144,10 +145,12 @@ function buildOrderProblems(items: OrderItem[]): OrderProblem[] {
   }));
 }
 
-const MultiProblemOrderingGame: React.FC<Props> = ({ items, onComplete, resetSignal }) => {
+const MultiProblemOrderingGame: React.FC<Props> = ({ items, onComplete, resetSignal, onItemChange }) => {
   const problems = React.useMemo(() => buildOrderProblems(items), [items]);
   const [idx, setIdx] = React.useState(0);
   const scoreRef = React.useRef(0);
+
+  React.useEffect(() => { onItemChange?.(idx); }, [idx, onItemChange]);
 
   React.useEffect(() => {
     setIdx(0);

@@ -23,8 +23,11 @@ function normalizeItemHints(itemHint: ItemHintInput): HintItem[] {
 export function composeHints(
   questHints: HintItem[] | null | undefined,
   activeTab:  ActivityTab,
-  itemHint?:  ItemHintInput,
+  itemHint:   ItemHintInput,
+  itemIndex:  number,
 ): HintItem[] {
-  const pool = (questHints ?? []).filter(h => !h.activity || h.activity === activeTab);
-  return [...normalizeItemHints(itemHint), ...pool];
+  const pool = (questHints ?? []).filter(h => (!h.activity || h.activity === activeTab) && (h.item_index === undefined || h.item_index === itemIndex));
+  return [...normalizeItemHints(itemHint), ...pool].filter((hint, index, hints) =>
+    hints.findIndex(other => other.body.trim().toLowerCase() === hint.body.trim().toLowerCase()) === index
+  );
 }
