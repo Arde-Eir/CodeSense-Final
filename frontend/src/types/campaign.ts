@@ -86,7 +86,7 @@ export interface Quest {
   id: string;
   title: string;
   description: string | null;
-  difficulty:     'easy' | 'medium' | 'hard' | null;
+  difficulty:     'beginner' | 'intermediate' | 'advanced' | 'expert' | null;
   level:          number | null;
   phase:          Phase | null;
   /** Discriminates campaign quests from other modes (e.g. 'sandbox'). Queried

@@ -18,7 +18,7 @@ import {
 import { extractTextFromPdf, generateQuestDraftFromText } from '@/admin/questAutoGenerator'
 import { generateAutoHints } from '@/campaign/generateAutoHints'
 import { assertAdminAuditReady, readAuditLogs, type AuditEntry } from '@/admin/adminAudit'
-import { isCampaignPhase, levelForPhase, phaseForLevel } from '@/types/campaign'
+import { isCampaignPhase, levelForPhase, phaseForLevel, PHASE_DEFAULTS } from '@/types/campaign'
 import {
   AdminAnnouncementsTab,
   AdminAuditTab,
@@ -224,8 +224,9 @@ export const AdminPanel: React.FC = () => {
     showToast(`Level ${level} is ready. Add learning material and quests, then save.`)
   }
 
-  const ensureLevelInfoForLevel = async (level: number) => {
+  const ensureLevelInfoForLevel = async (level: number): Promise<void> => {
     const phase = phaseForLevel(level)
+    if (Object.hasOwn(PHASE_DEFAULTS, phase)) return
     const row = {
       phase,
       title: levelName(level),

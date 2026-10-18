@@ -132,7 +132,7 @@ export interface QFormOrderProblem { id: string; question: string; items: QFormO
 
 export interface QuestFormState {
   title: string; description: string
-  difficulty: 'beginner' | 'intermediate' | 'advanced' | 'expert'; level: number
+  difficulty: NonNullable<Quest['difficulty']>; level: number
   basexp: number; requiredxp: number; sortorder: number; isactive: boolean
   tutorial_title: string; tutorial_body: string
   theory_sections: QFormTheory[]; objectives: string[]
@@ -297,11 +297,7 @@ export const tabLabel = (tab: ActivityTab): string => {
 
 export const campaignDifficultyFromForm = (
   difficulty: QuestFormState['difficulty']
-): Quest['difficulty'] => {
-  if (difficulty === 'beginner') return 'easy'
-  if (difficulty === 'intermediate') return 'medium'
-  return 'hard'
-}
+): Quest['difficulty'] => difficulty
 
 export const campaignDifficultyToForm = (
   difficulty: string | null | undefined
@@ -309,6 +305,7 @@ export const campaignDifficultyToForm = (
   if (difficulty === 'easy' || difficulty === 'beginner') return 'beginner'
   if (difficulty === 'medium' || difficulty === 'intermediate') return 'intermediate'
   if (difficulty === 'hard' || difficulty === 'advanced') return 'advanced'
+  if (difficulty === 'expert') return 'expert'
   return 'beginner'
 }
 
