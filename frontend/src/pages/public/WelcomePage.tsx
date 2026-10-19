@@ -1,6 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useAuth } from '@/components/AuthContext'
+import { MagneticButton } from '@/components/MagneticButton'
 
 export const WelcomePage: React.FC = () => {
   const navigate = useNavigate()
@@ -115,28 +116,20 @@ export const WelcomePage: React.FC = () => {
 
         <div style={{ width: '48px', height: '2px', background: 'rgba(76,175,80,0.4)', borderRadius: '2px', margin: '0 auto 32px' }} />
 
-        <button
+        <MagneticButton className="magnetic-button-wide" data-testid="welcome-start"
           onClick={handleStart}
-          style={{
+          faceStyle={{
             background: 'linear-gradient(135deg, #4caf50, #2d7a2d)',
             border: 'none', borderRadius: '12px',
             color: 'white', fontSize: '15px', fontWeight: '700',
             padding: '14px 48px', cursor: 'pointer',
             boxShadow: '0 8px 24px rgba(76,175,80,0.35)',
-            transition: 'all 0.2s', letterSpacing: '0.5px',
+            letterSpacing: '0.5px',
             width: '100%'
-          }}
-          onMouseEnter={e => {
-            e.currentTarget.style.transform = 'translateY(-2px)'
-            e.currentTarget.style.boxShadow = '0 12px 32px rgba(76,175,80,0.45)'
-          }}
-          onMouseLeave={e => {
-            e.currentTarget.style.transform = 'translateY(0)'
-            e.currentTarget.style.boxShadow = '0 8px 24px rgba(76,175,80,0.35)'
           }}
         >
           Start →
-        </button>
+        </MagneticButton>
 
         {isGuest && (
           <p style={{ color: '#484f58', fontSize: '12px', marginTop: '16px', marginBottom: 0 }}>

@@ -48,7 +48,7 @@ export function LevelXpSettings({ level, userId }: { level: number; userId: stri
   return (
     <div className="border-top pt-2 mt-3" data-testid="level-xp-settings">
       <label className="form-label" htmlFor="level-max-xp">Max XP for Level {level}</label>
-      <div className="d-flex gap-2">
+      <div className="d-flex gap-2 admin-inline-form">
         <input id="level-max-xp" data-testid="level-max-xp" type="number" min={0} max={2_147_483_647} step={1}
           className="form-control form-control-sm" value={draft} disabled={loading || saving}
           onChange={event => { setDraft(event.target.value); setMessage(null); }} />

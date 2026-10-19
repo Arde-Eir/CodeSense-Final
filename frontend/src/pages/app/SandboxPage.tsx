@@ -7,6 +7,7 @@ import { FlowGraph } from '@/components/Visualizer/FlowGraph';
 import { TokenDrawer } from '@/components/Visualizer/TokenDrawer';
 import { TokenChart } from '@/components/Visualizer/TokenChart';
 import { useAuth } from '@/components/AuthContext';
+import { MagneticButton } from '@/components/MagneticButton';
 import { DataIsolationService } from '@/services/DataIsolationService';
 import { DatabaseService } from '@/services/DatabaseService';
 import { supabase } from '@/services/supabase';
@@ -754,9 +755,9 @@ int main() {
                   </button>
                 </div>
                 <div className="action-bar" style={{ marginTop: '10px', flexShrink: 0 }}>
-                  <button onClick={handleAnalyze} disabled={isAnalyzing} className="analyze-btn">
+                  <MagneticButton onClick={handleAnalyze} disabled={isAnalyzing} className="magnetic-button-wide" faceClassName="analyze-btn" data-testid="sandbox-analyze">
                     {isAnalyzing ? '⟳ Analyzing…' : 'ANALYZE CODE'}
-                  </button>
+                  </MagneticButton>
                 </div>
               </div>
             </AccordionPanel>
@@ -998,9 +999,9 @@ int main() {
               <CodeEditor code={code} onChange={setCode} onEditorMount={e => (editorRef.current = e)} />
             </div>
             <div style={{ padding: '12px 16px', borderTop: '1px solid rgba(63,185,80,0.15)', background: 'rgba(13,17,23,0.8)', flexShrink: 0, display: 'flex', gap: '10px' }}>
-              <button onClick={() => { setEditorFullscreen(false); handleAnalyze(); }} disabled={isAnalyzing} className="analyze-btn">
+              <MagneticButton onClick={() => { setEditorFullscreen(false); handleAnalyze(); }} disabled={isAnalyzing} className="magnetic-button-wide" faceClassName="analyze-btn" data-testid="sandbox-fullscreen-analyze">
                 {isAnalyzing ? '⟳ Analyzing…' : 'ANALYZE CODE'}
-              </button>
+              </MagneticButton>
             </div>
           </div>
         </div>

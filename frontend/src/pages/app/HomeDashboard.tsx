@@ -1,6 +1,7 @@
 import React, { useEffect, useState, useRef, useCallback, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '@/components/AuthContext';
+import { MagneticButton } from '@/components/MagneticButton';
 import { supabase } from '@/services/supabase';
 import { getProfileImageUrlMap, getProfileImageUrls } from '@/services/ProfileImages';
 import { getLevelProgress, getXPToNextLevel, getRank } from '@/types'
@@ -845,9 +846,9 @@ export const HomeDashboard: React.FC = () => {
                   <span className="mc-chip" style={{ background: 'rgba(255,255,255,0.05)', color: '#8b949e' }}>🔤 7 analyzer tabs</span>
                   <span className="mc-chip" style={{ background: 'rgba(255,255,255,0.05)', color: '#8b949e' }}>🧩 Build Mode</span>
                 </div>
-                <button className="mc-cta" style={{ background: '#4caf50', color: 'white' }}>
+                <MagneticButton faceClassName="mc-cta" data-testid="home-explore-sandbox" faceStyle={{ background: '#4caf50', color: 'white' }}>
                   EXPLORE <span>→</span>
-                </button>
+                </MagneticButton>
               </div>
             </div>
 
@@ -894,17 +895,18 @@ export const HomeDashboard: React.FC = () => {
                   <span className="mc-chip" style={{ background: 'rgba(255,255,255,0.05)', color: '#8b949e' }}>⭐ XP rewards</span>
                   <span className="mc-chip" style={{ background: 'rgba(255,255,255,0.05)', color: '#8b949e' }}>🏅 Badges</span>
                 </div>
-                <button
+                <MagneticButton
+                  data-testid="home-learn-campaign"
                   disabled={isGuest}
-                  className="mc-cta"
-                  style={{
+                  faceClassName="mc-cta"
+                  faceStyle={{
                     background: isGuest ? 'transparent' : '#ffa726',
                     color: isGuest ? '#484f58' : 'white',
                     border: isGuest ? '1px solid #30363d' : 'none',
                   }}
                 >
                   {isGuest ? '🔒 LOCKED' : <>LEARN <span>→</span></>}
-                </button>
+                </MagneticButton>
               </div>
             </div>
           </div>

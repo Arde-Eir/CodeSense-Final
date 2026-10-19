@@ -2,6 +2,14 @@ import React, { useCallback, useEffect, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { supabase } from '@/services/supabase'
 import {
+  canonicalNotificationId, dismissLocalNotifications, markLocalNotificationsRead,
+  mergeNotificationPreferences, preferencesFromReceipts, readLocalNotificationPreferences,
+  type NotificationPreferences,
+} from './notificationState'
+import {
+  dismissAccountNotifications, loadAccountNotificationReceipts, markAccountNotificationsRead,
+} from '@/services/notificationReceipts'
+import {
   countUniqueCompletedQuests,
   isCompletedMissionRow,
   missionDoneAt,
@@ -25,29 +33,7 @@ const PRIORITY_CONFIG: Record<Announcement['priority'], { color: string; bg: str
   critical: { color: '#f85149', bg: 'rgba(248,81,73,0.08)',   border: 'rgba(248,81,73,0.25)',   icon: '🚨',  label: 'Critical' },
 }
 
-const NOTIF_SEEN_KEY      = 'cs-seen-notifs-v2'
-const NOTIF_DISMISSED_KEY = 'cs-dismissed-notifs-v1'
-const MILESTONE_TS_KEY    = 'cs-milestone-ts-v1'
 const NOTIF_LIMIT = 25
-
-const scopedStorageKey = (baseKey: string, ownerKey: string): string =>
-  `${baseKey}:${ownerKey}`
-
-/** Return the ISO timestamp for when this milestone was first observed.
- *  Stable across refreshes — written once to localStorage. */
-function getMilestoneTimestamp(id: string, ownerKey: string): string {
-  try {
-    const key = scopedStorageKey(MILESTONE_TS_KEY, ownerKey)
-    const stored: Record<string, string> = JSON.parse(localStorage.getItem(key) ?? localStorage.getItem(MILESTONE_TS_KEY) ?? '{}')
-    if (stored[id]) return stored[id]
-    const now = new Date().toISOString()
-    stored[id] = now
-    localStorage.setItem(key, JSON.stringify(stored))
-    return now
-  } catch {
-    return new Date().toISOString()
-  }
-}
 
 type NotifKind = 'announcement' | 'quest' | 'achievement' | 'rank' | 'admin'
 
@@ -85,48 +71,6 @@ const detailReason = (details: unknown): string | null => {
   return typeof details.reason === 'string' ? details.reason : null
 }
 
-const parseStoredIds = (storageKey: string): string[] => {
-  try {
-    const parsed = JSON.parse(localStorage.getItem(storageKey) ?? '[]')
-    return Array.isArray(parsed) ? parsed.filter((id): id is string => typeof id === 'string') : []
-  } catch {
-    return []
-  }
-}
-
-const getScopedIds = (baseKey: string, ownerKey: string): string[] => {
-  const key = scopedStorageKey(baseKey, ownerKey)
-  if (localStorage.getItem(key) !== null) return parseStoredIds(key)
-  const legacy = parseStoredIds(baseKey)
-  if (legacy.length > 0) {
-    try {
-      localStorage.setItem(key, JSON.stringify(legacy.slice(0, 500)))
-      localStorage.removeItem(baseKey)
-    } catch { /* quota */ }
-  }
-  return legacy
-}
-
-const setScopedIds = (baseKey: string, ownerKey: string, ids: string[]) => {
-  try {
-    localStorage.setItem(scopedStorageKey(baseKey, ownerKey), JSON.stringify(ids.slice(0, 500)))
-    localStorage.removeItem(baseKey)
-  } catch { /* quota */ }
-}
-
-const getSeenIds = (ownerKey: string): string[] => {
-  return getScopedIds(NOTIF_SEEN_KEY, ownerKey)
-}
-const setSeenIds = (ownerKey: string, ids: string[]) => {
-  setScopedIds(NOTIF_SEEN_KEY, ownerKey, ids)
-}
-const getDismissedIds = (ownerKey: string): string[] => {
-  return getScopedIds(NOTIF_DISMISSED_KEY, ownerKey)
-}
-const setDismissedIds = (ownerKey: string, ids: string[]) => {
-  setScopedIds(NOTIF_DISMISSED_KEY, ownerKey, ids)
-}
-
 interface Derived {
   check: (stats: { totalxp: number; sandboxRuns: number; quests: number }) => boolean
   id: string; icon: string; color: string; title: string; body: string
@@ -152,15 +96,23 @@ const QUEST_MILESTONES: Derived[] = [
   { id: 'ach:q10', icon: '🏆', color: '#a371f7', title: 'Quest Champion',   body: 'Ten quests — Epic achievement unlocked.',         check: s => s.quests >= 10 },
 ]
 
-export const NotificationBell: React.FC<{ userId: string | undefined; onViewAllAnnouncements: () => void }> = ({ userId, onViewAllAnnouncements }) => {
+interface NotificationBellProps { userId: string | undefined; onViewAllAnnouncements: () => void }
+
+export const NotificationBell: React.FC<NotificationBellProps> = props =>
+  <NotificationBellForOwner key={props.userId ?? 'guest'} {...props} />
+
+const NotificationBellForOwner: React.FC<NotificationBellProps> = ({ userId, onViewAllAnnouncements }) => {
   const navigate = useNavigate()
   const notificationOwnerKey = userId ?? 'guest'
   const [items, setItems] = useState<NotifItem[]>([])
   const [open, setOpen] = useState(false)
-  const [seen, setSeen] = useState<string[]>(() => getSeenIds(notificationOwnerKey))
-  const [dismissed, setDismissed] = useState<string[]>(() => getDismissedIds(notificationOwnerKey))
+  const [preferences, setPreferences] = useState<NotificationPreferences>({ seen: [], dismissed: [] })
+  const preferencesRef = useRef(preferences)
+  const { seen } = preferences
+  const [saving, setSaving] = useState(false)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+  const [actionError, setActionError] = useState<string | null>(null)
   const [lastUpdatedAt, setLastUpdatedAt] = useState<string | null>(null)
   const bellRef = useRef<HTMLDivElement>(null)
   const onViewAllRef = useRef(onViewAllAnnouncements)
@@ -168,12 +120,14 @@ export const NotificationBell: React.FC<{ userId: string | undefined; onViewAllA
   useEffect(() => { onViewAllRef.current = onViewAllAnnouncements }, [onViewAllAnnouncements])
   const [activeFilter, setActiveFilter] = useState<'all' | NotifKind>('all')
 
-  useEffect(() => {
-    setSeen(getSeenIds(notificationOwnerKey))
-    setDismissed(getDismissedIds(notificationOwnerKey))
-    setItems([])
-    setActiveFilter('all')
-  }, [notificationOwnerKey])
+  const commitPreferences = useCallback((incoming: NotificationPreferences): NotificationPreferences => {
+    const merged = mergeNotificationPreferences(preferencesRef.current, incoming)
+    preferencesRef.current = merged
+    setPreferences(merged)
+    const dismissedIds = new Set(merged.dismissed)
+    setItems(previous => previous.filter(item => !dismissedIds.has(item.id)))
+    return merged
+  }, [])
 
   const refresh = useCallback(async () => {
     const runId = refreshRunRef.current + 1
@@ -215,13 +169,15 @@ export const NotificationBell: React.FC<{ userId: string | undefined; onViewAllA
           .filter(isCompletedMissionRow)
           .filter(q => Boolean(missionDoneAt(q)))
           .sort((a, b) => new Date(missionDoneAt(b)!).getTime() - new Date(missionDoneAt(a)!).getTime())
+          .filter((quest, index, rows) => rows.findIndex(candidate => candidate.questid === quest.questid) === index)
           .slice(0, 10)
         for (const q of completedQuests) {
+          if (!q.questid) throw new Error(`Quest notification is missing questid (userId=${userId}).`)
           const completedAt = missionDoneAt(q)!
           const title = Array.isArray(q.quests) ? q.quests[0]?.title : q.quests?.title
           const hintsUsed = q.hintsused ?? 0
           out.push({
-            id: `quest:${q.questid}:${completedAt}`, kind: 'quest',
+            id: canonicalNotificationId(`quest:${q.questid}`), kind: 'quest',
             icon: '⚔️', color: '#ffa726',
             title: `Quest completed: ${title ?? 'Unknown'}`,
             body: hintsUsed > 0 ? `Used ${hintsUsed} hint${hintsUsed > 1 ? 's' : ''}.` : 'No hints used. Clean clear.',
@@ -271,17 +227,28 @@ export const NotificationBell: React.FC<{ userId: string | undefined; onViewAllA
               id: m.id, kind: m.id.startsWith('rank:') ? 'rank' : 'achievement',
               icon: m.icon, color: m.color,
               title: m.title, body: m.body,
-              timestamp: getMilestoneTimestamp(m.id, notificationOwnerKey),
+              timestamp: new Date().toISOString(),
               onClick: () => navigate('/profile'),
             })
           }
         }
       }
 
-      const dismissedSet = new Set(getDismissedIds(notificationOwnerKey))
-      const visible = out.filter(n => !dismissedSet.has(n.id))
-      visible.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime())
+      const receipts = userId ? await loadAccountNotificationReceipts(userId, out.map(item => item.id)) : []
       if (refreshRunRef.current !== runId) return
+      const latest = userId
+        ? preferencesFromReceipts(receipts)
+        : readLocalNotificationPreferences(localStorage, notificationOwnerKey)
+      const merged = commitPreferences(latest)
+      const receiptMap = new Map(receipts.map(receipt => [receipt.id, receipt]))
+      const dismissedSet = new Set(merged.dismissed)
+      const visible = out.filter(item => !dismissedSet.has(item.id)).map(item => {
+        if (item.kind !== 'rank' && item.kind !== 'achievement') return item
+        const receipt = receiptMap.get(item.id)
+        if (!receipt) throw new Error(`Milestone notification receipt is missing (id=${item.id}, userId=${userId}).`)
+        return { ...item, timestamp: receipt.observedAt }
+      })
+      visible.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime())
       setItems(visible.slice(0, NOTIF_LIMIT))
       setLastUpdatedAt(new Date().toISOString())
     } catch (err: unknown) {
@@ -292,17 +259,38 @@ export const NotificationBell: React.FC<{ userId: string | undefined; onViewAllA
     } finally {
       if (refreshRunRef.current === runId) setLoading(false)
     }
-  }, [userId, navigate, notificationOwnerKey])
+  }, [userId, navigate, notificationOwnerKey, commitPreferences])
 
   useEffect(() => {
     const initialRefresh = setTimeout(refresh, 0)
-    const channel = supabase.channel('notif-bell-realtime')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'announcements' }, () => refresh())
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'mission_progress' }, () => refresh())
-      .subscribe()
+    let refreshTimer: ReturnType<typeof setTimeout> | null = null
+    const scheduleRefresh = (): void => {
+      if (refreshTimer !== null) clearTimeout(refreshTimer)
+      refreshTimer = setTimeout(() => { refreshTimer = null; void refresh() }, 150)
+    }
+    const channel = supabase.channel(`notif-bell:${notificationOwnerKey}`)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'announcements' }, scheduleRefresh)
+    if (userId) channel
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'mission_progress', filter: `userid=eq.${userId}` }, scheduleRefresh)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'notification_receipts', filter: `user_id=eq.${userId}` }, scheduleRefresh)
+    channel.subscribe()
     const poll = setInterval(refresh, 90_000)
-    return () => { clearTimeout(initialRefresh); supabase.removeChannel(channel); clearInterval(poll) }
-  }, [refresh])
+    const onFocus = (): void => { void refresh() }
+    const onStorage = (event: StorageEvent): void => {
+      if (event.key === null || event.key.startsWith('cs-seen-notifs-') || event.key.startsWith('cs-dismissed-notifs-')) void refresh()
+    }
+    window.addEventListener('focus', onFocus)
+    window.addEventListener('storage', onStorage)
+    return () => {
+      refreshRunRef.current += 1
+      clearTimeout(initialRefresh)
+      if (refreshTimer !== null) clearTimeout(refreshTimer)
+      void supabase.removeChannel(channel)
+      clearInterval(poll)
+      window.removeEventListener('focus', onFocus)
+      window.removeEventListener('storage', onStorage)
+    }
+  }, [refresh, notificationOwnerKey, userId])
 
   useEffect(() => {
     const onClick = (e: MouseEvent) => {
@@ -319,15 +307,24 @@ export const NotificationBell: React.FC<{ userId: string | undefined; onViewAllA
     }
   }, [])
 
-  const markIdsRead = useCallback((ids: string[]) => {
-    if (ids.length === 0) return
-    setSeen(prev => {
-      const merged = Array.from(new Set([...prev, ...ids])).slice(0, 500)
-      if (merged.length === prev.length) return prev
-      setSeenIds(notificationOwnerKey, merged)
-      return merged
-    })
-  }, [notificationOwnerKey])
+  const markIdsRead = useCallback(async (ids: string[]): Promise<boolean> => {
+    const unreadIds = ids.filter(id => !preferencesRef.current.seen.includes(id))
+    if (unreadIds.length === 0) return true
+    setSaving(true)
+    try {
+      const next = userId
+        ? preferencesFromReceipts(await markAccountNotificationsRead(userId, unreadIds))
+        : markLocalNotificationsRead(localStorage, notificationOwnerKey, unreadIds)
+      commitPreferences(next)
+      setActionError(null)
+      return true
+    } catch (error) {
+      if (!(error instanceof Error)) throw error
+      console.error('Marking notifications read failed', { userId, ids: unreadIds, error })
+      setActionError(error.message)
+      return false
+    } finally { setSaving(false) }
+  }, [notificationOwnerKey, userId, commitPreferences])
 
   // Auto-mark the current snapshot as seen when the dropdown opens. New
   // realtime notifications that arrive while it is already open stay unread.
@@ -337,38 +334,53 @@ export const NotificationBell: React.FC<{ userId: string | undefined; onViewAllA
     let cancelled = false
     queueMicrotask(() => {
       if (cancelled) return
-      markIdsRead(idsToMark)
+      void markIdsRead(idsToMark)
     })
     return () => { cancelled = true }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open])
 
   const filtered = activeFilter === 'all' ? items : items.filter(i => i.kind === activeFilter)
+  const notificationError = actionError ?? error
   const unread = items.filter(i => !seen.includes(i.id))
   const unreadCount = Math.min(unread.length, 99)
   const unreadFiltered = filtered.filter(i => !seen.includes(i.id)).length
 
   const toggle = () => setOpen(o => !o)
 
-  const markAllRead = () => {
-    markIdsRead(items.map(i => i.id))
-  }
+  const markAllRead = (): void => { void markIdsRead(items.map(item => item.id)) }
 
-  const clearRead = () => {
-    const readIds = items.filter(i => seen.includes(i.id)).map(i => i.id)
+  const clearRead = async (): Promise<void> => {
+    const readIds = items.filter(item => seen.includes(item.id)).map(item => item.id)
     if (readIds.length === 0) return
-    const mergedDismissed = Array.from(new Set([...dismissed, ...readIds]))
-    setDismissed(mergedDismissed); setDismissedIds(notificationOwnerKey, mergedDismissed)
-    setItems(prev => prev.filter(i => !readIds.includes(i.id)))
-    if (activeFilter !== 'all' && filtered.length === readIds.filter(id => filtered.some(i => i.id === id)).length) {
+    setSaving(true)
+    try {
+      const next = userId
+        ? preferencesFromReceipts(await dismissAccountNotifications(userId, readIds))
+        : dismissLocalNotifications(localStorage, notificationOwnerKey, readIds)
+      commitPreferences(next)
+      setActionError(null)
       setActiveFilter('all')
-    }
+    } catch (error) {
+      if (!(error instanceof Error)) throw error
+      console.error('Clearing read notifications failed', { userId, ids: readIds, error })
+      setActionError(error.message)
+    } finally { setSaving(false) }
   }
 
-  const dismissItem = (id: string) => {
-    const mergedDismissed = Array.from(new Set([...dismissed, id]))
-    setDismissed(mergedDismissed); setDismissedIds(notificationOwnerKey, mergedDismissed)
-    setItems(prev => prev.filter(i => i.id !== id))
+  const dismissItem = async (id: string): Promise<void> => {
+    setSaving(true)
+    try {
+      const next = userId
+        ? preferencesFromReceipts(await dismissAccountNotifications(userId, [id]))
+        : dismissLocalNotifications(localStorage, notificationOwnerKey, [id])
+      commitPreferences(next)
+      setActionError(null)
+    } catch (error) {
+      if (!(error instanceof Error)) throw error
+      console.error('Dismissing notification failed', { userId, id, error })
+      setActionError(error.message)
+    } finally { setSaving(false) }
   }
 
   const readCount = items.filter(i => seen.includes(i.id)).length
@@ -386,6 +398,7 @@ export const NotificationBell: React.FC<{ userId: string | undefined; onViewAllA
     <div ref={bellRef} style={{ position: 'relative' }}>
       <button
         onClick={toggle}
+        data-testid="notification-bell-toggle"
         className="cs-icon-btn"
         style={{
           background: 'transparent', border: 'none', color: open ? '#e6edf3' : '#8b949e',
@@ -431,20 +444,20 @@ export const NotificationBell: React.FC<{ userId: string | undefined; onViewAllA
                 </div>
               </div>
               <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                <button onClick={() => refresh()}
-                  disabled={loading}
+                <button data-testid="notification-refresh" onClick={() => { void refresh() }}
+                  disabled={loading || saving}
                   title="Refresh notifications"
                   style={{ background: 'transparent', border: 'none', color: loading ? '#484f58' : '#58a6ff', fontSize: '10px', cursor: loading ? 'wait' : 'pointer', padding: 0, textDecoration: 'underline' }}>
                   Refresh
                 </button>
                 {unread.length > 0 && (
-                  <button onClick={markAllRead}
+                  <button data-testid="notification-mark-all-read" disabled={saving} onClick={markAllRead}
                     style={{ background: 'transparent', border: 'none', color: '#8b949e', fontSize: '10px', cursor: 'pointer', padding: 0, textDecoration: 'underline' }}>
                     Mark all read
                   </button>
                 )}
                 {readCount > 0 && (
-                  <button onClick={clearRead}
+                  <button data-testid="notification-clear-read" disabled={saving} onClick={() => { void clearRead() }}
                     title="Remove read notifications to free up space"
                     style={{ background: 'transparent', border: 'none', color: '#f85149', fontSize: '10px', cursor: 'pointer', padding: 0, textDecoration: 'underline' }}>
                     Clear read ({readCount})
@@ -474,8 +487,8 @@ export const NotificationBell: React.FC<{ userId: string | undefined; onViewAllA
                 )
               })}
             </div>
-            {error && (
-              <div style={{
+            {notificationError && (
+              <div role="alert" data-testid="notification-error" style={{
                 marginTop: 10,
                 padding: '8px 10px',
                 borderRadius: 8,
@@ -485,7 +498,7 @@ export const NotificationBell: React.FC<{ userId: string | undefined; onViewAllA
                 fontSize: 11,
                 lineHeight: 1.4,
               }}>
-                {error}
+                {notificationError}
               </div>
             )}
           </div>
@@ -509,6 +522,7 @@ export const NotificationBell: React.FC<{ userId: string | undefined; onViewAllA
                 return (
                   <div
                     key={n.id}
+                    data-testid={`notification-item-${n.id}`}
                     className="cs-menu-item"
                     style={{
                       background: isUnread ? `${n.color}0A` : 'transparent',
@@ -519,7 +533,12 @@ export const NotificationBell: React.FC<{ userId: string | undefined; onViewAllA
                     }}
                   >
                     <button
-                      onClick={() => { setOpen(false); n.onClick?.() }}
+                      data-testid={`notification-open-${n.id}`} disabled={saving}
+                      onClick={async () => {
+                        if (!await markIdsRead([n.id])) return
+                        setOpen(false)
+                        n.onClick?.()
+                      }}
                       style={{
                         flex: 1, minWidth: 0, background: 'transparent', border: 'none',
                         padding: 0, cursor: 'pointer', textAlign: 'left',
@@ -541,7 +560,8 @@ export const NotificationBell: React.FC<{ userId: string | undefined; onViewAllA
                       </div>
                     </button>
                     <button
-                      onClick={e => { e.stopPropagation(); dismissItem(n.id) }}
+                      data-testid={`notification-dismiss-${n.id}`} disabled={saving}
+                      onClick={e => { e.stopPropagation(); void dismissItem(n.id) }}
                       title="Dismiss"
                       style={{
                         background: 'transparent', border: 'none', color: '#484f58',

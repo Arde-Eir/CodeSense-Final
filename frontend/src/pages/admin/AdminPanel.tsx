@@ -1,6 +1,6 @@
+import { AdminRecordCell } from './AdminRecordCell'
 // Scope Tabler styles to this page to prevent style bleed.
 import React, { useEffect, useState, useCallback, useMemo, useRef } from 'react'
-import { useNavigate } from 'react-router-dom'
 import { useAuth } from '@/components/AuthContext'
 import { supabase } from '@/services/supabase'
 import { endSupportSession, requestSupportSession, type SupportSession } from '@/services/liveSupport'
@@ -27,6 +27,8 @@ import {
 } from './AdminCoreTabs'
 import { AdminLiveSupport } from './AdminLiveSupport'
 import { LevelXpSettings } from './LevelXpSettings'
+import { AdminNavigation } from './AdminNavigation'
+import './AdminPanel.css'
 
 import {
   campaignDifficultyFromForm,
@@ -89,11 +91,9 @@ const loadAdminQuestDraft = (userId: string): { form: QuestFormState; replaceTar
 }
 
 export const AdminPanel: React.FC = () => {
-  const navigate = useNavigate()
   const { user, refreshMaintenanceMode } = useAuth()
 
   const [tab, setTab] = useState<Tab>('dashboard')
-  const [navOpen, setNavOpen] = useState(false)
   const [users, setUsers] = useState<AdminUser[]>([])
   const [userImages, setUserImages] = useState<Map<string, ProfileImageUrls>>(new Map())
   const [avatarError, setAvatarError] = useState<string | null>(null)
@@ -1094,10 +1094,10 @@ export const AdminPanel: React.FC = () => {
   ]
 
   return (
-    <div className="antialiased" style={{ minHeight: '100vh', background: '#f0f4f8' }}>
+    <div className="admin-shell antialiased" data-testid="admin-panel" style={{ minHeight: '100vh', background: '#f0f4f8' }}>
 
       {toast && (
-        <div role={toast.type === 'error' ? 'alert' : 'status'} style={{
+        <div className="admin-toast" role={toast.type === 'error' ? 'alert' : 'status'} style={{
           position: 'fixed', top: 20, right: 20, zIndex: 9999,
           background: toast.type === 'success' ? '#2fb344' : '#d63939',
           color: 'white', padding: '12px 20px', borderRadius: '8px',
@@ -1108,51 +1108,10 @@ export const AdminPanel: React.FC = () => {
         </div>
       )}
 
-      <div className="wrapper">
-        <aside className="navbar navbar-vertical navbar-expand-lg navbar-dark" style={{ background: '#1a2233' }}>
-          <div className="container-fluid">
-            <button className="navbar-toggler" type="button" aria-label="Toggle admin navigation" aria-controls="admin-nav" aria-expanded={navOpen} onClick={() => setNavOpen(open => !open)}>
-              <span className="navbar-toggler-icon" />
-            </button>
+      <div className="wrapper admin-layout">
+        <AdminNavigation items={tabItems} selectedTab={tab} onSelectTab={setTab} />
 
-            <div style={{ display: 'flex', alignItems: 'center', gap: '10px', padding: '12px 0' }}>
-              <span style={{ fontSize: '22px' }}>🧠</span>
-              <span style={{ color: 'white', fontWeight: '700', fontSize: '16px' }}>CodeSense Admin</span>
-            </div>
-
-            <div id="admin-nav" className={`collapse navbar-collapse${navOpen ? ' show' : ''}`} style={{ flexDirection: 'column', alignItems: 'stretch' }}>
-            <div style={{ borderTop: '1px solid rgba(255,255,255,0.1)', margin: '8px 0', padding: '12px 0' }}>
-              <div style={{ color: 'rgba(255,255,255,0.5)', fontSize: '11px', padding: '0 8px 6px', textTransform: 'uppercase', letterSpacing: '1px' }}>
-                Navigation
-              </div>
-              {tabItems.map(t => (
-                <button key={t.id} onClick={() => { setTab(t.id); setNavOpen(false) }} aria-current={tab === t.id ? 'page' : undefined}
-                  style={{
-                    width: '100%', display: 'flex', alignItems: 'center', gap: '10px',
-                    padding: '10px 12px', background: tab === t.id ? 'rgba(255,255,255,0.12)' : 'transparent',
-                    border: 'none', borderRadius: '6px', color: tab === t.id ? 'white' : 'rgba(255,255,255,0.65)',
-                    fontSize: '13px', fontWeight: tab === t.id ? '700' : '400',
-                    cursor: 'pointer', marginBottom: '2px', textAlign: 'left',
-                    transition: 'all 0.15s',
-                  }}
-                >
-                  <i className={t.icon} style={{ fontSize: '18px', width: '20px' }} />
-                  {t.label}
-                </button>
-              ))}
-            </div>
-
-            <div style={{ marginTop: 'auto', borderTop: '1px solid rgba(255,255,255,0.1)', paddingTop: '12px' }}>
-              <button onClick={() => navigate('/home')}
-                style={{ width: '100%', background: 'transparent', border: 'none', color: 'rgba(255,255,255,0.5)', fontSize: '12px', cursor: 'pointer', textAlign: 'left', padding: '8px 12px' }}>
-                ← Back to App
-              </button>
-            </div>
-            </div>
-          </div>
-        </aside>
-
-        <div className="page-wrapper">
+        <main className="page-wrapper admin-main">
           <div className="page-header">
             <div className="container-xl">
               <div className="row align-items-center">
@@ -1185,7 +1144,7 @@ export const AdminPanel: React.FC = () => {
                   </ul>
                 </div>
               )}
-              {questDraftError && <div className="alert alert-danger d-flex justify-content-between align-items-center" role="alert">
+              {questDraftError && <div className="alert alert-danger d-flex justify-content-between align-items-center admin-toolbar" role="alert">
                 <span>{questDraftError}</span>
                 {invalidSavedDraft.current && <button type="button" className="btn btn-sm btn-outline-danger" onClick={() => {
                   try {
@@ -1250,15 +1209,24 @@ export const AdminPanel: React.FC = () => {
 
               {tab === 'quests' && (
                 <>
-                  <div className="d-flex gap-2 mb-3">
-                    <button className={`btn btn-sm ${questSubTab === 'create' ? 'btn-primary' : 'btn-outline-secondary'}`}
+                  <div className="d-flex gap-2 mb-3 admin-subtabs">
+                    <button type="button" data-testid="admin-quest-create" aria-pressed={questSubTab === 'create'} className={`btn btn-sm ${questSubTab === 'create' ? 'btn-primary' : 'btn-outline-secondary'}`}
                       onClick={() => setQuestSubTab('create')}>+ Create / Edit Quest</button>
-                    <button className={`btn btn-sm ${questSubTab === 'manage' ? 'btn-primary' : 'btn-outline-secondary'}`}
+                    <button type="button" data-testid="admin-quest-manage" aria-pressed={questSubTab === 'manage'} className={`btn btn-sm ${questSubTab === 'manage' ? 'btn-primary' : 'btn-outline-secondary'}`}
                       onClick={() => setQuestSubTab('manage')}>Manage Existing</button>
                   </div>
 
                   {questSubTab === 'create' && (
-                    <div className="row">
+                    <>
+                    <nav className="admin-section-links" aria-label="Quest editor sections">
+                      <a href="#admin-quest-basic">Basic info</a>
+                      <a href="#admin-quest-material">Learning material</a>
+                      <a href="#admin-quest-objectives">Objectives</a>
+                      <a href="#admin-quest-hints">Hints</a>
+                      <a href="#admin-quest-activities">Activities</a>
+                      <a href="#admin-quest-save">Save quest</a>
+                    </nav>
+                    <div className="row admin-builder-grid">
                       <div className="col-md-5">
 
                         <div className="card mb-3">
@@ -1294,7 +1262,7 @@ export const AdminPanel: React.FC = () => {
                         </div>
 
                         <div className="card mb-3">
-                          <div className="card-header"><h3 className="card-title">Basic Info</h3></div>
+                          <div className="card-header"><h3 id="admin-quest-basic" className="card-title admin-builder-section">Basic Info</h3></div>
                           <div className="card-body">
                             <div className="mb-2">
                               <label className="form-label">Title *</label>
@@ -1304,7 +1272,7 @@ export const AdminPanel: React.FC = () => {
                               <label className="form-label">Description</label>
                               <textarea className="form-control" rows={2} value={questForm.description} onChange={e => qSet({ description: e.target.value })} placeholder="Short description shown on the quest card" />
                             </div>
-                            <div className="row g-2 mb-2">
+                            <div className="row g-2 mb-2 admin-form-grid">
                               <div className="col-4">
                                 <label className="form-label">Level</label>
                                 <select className="form-select" value={questForm.level} onChange={e => qSet({ level: Number(e.target.value) })}>
@@ -1327,7 +1295,7 @@ export const AdminPanel: React.FC = () => {
                                 <input type="number" className="form-control" value={questForm.sortorder} onChange={e => qSet({ sortorder: Number(e.target.value) })} />
                               </div>
                             </div>
-                            <div className="row g-2 mb-2">
+                            <div className="row g-2 mb-2 admin-form-grid">
                               <div className="col-6">
                                 <label className="form-label">XP Reward</label>
                                 <input type="number" className="form-control" value={questForm.basexp} min={0} onChange={e => qSet({ basexp: Number(e.target.value) })} />
@@ -1351,7 +1319,7 @@ export const AdminPanel: React.FC = () => {
                                 </div>
                                 <span className={`badge bg-${levelBadgeColor(questForm.level)}-lt`}>Current: Level {questForm.level}</span>
                               </div>
-                              <div className="row g-2 mt-2 align-items-end">
+                              <div className="row g-2 mt-2 align-items-end admin-form-grid">
                                 <div className="col-6">
                                   <label className="form-label" style={{ fontSize: '12px' }}>New level number</label>
                                   <input
@@ -1391,7 +1359,7 @@ export const AdminPanel: React.FC = () => {
                         </div>
 
                         <div className="card mb-3">
-                          <div className="card-header"><h3 className="card-title">Learning Material</h3></div>
+                          <div className="card-header"><h3 id="admin-quest-material" className="card-title admin-builder-section">Learning Material</h3></div>
                           <div className="card-body">
                             <div className="mb-2">
                               <label className="form-label">Lesson Title</label>
@@ -1412,7 +1380,7 @@ export const AdminPanel: React.FC = () => {
                                 <span className="text-muted" style={{ fontSize: '11px', alignSelf: 'center' }}>Best for quick copy-paste from lesson notes.</span>
                               </div>
                             </div>
-                            <div className="d-flex justify-content-between align-items-center mb-1">
+                            <div className="d-flex justify-content-between align-items-center mb-1 admin-toolbar">
                               <label className="form-label mb-0" style={{ fontSize: '13px' }}>Theory Sections</label>
                               <div className="d-flex gap-1 flex-wrap justify-content-end">
                                 <button className="btn btn-xs btn-outline-primary" onClick={() => qSet({ theory_sections: [...questForm.theory_sections, newTheorySection('default', {})] })}>+ Text</button>
@@ -1482,7 +1450,7 @@ export const AdminPanel: React.FC = () => {
 
                         <div className="card mb-3">
                           <div className="card-header d-flex justify-content-between align-items-center">
-                            <h3 className="card-title mb-0">Learning Objectives</h3>
+                            <h3 id="admin-quest-objectives" className="card-title mb-0 admin-builder-section">Learning Objectives</h3>
                             <button className="btn btn-xs btn-outline-primary" onClick={() => qSet({ objectives: [...questForm.objectives, ''] })}>+ Add</button>
                           </div>
                           <div className="card-body">
@@ -1509,7 +1477,7 @@ export const AdminPanel: React.FC = () => {
 
                         <div className="card mb-3">
                           <div className="card-header d-flex justify-content-between align-items-center">
-                            <h3 className="card-title mb-0">Quest Hints</h3>
+                            <h3 id="admin-quest-hints" className="card-title mb-0 admin-builder-section">Quest Hints</h3>
                             <button className="btn btn-xs btn-outline-primary" onClick={() => qSet({
                               hints: [...questForm.hints, { id: `h_${Date.now()}`, title: '', body: '', icon: '', activity: 'all', _extra: {} }]
                             })}>+ Add Hint</button>
@@ -1533,7 +1501,7 @@ export const AdminPanel: React.FC = () => {
                                 {typeof h._extra.item_index === 'number' && Number.isInteger(h._extra.item_index) && h._extra.item_index >= 0 && (
                                   <div className="text-muted mb-1">{h.activity === 'drag' || h.activity === 'ordering' ? 'Puzzle' : 'Question'} {h._extra.item_index + 1}</div>
                                 )}
-                                <div className="row g-1 mb-1">
+                                <div className="row g-1 mb-1 admin-form-grid">
                                   <div className="col-7">
                                     <input className="form-control form-control-sm" placeholder="Hint title" value={h.title}
                                       onChange={e => { const rows = [...questForm.hints]; rows[i] = { ...rows[i], title: e.target.value }; qSet({ hints: rows }) }} />
@@ -1560,9 +1528,9 @@ export const AdminPanel: React.FC = () => {
                       <div className="col-md-7">
 
                         <div className="card mb-3">
-                          <div className="card-header"><h3 className="card-title">Activity Types</h3></div>
+                          <div className="card-header"><h3 id="admin-quest-activities" className="card-title admin-builder-section">Activity Types</h3></div>
                           <div className="card-body">
-                            <div className="row g-2">
+                            <div className="row g-2 admin-form-grid">
                               {([
                                 { key: 'act_mc',       label: 'Multiple Choice', icon: '🔘' },
                                 { key: 'act_drag',     label: 'Drag & Drop',     icon: '🎯' },
@@ -1591,7 +1559,7 @@ export const AdminPanel: React.FC = () => {
                                 mc_questions: [...questForm.mc_questions, { id: Date.now().toString(), question: '', options: ['', '', '', ''], correct: 0, explanation: '', hint: '' }]
                               })}>+ Add Q</button>
                             </div>
-                            <div className="card-body" style={{ maxHeight: '380px', overflowY: 'auto' }}>
+                            <div className="card-body admin-activity-editor" style={{ maxHeight: '380px', overflowY: 'auto' }}>
                               {questForm.mc_questions.map((q, qi) => (
                                 <div key={q.id} className="border rounded p-2 mb-2" style={{ fontSize: '12px' }}>
                                   <div className="d-flex justify-content-between mb-1">
@@ -1629,7 +1597,7 @@ export const AdminPanel: React.FC = () => {
                               <h3 className="card-title mb-0">🎯 Drag & Drop Problems</h3>
                               <button className="btn btn-xs btn-outline-primary" onClick={() => qSet({ drag_problems: [...questForm.drag_problems, newDragProblem()] })}>+ Add Problem</button>
                             </div>
-                            <div className="card-body" style={{ maxHeight: '500px', overflowY: 'auto' }}>
+                            <div className="card-body admin-activity-editor" style={{ maxHeight: '500px', overflowY: 'auto' }}>
                               {questForm.drag_problems.map((prob, pi) => (
                                 <div key={prob.id} className="border rounded p-2 mb-3" style={{ background: '#f8fafc' }}>
                                   <div className="d-flex justify-content-between align-items-center mb-2">
@@ -1642,7 +1610,7 @@ export const AdminPanel: React.FC = () => {
                                     <input className="form-control form-control-sm" placeholder="Question / instruction (e.g. Match each keyword to its meaning)" value={prob.question}
                                       onChange={e => { const dp = [...questForm.drag_problems]; dp[pi] = { ...dp[pi], question: e.target.value }; qSet({ drag_problems: dp }) }} />
                                   </div>
-                                  <div className="row g-2">
+                                  <div className="row g-2 admin-form-grid">
                                     <div className="col-6">
                                       <div className="d-flex justify-content-between align-items-center mb-1">
                                         <label className="form-label mb-0" style={{ fontSize: '11px', fontWeight: 600 }}>Draggable Items</label>
@@ -1705,7 +1673,7 @@ export const AdminPanel: React.FC = () => {
                                 balloon_questions: [...questForm.balloon_questions, { id: Date.now().toString(), question: '', options: ['', '', '', ''], correct: 0, correctAnswers: [0], explanation: '', hint: '' }]
                               })}>+ Add Q</button>
                             </div>
-                            <div className="card-body" style={{ maxHeight: '380px', overflowY: 'auto' }}>
+                            <div className="card-body admin-activity-editor" style={{ maxHeight: '380px', overflowY: 'auto' }}>
                               <div className="text-muted mb-2" style={{ fontSize: '11px' }}>Add 3-4 balloon labels, then tick every correct answer. Players must pop all correct balloons for that question. Keep option text short (under 25 chars).</div>
                               {questForm.balloon_questions.map((bq, qi) => (
                                 <div key={bq.id} className="border rounded p-2 mb-2" style={{ fontSize: '12px' }}>
@@ -1753,7 +1721,7 @@ export const AdminPanel: React.FC = () => {
                               <h3 className="card-title mb-0">📋 Ordering Problems</h3>
                               <button className="btn btn-xs btn-outline-primary" onClick={() => qSet({ ordering_problems: [...questForm.ordering_problems, newOrderProblem()] })}>+ Add Problem</button>
                             </div>
-                            <div className="card-body" style={{ maxHeight: '500px', overflowY: 'auto' }}>
+                            <div className="card-body admin-activity-editor" style={{ maxHeight: '500px', overflowY: 'auto' }}>
                               <div className="text-muted mb-2" style={{ fontSize: '11px' }}>Add items in the correct order — top = first. Each problem has its own question.</div>
                               {questForm.ordering_problems.map((prob, pi) => (
                                 <div key={prob.id} className="border rounded p-2 mb-3" style={{ background: '#f8fafc' }}>
@@ -1808,7 +1776,7 @@ export const AdminPanel: React.FC = () => {
                                     <small className="text-muted">Item {i + 1}</small>
                                     <button className="btn btn-xs btn-ghost-danger" onClick={() => qSet({ code_fill_items: questForm.code_fill_items.filter((_, j) => j !== i) })}>✕</button>
                                   </div>
-                                  <div className="row g-1 mb-1">
+                                  <div className="row g-1 mb-1 admin-form-grid">
                                     <div className="col-4">
                                       <input className="form-control form-control-sm" placeholder="Language (c, cpp…)" value={item.language}
                                         onChange={e => { const c = [...questForm.code_fill_items]; c[i] = { ...c[i], language: e.target.value }; qSet({ code_fill_items: c }) }} />
@@ -1833,7 +1801,7 @@ export const AdminPanel: React.FC = () => {
                           </div>
                         )}
 
-                        <div className="card">
+                        <div className="card admin-builder-section" id="admin-quest-save">
                           <div className="card-body">
                             {replaceTarget === null && (
                               <div className="alert alert-warning" role="alert">
@@ -1846,7 +1814,7 @@ export const AdminPanel: React.FC = () => {
                                 <button className="btn btn-xs btn-ghost-secondary ms-2" onClick={() => setReplaceTarget('')}>Clear</button>
                               </div>
                             )}
-                            <div className="d-flex gap-2 align-items-center flex-wrap">
+                            <div className="d-flex gap-2 align-items-center flex-wrap admin-builder-actions">
                               {replaceTarget ? (
                                 <button className="btn btn-warning" disabled={questSaving || !questForm.title.trim()}
                                   onClick={() => {
@@ -1862,7 +1830,7 @@ export const AdminPanel: React.FC = () => {
                                   {questSaving ? 'Saving…' : '✓ Save as New Quest'}
                                 </button>
                               )}
-                              <div className="d-flex gap-1 align-items-center">
+                              <div className="d-flex gap-1 align-items-center admin-load-quest">
                                 <select className="form-select form-select-sm" style={{ width: '220px' }} value={replaceTarget ?? ''}
                                   onChange={e => setReplaceTarget(e.target.value)}>
                                   <option value="">— Or load existing to edit —</option>
@@ -1885,6 +1853,7 @@ export const AdminPanel: React.FC = () => {
                         </div>
                       </div>
                     </div>
+                    </>
                   )}
 
                   {questSubTab === 'manage' && (
@@ -1906,7 +1875,7 @@ export const AdminPanel: React.FC = () => {
                           }}
                         >
                           <div className="d-flex align-items-start justify-content-between gap-3 flex-wrap">
-                            <div style={{ minWidth: 260, flex: '1 1 420px' }}>
+                            <div className="admin-data-tool-copy" style={{ minWidth: 260, flex: '1 1 420px' }}>
                               <div style={{ fontSize: '13px', fontWeight: 700, marginBottom: 4 }}>Fix MC Question Language</div>
                               <div className="text-muted" style={{ fontSize: '12px', lineHeight: 1.55 }}>
                                 Replaces balloon-pop wording in Multiple Choice questions with clearer MC wording, like <em>Select...</em> or <em>Which item...</em>.
@@ -1945,7 +1914,7 @@ export const AdminPanel: React.FC = () => {
                         </div>
                       </div>
                       <div className="card-body border-bottom">
-                        <div className="row g-2 align-items-end">
+                        <div className="row g-2 align-items-end admin-form-grid">
                           <div className="col-md-6">
                             <label className="form-label">Search quests</label>
                             <input
@@ -1982,34 +1951,34 @@ export const AdminPanel: React.FC = () => {
                           </div>
                         </div>
                       </div>
-                      <div className="table-responsive">
-                        <table className="table table-vcenter card-table table-striped">
-                          <thead>
-                            <tr><th>Title</th><th>Level</th><th>Primary activity</th><th>XP</th><th>Order</th><th>Status</th><th className="text-end">Actions</th></tr>
+                      <div className="table-responsive admin-records" role="region" aria-label="Campaign quests table" tabIndex={0}>
+                        <table role="table" className="admin-record-table table table-vcenter card-table table-striped admin-quest-table">
+                          <thead role="rowgroup">
+                            <tr role="row"><th role="columnheader" scope="col">Title</th><th role="columnheader" scope="col">Level</th><th role="columnheader" scope="col">Primary activity</th><th role="columnheader" scope="col">XP</th><th role="columnheader" scope="col">Order</th><th role="columnheader" scope="col">Status</th><th role="columnheader" scope="col" className="text-end">Actions</th></tr>
                           </thead>
-                          <tbody>
+                          <tbody role="rowgroup">
                             {questsLoading && existingQuests.length === 0 && (
-                              <tr><td colSpan={7} className="text-center text-muted py-4">Loading quests...</td></tr>
+                              <tr role="row"><td role="cell" colSpan={7} className="text-center text-muted py-4">Loading quests...</td></tr>
                             )}
                             {!questsLoading && managedQuests.map(q => {
                               const activities = questActivityLabels(q)
                               const isBusy = questActionId === q.id
                               return (
-                              <tr key={q.id}>
-                                <td>
+                              <tr data-testid={`admin-quest-record-${q.id}`} role="row" key={q.id}>
+                                <AdminRecordCell label="Title">
                                   <strong style={{ fontSize: '13px' }}>{q.title}</strong>
                                   {q.description && <div className="text-muted" style={{ fontSize: '11px', maxWidth: 420 }}>{q.description}</div>}
-                                </td>
-                                <td><span className={`badge bg-${levelBadgeColor(q.level ?? 0)}-lt`}>Level {q.level ?? 'n/a'}</span></td>
-                                <td>
+                                </AdminRecordCell>
+                                <AdminRecordCell label="Level"><span className={`badge bg-${levelBadgeColor(q.level ?? 0)}-lt`}>Level {q.level ?? 'n/a'}</span></AdminRecordCell>
+                                <AdminRecordCell label="Primary activity">
                                   <div className="d-flex gap-1 flex-wrap">
                                     {activities.length ? activities.map(label => <span key={label} className="badge bg-blue-lt">{label}</span>) : <span className="text-muted" style={{ fontSize: '12px' }}>No activities</span>}
                                   </div>
-                                </td>
-                                <td>{q.basexp}</td>
-                                <td>{q.sortorder}</td>
-                                <td>{q.isactive ? <span className="badge bg-green">Active</span> : <span className="badge bg-secondary">Inactive</span>}</td>
-                                <td className="text-end">
+                                </AdminRecordCell>
+                                <AdminRecordCell label="XP">{q.basexp}</AdminRecordCell>
+                                <AdminRecordCell label="Order">{q.sortorder}</AdminRecordCell>
+                                <AdminRecordCell label="Status">{q.isactive ? <span className="badge bg-green">Active</span> : <span className="badge bg-secondary">Inactive</span>}</AdminRecordCell>
+                                <AdminRecordCell label="Actions" className="admin-record-wide admin-record-actions text-end">
                                   <div className="d-flex gap-1 justify-content-end flex-wrap">
                                     <button className="btn btn-sm btn-outline-primary" disabled={!!questActionId} onClick={() => { void loadQuestForEdit(q) }}>Edit</button>
                                     <button className="btn btn-sm btn-outline-warning" disabled={!!questActionId} onClick={() => toggleQuestActive(q)}>
@@ -2017,14 +1986,14 @@ export const AdminPanel: React.FC = () => {
                                     </button>
                                     <button className="btn btn-sm btn-ghost-danger" disabled={!!questActionId} onClick={() => deleteQuest(q)}>Delete</button>
                                   </div>
-                                </td>
+                                </AdminRecordCell>
                               </tr>
                             )})}
                             {!questsLoading && existingQuests.length === 0 && (
-                              <tr><td colSpan={7} className="text-center text-muted py-4">No quests found</td></tr>
+                              <tr role="row"><td role="cell" colSpan={7} className="text-center text-muted py-4">No quests found</td></tr>
                             )}
                             {!questsLoading && existingQuests.length > 0 && managedQuests.length === 0 && (
-                              <tr><td colSpan={7} className="text-center text-muted py-4">No quests match the current filters</td></tr>
+                              <tr role="row"><td role="cell" colSpan={7} className="text-center text-muted py-4">No quests match the current filters</td></tr>
                             )}
                           </tbody>
                         </table>
@@ -2037,7 +2006,7 @@ export const AdminPanel: React.FC = () => {
 
             </div>
           </div>
-        </div>
+        </main>
       </div>
       {liveHelp && <AdminLiveSupport key={liveHelp.session.id} session={liveHelp.session} learnerName={liveHelp.learnerName} onClose={() => setLiveHelp(null)} />}
     </div>

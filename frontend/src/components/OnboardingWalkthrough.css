@@ -1,0 +1,52 @@
+.cs-tour-overlay { position: fixed; inset: 0; z-index: 10000; display: grid; place-items: center; padding: max(12px, env(safe-area-inset-top)) max(12px, env(safe-area-inset-right)) max(12px, env(safe-area-inset-bottom)) max(12px, env(safe-area-inset-left)); background: #030509c9; }
+.cs-tour-card, .cs-tour-dock, .cs-tour-resume, .cs-tour-error { color: #e6edf3; font-family: 'IBM Plex Sans', system-ui, sans-serif; overflow-wrap: anywhere; }
+.cs-tour-card { display: flex; flex-direction: column; min-width: 0; width: min(100%, 620px); max-height: min(760px, calc(100dvh - 32px)); border: 1px solid #30363d; border-radius: 16px; overflow: hidden; background: linear-gradient(155deg, #161b22, #0d1117); box-shadow: 0 20px 60px #0009; }
+.cs-tour-header { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; flex-shrink: 0; gap: 8px; padding: 12px 20px; border-bottom: 1px solid #30363d; }
+.cs-tour-counter { color: #66bb6a; font-size: 12px; font-weight: 700; }
+.cs-tour-header-actions, .cs-tour-dock-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.cs-tour-progress { flex-shrink: 0; height: 3px; background: #21262d; }
+.cs-tour-progress > div { height: 100%; background: #4caf50; }
+.cs-tour-content { flex: 1; min-height: 0; padding: 24px; overflow-y: auto; overscroll-behavior: contain; }
+.cs-tour-title { display: flex; align-items: flex-start; gap: 14px; margin-bottom: 12px; }
+.cs-tour-title > div { min-width: 0; }
+.cs-tour-icon { display: grid; flex-shrink: 0; place-items: center; width: 48px; height: 48px; border-radius: 12px; background: #e3b3411f; font-size: 28px; }
+.cs-tour-kicker { margin-bottom: 4px; color: #e3b341; font-size: 12px; font-weight: 600; }
+.cs-tour-title h2 { margin: 0; color: #e6edf3; font-size: 22px; line-height: 1.3; }
+.cs-tour-body { color: #c9d1d9; font-size: 14px; line-height: 1.75; }
+.cs-tour-body p + p { margin-top: 12px; }
+.cs-tour-takeaways { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 160px), 1fr)); gap: 10px; margin: 18px 0 0; padding: 0; list-style: none; }
+.cs-tour-takeaways li { padding: 10px 12px; border: 1px solid #30363d; border-radius: 8px; background: #161b22; color: #c9d1d9; font-size: 13px; line-height: 1.5; }
+.cs-tour-takeaways span { margin-right: 6px; color: #66bb6a; }
+.cs-tour-card button, .cs-tour-dock button, .cs-tour-resume, .cs-tour-error button { min-height: 44px; padding: 10px 14px; border: 1px solid #484f58; border-radius: 8px; background: #21262d; color: #e6edf3; font-size: 14px; font-weight: 600; line-height: 1.4; white-space: normal; cursor: pointer; touch-action: manipulation; }
+.cs-tour-card button:disabled { opacity: .4; cursor: default; }
+.cs-tour-card .cs-tour-primary, .cs-tour-dock .cs-tour-primary { border-color: #2ea043; background: #238636; color: #fff; }
+.cs-tour-card .cs-tour-action { width: 100%; margin-top: 20px; border-color: #58a6ff80; background: #58a6ff1a; color: #82c6ff; }
+.cs-tour-action-note { margin: 8px 0 0; color: #8b949e; font-size: 12px; line-height: 1.5; }
+.cs-tour-footer { display: grid; flex-shrink: 0; gap: 12px; padding: 16px 20px; border-top: 1px solid #30363d; }
+.cs-tour-step-picker { display: grid; gap: 6px; color: #c9d1d9; font-size: 12px; }
+.cs-tour-step-picker select { width: 100%; min-width: 0; min-height: 44px; padding: 8px; border: 1px solid #484f58; border-radius: 8px; background: #0d1117; color: #e6edf3; font-size: 16px; }
+.cs-tour-page-controls { display: flex; justify-content: space-between; gap: 12px; }
+.cs-tour-dock, .cs-tour-resume, .cs-tour-error { position: fixed; right: max(16px, env(safe-area-inset-right)); bottom: max(16px, env(safe-area-inset-bottom)); z-index: 10000; max-width: calc(100vw - 32px); border: 1px solid #4caf5070; border-radius: 12px; background: #161b22; box-shadow: 0 8px 32px #0008; }
+.cs-tour-dock { width: 360px; max-height: min(360px, 45dvh); padding: 14px; overflow-y: auto; }
+.cs-tour-dock-heading { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
+.cs-tour-dock h2 { margin: 6px 0; color: #e6edf3; font-size: 16px; line-height: 1.4; }
+.cs-tour-dock p { margin: 0 0 12px; color: #c9d1d9; font-size: 13px; line-height: 1.5; }
+.cs-tour-dock-actions > button { flex: 1 1 auto; }
+.cs-tour-dock .cs-tour-end { padding: 8px 0; border: 0; background: none; color: #c9d1d9; font-size: 12px; text-decoration: underline; }
+.cs-tour-resume { display: flex; align-items: center; gap: 8px; }
+.cs-tour-error { padding: 16px; }
+.cs-tour-error p { margin: 8px 0 12px; }
+.cs-tour-card button:focus-visible, .cs-tour-card select:focus-visible, .cs-tour-dock button:focus-visible, .cs-tour-resume:focus-visible, .cs-tour-error button:focus-visible { outline: 2px solid #82c6ff; outline-offset: 2px; }
+@media (max-width: 620px) {
+  .cs-tour-header, .cs-tour-footer { padding: 12px 16px; }
+  .cs-tour-content { padding: 18px 16px; }
+  .cs-tour-title h2 { font-size: 20px; }
+  .cs-tour-title { gap: 10px; }
+  .cs-tour-icon { width: 40px; height: 40px; font-size: 24px; }
+  .cs-tour-takeaways { grid-template-columns: 1fr; }
+  .cs-tour-page-controls > button { flex: 1; }
+}
+@media (max-height: 480px) {
+  .cs-tour-card { overflow-y: auto; overscroll-behavior: contain; }
+  .cs-tour-content { flex: none; overflow-y: visible; }
+}

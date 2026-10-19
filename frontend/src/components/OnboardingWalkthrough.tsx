@@ -1,10 +1,14 @@
 /** First-use tour, persisted in localStorage and replayable from the profile menu. */
-import React, { useEffect, useState } from 'react'
-import { useNavigate } from 'react-router-dom'
+import React, { useEffect, useRef, useState, type RefObject } from 'react'
+import { createPortal } from 'react-dom'
+import { useLocation, useNavigate } from 'react-router-dom'
+import { OnboardingDialog } from './OnboardingDialog'
+import './OnboardingWalkthrough.css'
 
 export const ONBOARD_KEY = 'cs-onboarded-v1'
 export const ONBOARD_ACTIVE_KEY = 'cs-onboard-active-v1'
 export const ONBOARD_STEP_KEY = 'cs-onboard-step-v1'
+export const ONBOARD_VIEW_KEY = 'cs-onboard-view-v1'
 
 interface Step {
   icon: string
@@ -12,15 +16,25 @@ interface Step {
   kicker: string
   body: React.ReactNode
   takeaways: string[]
-  action?: { label: string; path?: string; onClick?: () => void }
+  action?: { label: string; path: string }
 }
 
-const readInitialStep = (stepCount: number): number => {
+type TourView = 'guide' | 'exploring' | 'minimized'
+interface TourProgress { idx: number; view: TourView }
+interface TourState { progress: TourProgress | null; error: string | null }
+
+const storageErrorMessage = (error: Error): string => `Welcome tour progress could not be saved or restored: ${error.message}. Allow site storage, then retry.`
+
+const readInitialProgress = (stepCount: number): TourState => {
   try {
-    const raw = Number(localStorage.getItem(ONBOARD_STEP_KEY) ?? '0')
-    return Number.isInteger(raw) ? Math.max(0, Math.min(stepCount - 1, raw)) : 0
-  } catch {
-    return 0
+    const idx = Number(localStorage.getItem(ONBOARD_STEP_KEY) ?? '0')
+    const view = localStorage.getItem(ONBOARD_VIEW_KEY) ?? 'guide'
+    if (!Number.isInteger(idx) || idx < 0 || idx >= stepCount) throw new RangeError('The saved tour step is invalid; restart the tour')
+    if (view !== 'guide' && view !== 'exploring' && view !== 'minimized') throw new RangeError('The saved tour view is invalid; restart the tour')
+    return { progress: { idx, view }, error: null }
+  } catch (error) {
+    if (!(error instanceof Error)) throw error
+    return { progress: null, error: storageErrorMessage(error) }
   }
 }
 
@@ -37,12 +51,12 @@ const STEPS = (isAdmin: boolean, isGuest: boolean): Step[] => [
           quests, progress, and profile tools.
         </p>
         <p style={{ color: '#8b949e', fontSize: 12, marginTop: 10 }}>
-          It saves your current step while you move around, so opening a feature
-          from the tour will not lose your place.
+          Opening a feature shrinks the tour into a small guide so you can try the
+          page. Review the same step or continue when you are ready.
         </p>
       </>
     ),
-    takeaways: ['Replay anytime from the profile menu', 'Use feature buttons to jump around', 'Skip finishes the tour cleanly'],
+    takeaways: ['Replay anytime from the profile menu', 'Open features and try them as you learn', 'Minimize to pause; End tour finishes it'],
   },
   {
     icon: '🏠',
@@ -263,254 +277,147 @@ const STEPS = (isAdmin: boolean, isGuest: boolean): Step[] => [
 export const OnboardingWalkthrough: React.FC<{
   isAdmin: boolean
   isGuest: boolean
+  backgroundRef: RefObject<HTMLDivElement | null>
+  startError: string | null
   onFinish: () => void
-}> = ({ isAdmin, isGuest, onFinish }) => {
+}> = ({ isAdmin, isGuest, backgroundRef, startError, onFinish }) => {
   const navigate = useNavigate()
+  const location = useLocation()
   const steps = STEPS(isAdmin, isGuest)
-  const [idx, setIdx] = useState(() => readInitialStep(steps.length))
-  const step = steps[idx]
-  const isLast = idx === steps.length - 1
+  const [state, setState] = useState<TourState>(() => startError
+    ? { progress: null, error: startError }
+    : readInitialProgress(steps.length))
+  const resumeRef = useRef<HTMLButtonElement>(null)
+  const reviewRef = useRef<HTMLButtonElement>(null)
+  const view = state.progress?.view
 
   useEffect(() => {
-    try { localStorage.setItem(ONBOARD_ACTIVE_KEY, 'true') } catch { /* quota */ }
-    const previousOverflow = document.body.style.overflow
-    document.body.style.overflow = 'hidden'
-    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') skip() }
-    document.addEventListener('keydown', onKey)
-    return () => {
-      document.body.style.overflow = previousOverflow
-      document.removeEventListener('keydown', onKey)
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
+    if (view === 'minimized') resumeRef.current?.focus()
+    if (view === 'exploring') reviewRef.current?.focus()
+  }, [view])
 
-  useEffect(() => {
+  const changeProgress = (progress: TourProgress): boolean => {
     try {
+      localStorage.setItem(ONBOARD_STEP_KEY, String(progress.idx))
+      localStorage.setItem(ONBOARD_VIEW_KEY, progress.view)
       localStorage.setItem(ONBOARD_ACTIVE_KEY, 'true')
-      localStorage.setItem(ONBOARD_STEP_KEY, String(idx))
-    } catch { /* quota */ }
-  }, [idx])
+    } catch (error) {
+      if (!(error instanceof Error)) throw error
+      setState(previous => ({ ...previous, error: storageErrorMessage(error) }))
+      return false
+    }
+    setState({ progress, error: null })
+    return true
+  }
 
-  const finish = () => {
+  const finish = (): void => {
     try {
       localStorage.setItem(ONBOARD_KEY, 'done')
       localStorage.removeItem(ONBOARD_ACTIVE_KEY)
       localStorage.removeItem(ONBOARD_STEP_KEY)
-    } catch { /* quota */ }
+      localStorage.removeItem(ONBOARD_VIEW_KEY)
+    } catch (error) {
+      if (!(error instanceof Error)) throw error
+      setState(previous => ({ ...previous, error: storageErrorMessage(error) }))
+      return
+    }
     onFinish()
   }
 
-  const skip = () => finish()
+  if (!state.progress || state.error) return createPortal(
+    <section className="cs-tour-error" role="alert" data-testid="welcome-tour-error">
+      <h2>Welcome tour paused</h2>
+      <p>{state.error}</p>
+      <button type="button" data-testid="welcome-tour-retry" onClick={() => changeProgress(state.progress ?? { idx: 0, view: 'guide' })}>
+        {state.progress ? 'Retry saving progress' : 'Restart tour'}
+      </button>
+      <button type="button" data-testid="welcome-tour-close-error" onClick={onFinish}>Close without saving</button>
+    </section>, document.body,
+  )
 
-  const next = () => {
+  const { idx } = state.progress
+  const step = steps[idx]
+  const action = step.action
+  const isLast = idx === steps.length - 1
+  const counter = `Welcome tour · ${idx + 1} / ${steps.length}`
+  const minimize = (): void => { changeProgress({ idx, view: 'minimized' }) }
+  const review = (): void => { changeProgress({ idx, view: 'guide' }) }
+  const next = (): void => {
     if (isLast) finish()
-    else setIdx(i => Math.min(steps.length - 1, i + 1))
+    else changeProgress({ idx: idx + 1, view: 'guide' })
+  }
+  const openFeature = (path: string): void => {
+    if (changeProgress({ idx, view: 'exploring' })) navigate(path)
   }
 
-  const back = () => setIdx(i => Math.max(0, i - 1))
+  if (view === 'minimized') return createPortal(
+    <button ref={resumeRef} type="button" className="cs-tour-resume" data-testid="welcome-tour-resume" onClick={review}>
+      <span aria-hidden="true">🗺️</span> Resume tour · {idx + 1}/{steps.length}
+    </button>, document.body,
+  )
 
-  const goToAction = () => {
-    if (!step.action) return
-    if (step.action.path) {
-      const nextIdx = isLast ? idx : Math.min(steps.length - 1, idx + 1)
-      try {
-        localStorage.setItem(ONBOARD_ACTIVE_KEY, 'true')
-        localStorage.setItem(ONBOARD_STEP_KEY, String(nextIdx))
-      } catch { /* quota */ }
-      navigate(step.action.path)
-      // Keep the App-level tour open when navigating to the next step.
-      if (!isLast) setIdx(nextIdx)
-    } else {
-      step.action.onClick?.()
-    }
-  }
+  if (view === 'exploring') return createPortal(
+    <section className="cs-tour-dock" aria-label="Welcome tour guide" data-testid="welcome-tour-dock">
+      <div className="cs-tour-dock-heading">
+        <div className="cs-tour-counter">{counter}</div>
+        <button type="button" data-testid="welcome-tour-minimize" onClick={minimize}>Minimize</button>
+      </div>
+      <h2>{step.icon} {step.title}</h2>
+      <p>Try this page freely. Your place is saved; continue when you are ready.</p>
+      <div className="cs-tour-dock-actions">
+        <button ref={reviewRef} type="button" data-testid="welcome-tour-review" onClick={review}>Review step</button>
+        <button type="button" className="cs-tour-primary" data-testid="welcome-tour-next" onClick={next}>{isLast ? 'Finish tour' : 'Next step →'}</button>
+        {action && location.pathname !== action.path && <button type="button" data-testid="welcome-tour-open-feature" onClick={() => openFeature(action.path)}>{action.label}</button>}
+      </div>
+      <button type="button" className="cs-tour-end" data-testid="welcome-tour-end" onClick={finish}>End tour</button>
+    </section>, document.body,
+  )
 
   return (
-    <div style={{
-      position: 'fixed', inset: 0, zIndex: 10000,
-      background: 'rgba(3,5,9,0.85)', backdropFilter: 'blur(6px)',
-      display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16,
-      animation: 'obFadeIn 0.2s ease',
-    }}
-      role="dialog"
-      aria-modal="true"
-      aria-labelledby="codesense-tour-title"
-    >
-      <style>{`
-        @keyframes obFadeIn  { from{opacity:0} to{opacity:1} }
-        @keyframes obSlideUp { from{opacity:0;transform:translateY(18px)} to{opacity:1;transform:translateY(0)} }
-        @media (max-width: 620px) {
-          .cs-onboard-card { max-height: calc(100vh - 28px); }
-          .cs-onboard-content { padding: 22px 18px 18px !important; }
-          .cs-onboard-footer { padding: 14px 18px !important; gap: 12px; }
-          .cs-onboard-dots { display: none !important; }
-        }
-      `}</style>
-
-      <div className="cs-onboard-card" style={{
-        background: 'linear-gradient(155deg, #161b22 0%, #0d1117 100%)',
-        border: '1px solid #30363d', borderRadius: 18,
-        maxWidth: 620, width: '100%', padding: 0,
-        maxHeight: 'calc(100vh - 48px)',
-        boxShadow: '0 30px 90px rgba(0,0,0,0.8), 0 0 0 1px rgba(76,175,80,0.1)',
-        animation: 'obSlideUp 0.28s ease-out',
-        fontFamily: "'IBM Plex Sans', system-ui, sans-serif",
-        display: 'flex', flexDirection: 'column', overflow: 'hidden',
-      }}>
-        <div style={{
-          display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-          padding: '14px 20px', borderBottom: '1px solid #21262d',
-        }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-            <span style={{
-              background: 'rgba(76,175,80,0.12)', color: '#4caf50',
-              padding: '3px 10px', borderRadius: 10,
-              fontSize: 10, fontWeight: 800, letterSpacing: 1.2,
-              fontFamily: "'IBM Plex Mono', monospace",
-            }}>
-              WELCOME TOUR · {idx + 1} / {steps.length}
-            </span>
-          </div>
-          <button onClick={skip}
-            style={{
-              background: 'transparent', border: 'none', color: '#8b949e',
-              fontSize: 12, cursor: 'pointer', padding: 0,
-              textDecoration: 'underline',
-            }}>
-            Skip tour
-          </button>
+    <OnboardingDialog backgroundRef={backgroundRef} onPause={minimize} stepIndex={idx}>
+      <header className="cs-tour-header">
+        <span className="cs-tour-counter">{counter}</span>
+        <div className="cs-tour-header-actions">
+          <button type="button" data-testid="welcome-tour-minimize" onClick={minimize}>Pause</button>
+          <button type="button" data-testid="welcome-tour-end" onClick={finish}>End tour</button>
         </div>
-
-        <div style={{ background: '#21262d', height: 3 }}>
-          <div style={{
-            width: `${((idx + 1) / steps.length) * 100}%`, height: '100%',
-            background: 'linear-gradient(90deg, #4caf50, #66bb6a)',
-            transition: 'width 0.3s ease',
-          }} />
-        </div>
-
-        <div className="cs-onboard-content" style={{ padding: '28px 28px 24px', flex: 1, overflowY: 'auto' }}>
-          <div style={{ display: 'flex', alignItems: 'flex-start', gap: 16, marginBottom: 12 }}>
-            <div style={{
-              width: 58, height: 58, borderRadius: 16,
-              display: 'flex', alignItems: 'center', justifyContent: 'center',
-              background: 'rgba(227,179,65,0.12)',
-              border: '1px solid rgba(227,179,65,0.24)',
-              fontSize: 34,
-              flexShrink: 0,
-            }}>{step.icon}</div>
-            <div>
-              <div style={{
-                color: '#e3b341',
-                fontFamily: "'IBM Plex Mono', monospace",
-                fontSize: 11,
-                fontWeight: 800,
-                letterSpacing: 1.1,
-                textTransform: 'uppercase',
-                marginBottom: 6,
-              }}>
-                {step.kicker}
-              </div>
-              <h2 id="codesense-tour-title" style={{
-            color: '#e6edf3', fontSize: 22, fontWeight: 800,
-            margin: '0 0 12px',
-          }}>
-            {step.title}
-          </h2>
-            </div>
-          </div>
-          <div style={{ color: '#c9d1d9', fontSize: 14, lineHeight: 1.75 }}>
-            {step.body}
-          </div>
-          <div style={{
-            display: 'grid',
-            gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))',
-            gap: 10,
-            marginTop: 18,
-          }}>
-            {step.takeaways.map(takeaway => (
-              <div
-                key={takeaway}
-                style={{
-                  background: 'rgba(22,27,34,0.88)',
-                  border: '1px solid #30363d',
-                  borderRadius: 10,
-                  color: '#c9d1d9',
-                  fontSize: 12,
-                  lineHeight: 1.45,
-                  padding: '10px 12px',
-                }}
-              >
-                <span style={{ color: '#4caf50', fontWeight: 900, marginRight: 6 }}>✓</span>
-                {takeaway}
-              </div>
-            ))}
-          </div>
-        </div>
-
-        {step.action && (
-          <div style={{ padding: '0 28px' }}>
-            <button onClick={goToAction} style={{
-              width: '100%', padding: '10px 16px',
-              background: 'rgba(88,166,255,0.1)',
-              border: '1px solid rgba(88,166,255,0.35)',
-              color: '#58a6ff', borderRadius: 8,
-              fontSize: 13, fontWeight: 700, cursor: 'pointer',
-              letterSpacing: 0.4, transition: 'all 0.15s',
-            }}
-              onMouseEnter={e => { e.currentTarget.style.background = 'rgba(88,166,255,0.18)' }}
-              onMouseLeave={e => { e.currentTarget.style.background = 'rgba(88,166,255,0.1)' }}
-            >
-              {step.action.label}
-            </button>
-          </div>
-        )}
-
-        <div className="cs-onboard-footer" style={{
-          display: 'flex', justifyContent: 'space-between', alignItems: 'center',
-          padding: '18px 28px', borderTop: '1px solid #21262d', marginTop: 24,
-        }}>
-          <button onClick={back} disabled={idx === 0}
-            style={{
-              background: 'transparent', border: '1px solid #30363d',
-              color: '#8b949e', padding: '8px 18px', borderRadius: 8,
-              fontSize: 12, fontWeight: 700, cursor: idx === 0 ? 'not-allowed' : 'pointer',
-              opacity: idx === 0 ? 0.4 : 1, letterSpacing: 0.4,
-            }}
-          >
-            ← Back
-          </button>
-
-          <div className="cs-onboard-dots" style={{ display: 'flex', gap: 6 }}>
-            {steps.map((_, i) => (
-              <button
-                key={i}
-                onClick={() => setIdx(i)}
-                style={{
-                  width: i === idx ? 18 : 6, height: 6,
-                  borderRadius: 3,
-                  background: i === idx ? '#4caf50' : i < idx ? 'rgba(76,175,80,0.4)' : '#30363d',
-                  border: 'none', cursor: 'pointer', padding: 0,
-                  transition: 'all 0.2s ease',
-                }}
-                aria-label={`Go to step ${i + 1}`}
-              />
-            ))}
-          </div>
-
-          <button onClick={next}
-            style={{
-              background: isLast ? '#4caf50' : '#238636',
-              border: 'none', color: 'white', padding: '8px 22px',
-              borderRadius: 8, fontSize: 12, fontWeight: 700,
-              cursor: 'pointer', letterSpacing: 0.4,
-            }}
-          >
-            {isLast ? '🚀 Start exploring' : 'Next →'}
-          </button>
-        </div>
+      </header>
+      <div className="cs-tour-progress" role="progressbar" aria-label="Tour progress" aria-valuemin={1} aria-valuemax={steps.length} aria-valuenow={idx + 1}>
+        <div style={{ width: `${((idx + 1) / steps.length) * 100}%` }} />
       </div>
-    </div>
+      <div key={idx} className="cs-tour-content" data-testid="welcome-tour-content">
+        <div className="cs-tour-title">
+          <span className="cs-tour-icon" aria-hidden="true">{step.icon}</span>
+          <div>
+            <div className="cs-tour-kicker">{step.kicker}</div>
+            <h2 id="codesense-tour-title" data-testid="welcome-tour-title">{step.title}</h2>
+          </div>
+        </div>
+        <div className="cs-tour-body">{step.body}</div>
+        <ul className="cs-tour-takeaways">
+          {step.takeaways.map(takeaway => <li key={takeaway}><span aria-hidden="true">✓</span>{takeaway}</li>)}
+        </ul>
+        {action && <>
+          <button type="button" className="cs-tour-action" data-testid="welcome-tour-open-feature" onClick={() => openFeature(action.path)}>{action.label}</button>
+          <p className="cs-tour-action-note">The guide will shrink so you can explore. This step stays saved until you continue.</p>
+        </>}
+      </div>
+      <footer className="cs-tour-footer">
+        <label className="cs-tour-step-picker">Jump to a step
+          <select data-testid="welcome-tour-step" value={idx} onChange={event => {
+            const selected = Number(event.target.value)
+            if (!Number.isInteger(selected) || selected < 0 || selected >= steps.length) throw new RangeError(`Invalid welcome-tour step: ${event.target.value}`)
+            changeProgress({ idx: selected, view: 'guide' })
+          }}>
+            {steps.map((item, index) => <option key={item.title} value={index}>{index + 1}. {item.title}</option>)}
+          </select>
+        </label>
+        <div className="cs-tour-page-controls">
+          <button type="button" data-testid="welcome-tour-back" disabled={idx === 0} onClick={() => changeProgress({ idx: idx - 1, view: 'guide' })}>← Back</button>
+          <button type="button" className="cs-tour-primary" data-testid="welcome-tour-next" onClick={next}>{isLast ? '🚀 Start exploring' : 'Next →'}</button>
+        </div>
+      </footer>
+    </OnboardingDialog>
   )
 }
 

@@ -1,3 +1,4 @@
+import { AdminRecordCell } from './AdminRecordCell'
 import React, { useState } from 'react'
 import type { ProfileImageUrls } from '@/services/ProfileImages'
 import { PlayerDetailModal } from '@/components/PlayerDetailModal'
@@ -78,29 +79,29 @@ export const AdminDashboardTab: React.FC<{
                       <div className="card">
                         <div className="card-header"><h3 className="card-title">Recent Activity</h3></div>
                         {auditError && <div role="alert" className="alert alert-danger m-3">{auditError} Previously loaded entries may be outdated.</div>}
-                        <div className="table-responsive">
-                          <table className="table table-vcenter card-table">
-                            <thead>
-                              <tr>
-                                <th>Action</th><th>Admin</th><th>Target</th><th>Time</th>
+                        <div className="table-responsive admin-records">
+                          <table role="table" className="admin-record-table table table-vcenter card-table">
+                            <thead role="rowgroup">
+                              <tr role="row">
+                                <th role="columnheader" scope="col">Action</th><th role="columnheader" scope="col">Admin</th><th role="columnheader" scope="col">Target</th><th role="columnheader" scope="col">Time</th>
                               </tr>
                             </thead>
-                            <tbody>
+                            <tbody role="rowgroup">
                               {auditLogs.slice(0, 10).map(log => (
-                                <tr key={log.id}>
-                                  <td><span className={`badge bg-${
+                                <tr data-testid={`admin-audit-record-${log.id}`} role="row" key={log.id}>
+                                  <AdminRecordCell label="Action"><span className={`badge bg-${
                                     log.action.includes('ban')         ? 'red'    :
                                     log.action.includes('admin')       ? 'purple' :
                                     log.action.includes('maintenance') ? 'orange' :
                                     log.action.includes('impersonat')  ? 'yellow' : 'blue'
-                                  }-lt`}>{log.action}</span></td>
-                                  <td>{log.admin?.playername ?? log.admin_id?.slice(0, 8) ?? 'Deleted admin'}</td>
-                                  <td>{log.target?.playername ?? (log.target_user_id ? log.target_user_id.slice(0, 8) : '—')}</td>
-                                  <td className="text-muted">{log.created_at ? fmt(log.created_at) : 'Not recorded'}</td>
+                                  }-lt`}>{log.action}</span></AdminRecordCell>
+                                  <AdminRecordCell label="Admin">{log.admin?.playername ?? log.admin_id?.slice(0, 8) ?? 'Deleted admin'}</AdminRecordCell>
+                                  <AdminRecordCell label="Target">{log.target?.playername ?? (log.target_user_id ? log.target_user_id.slice(0, 8) : '—')}</AdminRecordCell>
+                                  <AdminRecordCell label="Time" className="admin-record-wide text-muted">{log.created_at ? fmt(log.created_at) : 'Not recorded'}</AdminRecordCell>
                                 </tr>
                               ))}
                               {auditLogs.length === 0 && !auditError && (
-                                <tr><td colSpan={4} className="text-center text-muted py-3">{auditLoading ? 'Loading audit entries…' : 'No audit entries yet'}</td></tr>
+                                <tr role="row"><td role="cell" colSpan={4} className="text-center text-muted py-3">{auditLoading ? 'Loading audit entries…' : 'No audit entries yet'}</td></tr>
                               )}
                             </tbody>
                           </table>
@@ -158,12 +159,13 @@ export const AdminUsersTab: React.FC<{
                     <h3 className="card-title">User Management</h3>
                     <div className="card-options" style={{ gap: '8px', display: 'flex', alignItems: 'center' }}>
                       <input
+                        data-testid="admin-user-search" aria-label="Search users"
                         type="text" className="form-control form-control-sm"
                         placeholder="Search users..." value={userSearch}
                         onChange={e => setUserSearch(e.target.value)}
                         style={{ width: '200px' }}
                       />
-                      <select className="form-select form-select-sm" value={userFilter}
+                      <select data-testid="admin-user-filter" aria-label="Filter users" className="form-select form-select-sm" value={userFilter}
                         onChange={e => setUserFilter(parseUserFilter(e.target.value))} style={{ width: '130px' }}>
                         <option value="all">All Users</option>
                         <option value="active">Not banned</option>
@@ -172,20 +174,20 @@ export const AdminUsersTab: React.FC<{
                       </select>
                     </div>
                   </div>
-                  <div className="table-responsive">
-                    <table className="table table-vcenter card-table table-striped">
-                      <thead>
-                        <tr>
-                          <th>Player</th><th>Email</th><th>Type</th><th>Level</th><th>XP</th>
-                          <th>Status</th><th>Joined</th><th>Last Active</th><th>Actions</th>
+                  <div className="table-responsive admin-records" data-testid="admin-users-table-scroll" role="region" aria-label="User management table" tabIndex={0}>
+                    <table role="table" className="admin-record-table table table-vcenter card-table table-striped admin-user-table">
+                      <thead role="rowgroup">
+                        <tr role="row">
+                          <th role="columnheader" scope="col">Player</th><th role="columnheader" scope="col">Email</th><th role="columnheader" scope="col">Type</th><th role="columnheader" scope="col">Level</th><th role="columnheader" scope="col">XP</th>
+                          <th role="columnheader" scope="col">Status</th><th role="columnheader" scope="col">Joined</th><th role="columnheader" scope="col">Last Active</th><th role="columnheader" scope="col">Actions</th>
                         </tr>
                       </thead>
-                      <tbody>
+                      <tbody role="rowgroup">
                         {filteredUsers.map(u => {
                           const avatarUrl = userImages.get(u.id)?.avatarUrl ?? null
                           return (
-                          <tr key={u.id}>
-                            <td>
+                          <tr data-testid={`admin-user-record-${u.id}`} role="row" key={u.id}>
+                            <AdminRecordCell label="Player">
                               <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                                 <div style={{ width: '32px', height: '32px', borderRadius: '50%', background: '#206bc4', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'white', fontWeight: '700', fontSize: '14px', flexShrink: 0, overflow: 'hidden' }}>
                                   {avatarUrl
@@ -197,30 +199,30 @@ export const AdminUsersTab: React.FC<{
                                   {u.is_admin && <span className="badge bg-purple-lt ms-1" style={{ fontSize: '10px' }}>admin</span>}
                                 </div>
                               </div>
-                            </td>
-                            <td className="text-muted" style={{ fontSize: '12px' }}>{u.email}</td>
-                            <td>
+                            </AdminRecordCell>
+                            <AdminRecordCell label="Email" className="admin-record-wide text-muted" style={{ fontSize: '12px' }}>{u.email}</AdminRecordCell>
+                            <AdminRecordCell label="Type">
                               <span className={`badge bg-${u.user_type === 'professional' ? 'azure' : 'teal'}-lt`} style={{ textTransform: 'capitalize' }}>
                                 {u.user_type ?? 'student'}
                               </span>
-                            </td>
-                            <td>{u.currentlevel}</td>
-                            <td>{u.totalxp}</td>
-                            <td>
+                            </AdminRecordCell>
+                            <AdminRecordCell label="Level">{u.currentlevel}</AdminRecordCell>
+                            <AdminRecordCell label="XP">{u.totalxp}</AdminRecordCell>
+                            <AdminRecordCell label="Status">
                               {u.is_banned
                                 ? <span className="badge bg-red">Banned</span>
                                 : <span className="badge bg-green">Not banned</span>
                               }
-                            </td>
-                            <td className="text-muted" style={{ fontSize: '11px' }}>{fmt(u.createdat)}</td>
-                            <td className="text-muted" style={{ fontSize: '11px' }}>{u.lastactive ? fmt(u.lastactive) : '—'}</td>
-                            <td>
+                            </AdminRecordCell>
+                            <AdminRecordCell label="Joined" className="text-muted" style={{ fontSize: '11px' }}>{fmt(u.createdat)}</AdminRecordCell>
+                            <AdminRecordCell label="Last Active" className="text-muted" style={{ fontSize: '11px' }}>{u.lastactive ? fmt(u.lastactive) : '—'}</AdminRecordCell>
+                            <AdminRecordCell className="admin-record-wide admin-record-actions" label="Actions">
                               <div style={{ display: 'flex', gap: '4px', flexWrap: 'wrap' }}>
                                 {u.is_banned ? (
                                   <button className="btn btn-sm btn-success" disabled={saving}
                                     onClick={() => setPendingAction({ kind: 'unban', user: u })}>Unban</button>
                                 ) : (
-                                  <button className="btn btn-sm btn-danger" disabled={saving || u.id === currentUserId}
+                                  <button data-testid={`admin-ban-${u.id}`} className="btn btn-sm btn-danger" disabled={saving || u.id === currentUserId}
                                     onClick={() => setPendingAction({ kind: 'ban', user: u })}>Ban</button>
                                 )}
                                 {u.id !== currentUserId && (
@@ -238,20 +240,20 @@ export const AdminUsersTab: React.FC<{
                                   Live Preview & Help
                                 </button>
                               </div>
-                            </td>
+                            </AdminRecordCell>
                           </tr>
                         )})}
                         {filteredUsers.length === 0 && (
-                          <tr><td colSpan={9} className="text-center text-muted py-4">{loading ? 'Loading users…' : 'No users found'}</td></tr>
+                          <tr role="row"><td role="cell" colSpan={9} className="text-center text-muted py-4">{loading ? 'Loading users…' : 'No users found'}</td></tr>
                         )}
                       </tbody>
                     </table>
                   </div>
-                  <div className="card-footer text-muted d-flex justify-content-between align-items-center" style={{ fontSize: '12px' }}>
+                  <div className="card-footer text-muted d-flex justify-content-between align-items-center admin-users-pagination" style={{ fontSize: '12px' }}>
                     <span>{resultCount === 0 ? 0 : page * 25 + 1}–{Math.min((page + 1) * 25, resultCount)} of {resultCount} matching users ({userCount} total)</span>
                     <span className="d-flex gap-2">
-                      <button type="button" className="btn btn-sm" disabled={loading || page === 0} onClick={() => setPage(page - 1)}>Previous</button>
-                      <button type="button" className="btn btn-sm" disabled={loading || (page + 1) * 25 >= resultCount} onClick={() => setPage(page + 1)}>Next</button>
+                      <button type="button" data-testid="admin-users-previous" className="btn btn-sm" disabled={loading || page === 0} onClick={() => setPage(page - 1)}>Previous</button>
+                      <button type="button" data-testid="admin-users-next" className="btn btn-sm" disabled={loading || (page + 1) * 25 >= resultCount} onClick={() => setPage(page + 1)}>Next</button>
                     </span>
                   </div>
                 </div>
@@ -263,10 +265,10 @@ export const AdminUsersTab: React.FC<{
       onClose={() => setPreviewUserId(null)}
     />
   )}
-  {pendingAction && <div role="dialog" aria-modal="true" aria-labelledby="admin-user-action-title"
+  {pendingAction && <div data-testid="admin-user-action-dialog" role="dialog" aria-modal="true" aria-labelledby="admin-user-action-title"
     onKeyDown={event => { if (event.key === 'Escape') setPendingAction(null) }}
     style={{ position: 'fixed', inset: 0, zIndex: 20000, background: '#0009', display: 'grid', placeItems: 'center', padding: 16 }}>
-    <div className="card" style={{ width: 'min(100%, 460px)' }}>
+    <div className="card admin-confirm-dialog" style={{ width: 'min(100%, 460px)' }}>
       <div className="card-body">
         <h3 id="admin-user-action-title">{pendingAction.kind === 'ban' ? 'Ban' : pendingAction.kind === 'unban' ? 'Unban' : pendingAction.user.is_admin ? 'Revoke admin access from' : 'Grant admin access to'} {pendingAction.user.playername}?</h3>
         <p className="text-muted">{pendingAction.kind === 'ban'
@@ -280,8 +282,8 @@ export const AdminUsersTab: React.FC<{
           <textarea id="admin-ban-reason" className="form-control" autoFocus value={banReason}
             onChange={event => setBanReason(event.target.value)} rows={3} maxLength={500} />
         </label>}
-        <div className="d-flex justify-content-end gap-2 mt-3">
-          <button type="button" className="btn" disabled={saving} onClick={() => { setPendingAction(null); setBanReason('') }}>Cancel</button>
+        <div className="d-flex justify-content-end gap-2 mt-3 admin-confirm-actions">
+          <button type="button" data-testid="admin-user-action-cancel" className="btn" disabled={saving} onClick={() => { setPendingAction(null); setBanReason('') }}>Cancel</button>
           <button type="button" className="btn btn-danger" disabled={saving || (pendingAction.kind === 'ban' && !banReason.trim())}
             onClick={() => { void confirmAction() }}>Confirm</button>
         </div>
@@ -308,17 +310,17 @@ export const AdminAuditTab: React.FC<{
                     </div>
                   </div>
                   {auditError && <div role="alert" className="alert alert-danger m-3">{auditError} Previously loaded entries may be outdated.</div>}
-                  <div className="table-responsive">
-                    <table className="table table-vcenter card-table">
-                      <thead>
-                        <tr>
-                          <th>Action</th><th>Admin</th><th>Target User</th><th>Details</th><th>Timestamp</th>
+                  <div className="table-responsive admin-records" role="region" aria-label="Admin audit table" tabIndex={0}>
+                    <table role="table" className="admin-record-table table table-vcenter card-table admin-audit-table">
+                      <thead role="rowgroup">
+                        <tr role="row">
+                          <th role="columnheader" scope="col">Action</th><th role="columnheader" scope="col">Admin</th><th role="columnheader" scope="col">Target User</th><th role="columnheader" scope="col">Details</th><th role="columnheader" scope="col">Timestamp</th>
                         </tr>
                       </thead>
-                      <tbody>
+                      <tbody role="rowgroup">
                         {auditLogs.map(log => (
-                          <tr key={log.id}>
-                            <td>
+                          <tr data-testid={`admin-audit-record-${log.id}`} role="row" key={log.id}>
+                            <AdminRecordCell label="Action">
                               <span className={`badge bg-${
                                 log.action.includes('ban') ? 'red' :
                                 log.action.includes('admin') ? 'purple' :
@@ -328,20 +330,20 @@ export const AdminAuditTab: React.FC<{
                               }-lt`}>
                                 {log.action}
                               </span>
-                            </td>
-                            <td><span title={log.admin_id ?? undefined}>{log.admin?.playername ?? log.admin_id ?? 'Deleted admin'}</span></td>
-                            <td><span title={log.target_user_id ?? undefined}>{log.target?.playername ?? log.target_user_id ?? '—'}</span></td>
-                            <td className="text-muted" style={{ fontSize: '11px', maxWidth: '360px' }}>
+                            </AdminRecordCell>
+                            <AdminRecordCell label="Admin"><span title={log.admin_id ?? undefined}>{log.admin?.playername ?? log.admin_id ?? 'Deleted admin'}</span></AdminRecordCell>
+                            <AdminRecordCell label="Target User"><span title={log.target_user_id ?? undefined}>{log.target?.playername ?? log.target_user_id ?? '—'}</span></AdminRecordCell>
+                            <AdminRecordCell label="Details" className="admin-record-wide text-muted" style={{ fontSize: '11px', maxWidth: '360px' }}>
                               {log.details !== null ? <details data-testid={`admin-audit-details-${log.id}`}>
-                                <summary>View details</summary>
+                                <summary data-testid={`admin-audit-summary-${log.id}`}>View details</summary>
                                 <pre style={{ whiteSpace: 'pre-wrap', overflowWrap: 'anywhere', margin: '8px 0' }}>{JSON.stringify(log.details, null, 2)}</pre>
                               </details> : '—'}
-                            </td>
-                            <td className="text-muted" style={{ fontSize: '11px' }}>{log.created_at ? fmt(log.created_at) : 'Not recorded'}</td>
+                            </AdminRecordCell>
+                            <AdminRecordCell label="Timestamp" className="admin-record-wide text-muted" style={{ fontSize: '11px' }}>{log.created_at ? fmt(log.created_at) : 'Not recorded'}</AdminRecordCell>
                           </tr>
                         ))}
                         {auditLogs.length === 0 && !auditError && (
-                          <tr><td colSpan={5} className="text-center text-muted py-4">{auditLoading ? 'Loading audit entries…' : 'No audit entries yet'}</td></tr>
+                          <tr role="row"><td role="cell" colSpan={5} className="text-center text-muted py-4">{auditLoading ? 'Loading audit entries…' : 'No audit entries yet'}</td></tr>
                         )}
                       </tbody>
                     </table>
@@ -361,7 +363,7 @@ export const AdminMaintenanceTab: React.FC<{
   maintenanceOn, setMaintenanceOn, maintenanceMsg, setMaintenanceMsg,
   saving, saveMaintenance,
 }) => (
-<div className="row">
+<div className="row admin-content-grid">
                   <div className="col-md-6">
                     <div className="card">
                       <div className="card-header"><h3 className="card-title">Maintenance Mode</h3></div>
@@ -433,7 +435,7 @@ export const AdminAnnouncementsTab: React.FC<{
   createAnnouncement: () => Promise<void>
   deleteAnnouncement: (id: string, title: string) => Promise<void>
 }> = ({ newAnn, setNewAnn, announcements, createAnnouncement, deleteAnnouncement }) => (
-<div className="row">
+<div className="row admin-content-grid">
                   <div className="col-md-5">
                     <div className="card">
                       <div className="card-header"><h3 className="card-title">New Announcement</h3></div>

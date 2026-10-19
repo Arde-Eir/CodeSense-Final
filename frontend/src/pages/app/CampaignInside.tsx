@@ -3,6 +3,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { useAuth } from '@/components/AuthContext';
+import { MagneticButton } from '@/components/MagneticButton';
 import { supabase } from '@/services/supabase';
 import type {
   Phase, Quest, MissionProgress, QuestRow,
@@ -173,12 +174,12 @@ const QuestCard: React.FC<{
               <SubTopicItem key={i} title={topic} isDone={isDone} />
             ))}
           </div>
-          <button
+          <MagneticButton className="magnetic-button-wide" data-testid={`quest-start-${quest.id}`}
             onClick={onClick}
-            style={{ width: '100%', padding: 12, borderRadius: 8, background: accent, color: '#080c11', fontWeight: 900, fontSize: 12, cursor: 'pointer', border: 'none', boxShadow: `0 4px 12px ${accent}33` }}
+            faceStyle={{ width: '100%', padding: 12, borderRadius: 8, background: accent, color: '#080c11', fontWeight: 900, fontSize: 12, cursor: 'pointer', border: 'none', boxShadow: `0 4px 12px ${accent}33` }}
           >
             {cta}
-          </button>
+          </MagneticButton>
         </div>
       )}
     </div>
@@ -615,7 +616,7 @@ const STYLE_CSS = `
     .ci-hero { margin-bottom: 14px; }
     .ci-hero-content { min-height: 0; padding: 18px; gap: 16px; }
     .ci-two-col { gap: 14px; }
-    .ci-root button { min-height: 44px; font-size: 14px !important; touch-action: manipulation; }
+    .ci-root button, .ci-root .magnetic-button-face { min-height: 44px; font-size: 14px !important; touch-action: manipulation; }
     .ci-quest-toggle { padding: 14px !important; gap: 10px !important; }
     .ci-quest-title { font-size: 16px !important; line-height: 1.4; }
     .ci-quest-meta { font-size: 12px !important; color: #8b949e !important; line-height: 1.5; }

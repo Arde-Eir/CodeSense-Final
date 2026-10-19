@@ -165,6 +165,8 @@
 }
 .cs-modal-close { transition: background 0.15s ease, transform 0.15s ease; }
 
+.mc-card .magnetic-button { width: fit-content; }
+
 @media (max-width: 768px) {
   .cs-home-header {
     padding: 12px 16px !important;
@@ -211,7 +213,7 @@
     padding: 20px 18px !important;
   }
   .mc-cta {
-    width: 100% !important;
+    width: auto !important;
     justify-content: center !important;
     font-size: 14px !important;
     padding: 14px 20px !important;

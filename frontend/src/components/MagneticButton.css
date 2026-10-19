@@ -1,0 +1,43 @@
+button.magnetic-button {
+  --magnetic-enabled: 0;
+  display: inline-grid;
+  min-width: 0;
+  max-width: 100%;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 12px;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: inherit;
+  vertical-align: middle;
+  cursor: pointer;
+  touch-action: manipulation;
+}
+button.magnetic-button.magnetic-button-wide { display: grid; width: 100%; }
+button.magnetic-button > .magnetic-button-face {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 0;
+  max-width: 100%;
+  pointer-events: none;
+  transform: none;
+}
+button.magnetic-button:disabled { cursor: not-allowed; }
+button.magnetic-button:disabled > .magnetic-button-face { opacity: .55; }
+button.magnetic-button:focus-visible { outline: 2px solid #82c6ff; outline-offset: 4px; }
+button.magnetic-button:active:not(:disabled) > .magnetic-button-face { filter: brightness(1.08); }
+@media (hover: hover) and (pointer: fine) and (prefers-reduced-motion: no-preference) {
+  button.magnetic-button { --magnetic-enabled: 1; }
+  button.magnetic-button:not(:disabled):not(:focus-visible) > .magnetic-button-face {
+    transform: perspective(700px) translate3d(var(--magnetic-x, 0px), var(--magnetic-y, 0px), 0) rotateX(var(--magnetic-rx, 0deg)) rotateY(var(--magnetic-ry, 0deg));
+    transition: transform 240ms cubic-bezier(.2, .9, .3, 1.16), filter 160ms ease;
+  }
+  button.magnetic-button:hover:not(:disabled) > .magnetic-button-face { filter: brightness(1.06); }
+  button.magnetic-button:active:not(:disabled):not(:focus-visible) > .magnetic-button-face { transform: scale(.98); }
+}
+@media (prefers-reduced-motion: reduce) {
+  button.magnetic-button > .magnetic-button-face { transform: none; transition: none; }
+}

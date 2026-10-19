@@ -1,6 +1,7 @@
 import React, { useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '@/components/AuthContext';
+import { MagneticButton } from '@/components/MagneticButton';
 
 export const LandingPage: React.FC = () => {
   const navigate = useNavigate();
@@ -109,32 +110,6 @@ export const LandingPage: React.FC = () => {
           gap: 16px;
           margin-bottom: 36px;
         }
-        .stat-bar {
-          display: flex;
-          gap: 28px;
-          justify-content: center;
-          flex-wrap: wrap;
-          margin-bottom: 40px;
-        }
-        .stat-item {
-          display: flex;
-          flex-direction: column;
-          align-items: center;
-          gap: 2px;
-        }
-        .stat-value {
-          font-size: 22px;
-          font-weight: 800;
-          color: #4caf50;
-          letter-spacing: -0.5px;
-        }
-        .stat-label {
-          font-size: 11px;
-          color: #8b949e;
-          text-transform: uppercase;
-          letter-spacing: 0.6px;
-          font-weight: 600;
-        }
         @media (max-width: 1024px) and (min-width: 769px) {
           .feature-grid { grid-template-columns: repeat(2, 1fr); }
         }
@@ -148,8 +123,6 @@ export const LandingPage: React.FC = () => {
             min-height: 52px;
             width: 100%;
           }
-          .stat-bar { gap: 20px; margin-bottom: 28px; }
-          .stat-value { font-size: 20px; }
           .landing-card { padding: 22px 16px; }
         }
       `}</style>
@@ -182,17 +155,6 @@ export const LandingPage: React.FC = () => {
             Master safe coding with real-time feedback.
           </p>
 
-          <div className="stat-bar">
-            <div className="stat-item">
-              <span className="stat-value">4</span>
-              <span className="stat-label">Patch</span>
-            </div>
-            <div className="stat-item">
-              <span className="stat-value">C++</span>
-              <span className="stat-label">Language</span>
-            </div>
-          </div>
-
           <div className="feature-grid">
             {[
               { icon: '🔬', title: 'Sandbox Mode', desc: 'Experiment freely with code analysis' },
@@ -208,12 +170,12 @@ export const LandingPage: React.FC = () => {
           </div>
 
           <div className="cta-row" style={{ display: 'flex', gap: '14px', justifyContent: 'center', marginBottom: '28px', flexWrap: 'wrap' }}>
-            <button className="cta-primary" onClick={() => navigate('/signup')}>
+            <MagneticButton faceClassName="cta-primary" data-testid="landing-create-account" onClick={() => navigate('/signup')}>
               Create an Account
-            </button>
-            <button className="cta-secondary" onClick={() => navigate('/login')}>
+            </MagneticButton>
+            <MagneticButton faceClassName="cta-secondary" data-testid="landing-sign-in" onClick={() => navigate('/login')}>
               Sign In
-            </button>
+            </MagneticButton>
           </div>
 
 
