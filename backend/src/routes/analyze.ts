@@ -1,4 +1,5 @@
 import { Router } from 'express';
+import { captureException } from '@sentry/node';
 import { tokenize } from '../analysis/lexer';
 import { TypeChecker } from '../analysis/typechecker';
 import { SymbolicExecutor } from '../analysis/symbolicexe';
@@ -473,6 +474,7 @@ router.post('/analyze', (req, res) => {
       ? criticalError.phase
       : 'Analysis pipeline';
     const message = errorMessage(criticalError);
+    captureException(criticalError, { tags: { analysisPhase: phase } });
     console.error('Analysis engine failure', {
       phase,
       message,

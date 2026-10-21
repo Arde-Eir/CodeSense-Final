@@ -1,4 +1,5 @@
 import { Router, raw, type Request, type Response } from 'express';
+import { captureException } from '@sentry/node';
 import { Webhook, WebhookVerificationError } from 'standardwebhooks';
 
 interface RegistrationHookPayload {
@@ -168,6 +169,7 @@ router.post('/auth/before-user-created', raw({ type: 'application/json', limit: 
         }
         if (!(caught instanceof Error)) throw caught;
         const statusCode = 'statusCode' in caught && typeof caught.statusCode === 'number' ? caught.statusCode : 502;
+        if (statusCode >= 500) captureException(caught);
         const message = caught instanceof SyntaxError ? 'The registration verification payload is not valid JSON.' : caught.message;
         console.error('Registration verification failed', { errorType: caught.name, statusCode });
         // Supabase reads an error envelope from HTTP 200 and propagates http_code.

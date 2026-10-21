@@ -6,7 +6,7 @@ Frontend: [pr-codesense.netlify.app](https://pr-codesense.netlify.app/).
 
 ## Prerequisites
 
-- Node.js 18 or newer
+- Node.js 20.19+, 22.12+, or 24 LTS
 - npm
 - Git
 

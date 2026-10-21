@@ -9,8 +9,8 @@
     "build:ts": "tsc -p .",
     "copy:parser": "shx mkdir -p dist/analysis && shx cp src/analysis/parser.js dist/analysis/parser.js",
     "build": "npm run clean && npm run build:parser && npm run build:ts && npm run copy:parser",
-    "dev": "ts-node src/server.ts",
-    "start": "node dist/server.js"
+    "dev": "node --env-file-if-exists=.env.local --require ts-node/register src/server.ts",
+    "start": "node --env-file-if-exists=.env.local dist/server.js"
   },
   "keywords": [
     "cpp",
@@ -22,6 +22,7 @@
   "author": "CodeSense Team",
   "license": "ISC",
   "dependencies": {
+    "@sentry/node": "^11.8.0",
     "body-parser": "^2.3.0",
     "cors": "^2.8.6",
     "express": "^5.2.1",
