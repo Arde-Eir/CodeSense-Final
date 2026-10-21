@@ -230,7 +230,7 @@ export const PlayerDetailModal: React.FC<{
       setVisibleActivity(50)
 
       const { data, error: err } = await supabase
-        .from('users')
+        .from(showAllProgress || userId === currentUserId ? 'users' : 'player_profiles')
         .select('id, playername, totalxp, sandbox_runs, quests_completed, isactive, is_banned, createdat, lastactive, charactertype, user_type')
         .eq('id', userId)
         .maybeSingle()
@@ -248,7 +248,7 @@ export const PlayerDetailModal: React.FC<{
         loadReportHistory(userId, showAllProgress),
         loadActivityHistory(userId, showAllProgress),
         loadQuestProgress(userId, showAllProgress),
-        supabase.from('users').select('id', { count: 'exact', head: true }).eq('isactive', true).eq('is_banned', false).gt('totalxp', selectedPlayer.totalxp),
+        supabase.from('player_profiles').select('id', { count: 'exact', head: true }).eq('isactive', true).eq('is_banned', false).gt('totalxp', selectedPlayer.totalxp),
         getProfileImageUrls(userId),
       ])
 
@@ -286,7 +286,7 @@ export const PlayerDetailModal: React.FC<{
       setLoading(false)
     })
     return () => { cancelled = true }
-  }, [userId, showAllProgress])
+  }, [userId, currentUserId, showAllProgress])
 
   const openReportCode = async (reportId: string): Promise<void> => {
     setReportCodeLoading(reportId)

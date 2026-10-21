@@ -118,6 +118,8 @@ This runs:
 - frontend lint
 - frontend production build
 - backend production build
+- backend API integration tests
+- local PostgreSQL integration tests for private profiles and shared login limits
 
 Useful individual commands:
 

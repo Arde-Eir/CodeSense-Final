@@ -414,7 +414,7 @@ export const HomeDashboard: React.FC = () => {
     setSearchLoading(true)
     const ql = q.toLowerCase()
     try {
-      const { data: players } = await supabase.from('users').select('id, playername, totalxp, currentlevel').eq('isactive', true).eq('is_banned', false).ilike('playername', `%${q}%`).limit(5)
+      const { data: players } = await supabase.from('player_profiles').select('id, playername, totalxp, currentlevel').eq('isactive', true).eq('is_banned', false).ilike('playername', `%${q}%`).limit(5)
       const [t, ph, d] = await Promise.all([
         supabase.from('quests').select('id, title, phase, difficulty, basexp').ilike('title',       `%${q}%`).eq('isactive', true).eq('mode', 'campaign').limit(5),
         supabase.from('quests').select('id, title, phase, difficulty, basexp').ilike('phase',       `%${q}%`).eq('isactive', true).eq('mode', 'campaign').limit(5),
@@ -450,14 +450,14 @@ export const HomeDashboard: React.FC = () => {
   const fetchLeaderboard = useCallback(async () => {
     if (!user) return
     try {
-      const { data: lb } = await supabase.from('users').select('id, playername, totalxp, currentlevel').eq('isactive', true).eq('is_banned', false).order('totalxp', { ascending: false }).limit(10)
+      const { data: lb } = await supabase.from('player_profiles').select('id, playername, totalxp, currentlevel').eq('isactive', true).eq('is_banned', false).order('totalxp', { ascending: false }).limit(10)
       if (lb) {
         const imageMap = await getProfileImageUrlMap(lb.map(player => player.id))
         setLeaderboard(lb.map(player => ({ ...player, ...imageMap.get(player.id) })))
         const myPos = lb.findIndex(u => u.id === user.id)
         if (myPos !== -1) { setMyRank(myPos + 1) }
         else {
-          const { count } = await supabase.from('users').select('*', { count: 'exact', head: true }).eq('isactive', true).eq('is_banned', false).gt('totalxp', user.totalXP ?? 0)
+          const { count } = await supabase.from('player_profiles').select('id', { count: 'exact', head: true }).eq('isactive', true).eq('is_banned', false).gt('totalxp', user.totalXP ?? 0)
           setMyRank((count ?? 0) + 1)
         }
       }
@@ -500,7 +500,7 @@ export const HomeDashboard: React.FC = () => {
     if (!user) { setStatsLoading(false); return }
     const initialStats = setTimeout(fetchStats, 0)
     const channel = supabase.channel('leaderboard-realtime')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'users' }, () => fetchLeaderboard())
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'player_profiles' }, () => fetchLeaderboard())
       .subscribe()
     return () => { clearTimeout(initialStats); supabase.removeChannel(channel) }
   }, [fetchLeaderboard, fetchStats, user])

@@ -3,7 +3,8 @@
     "build": "npm run build:frontend && npm run build:backend",
     "build:backend": "npm --prefix backend run build",
     "build:frontend": "npm --prefix frontend run build",
-    "check": "npm run scan:secrets && npm run lint && npm run build",
+    "check": "npm run scan:secrets && npm run lint && npm run build && npm --prefix backend test && npm run test:security",
+    "test:security": "node --test tests/profile-security.test.mjs",
     "lint": "npm --prefix frontend run lint",
     "scan:secrets": "node scripts/scan-secrets.mjs"
   },

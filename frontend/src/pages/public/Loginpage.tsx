@@ -110,8 +110,10 @@ export const LoginPage: React.FC = () => {
         // Format from DatabaseService: "ACCOUNT_BANNED: <reason>"  or just "ACCOUNT_BANNED"
         const reason = msg.slice('ACCOUNT_BANNED'.length).replace(/^:\s*/, '').trim();
         setBanInfo({ reason });
-      } else {
+      } else if (msg === 'INVALID_CREDENTIALS') {
         setError('Invalid Player Name or Secret Code.');
+      } else {
+        setError(msg || 'The sign-in service is unavailable. Try again shortly.');
       }
     } finally {
       setIsLoading(false);

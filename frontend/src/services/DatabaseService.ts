@@ -1,4 +1,5 @@
 import { supabase } from './supabase'
+import { signInPlayer } from './playerLogin'
 import type { ExplorerProfile } from '@/types'
 
 export const DatabaseService = {
@@ -17,24 +18,11 @@ export const DatabaseService = {
 
   async login(playerName: string, secretCode: string): Promise<ExplorerProfile> {
     try {
-      const { data: userRow, error: lookupError } = await supabase
-        .from('users')
-        .select('email')
-        .ilike('playername', playerName.trim())
-        .limit(1)
-        .maybeSingle()
-
-      if (lookupError || !userRow?.email) {
-        throw new Error('INVALID_CREDENTIALS')
-      }
-
-      const { data, error } = await supabase.auth.signInWithPassword({
-        email: userRow.email,
-        password: secretCode,
-      })
+      const tokens = await signInPlayer(playerName, secretCode)
+      const { data, error } = await supabase.auth.setSession(tokens)
 
       if (error || !data.user) {
-        throw new Error('INVALID_CREDENTIALS')
+        throw new Error(`Could not establish the signed-in session: ${error?.message ?? 'authenticated user is missing'}`)
       }
 
       const { data: profile, error: profileError } = await supabase
@@ -100,21 +88,21 @@ export const DatabaseService = {
           msg.includes('email address is already') ||
           msg.includes('user already exists')
         ) {
-          // An existing auth account may lack its public profile.
-          const { data: existingProfile } = await supabase
+          // Authenticate before reading an existing account's private profile.
+          const { data: recoveryData, error: recoveryErr } = await supabase.auth.signInWithPassword({
+            email,
+            password: secretCode,
+          })
+          if (recoveryErr || !recoveryData.user) throw new Error('EMAIL_TAKEN')
+          const { data: existingProfile, error: existingProfileError } = await supabase
             .from('users')
             .select('id')
-            .ilike('email', email.trim())
+            .eq('id', recoveryData.user.id)
             .maybeSingle()
+          if (existingProfileError) throw existingProfileError
 
           if (!existingProfile) {
-            // Verify account ownership before restoring the missing profile.
-            const { data: recoveryData, error: recoveryErr } = await supabase.auth.signInWithPassword({
-              email,
-              password: secretCode,
-            })
-
-            if (!recoveryErr && recoveryData?.user) {
+            if (recoveryData.user) {
               const recoveredId = recoveryData.user.id
               const { data: newProfile, error: insertErr } = await supabase
                 .from('users')
@@ -153,6 +141,7 @@ export const DatabaseService = {
 
             throw new Error('EMAIL_ORPHANED')
           }
+          await supabase.auth.signOut()
           throw new Error('EMAIL_TAKEN')
         }
 
@@ -181,6 +170,9 @@ export const DatabaseService = {
 
       if (!data.user) {
         throw new Error('SIGNUP_FAILED')
+      }
+      if (!data.session) {
+        throw new Error('Your account was created. Confirm the link sent to your email, then sign in.')
       }
 
       const userId = data.user.id
@@ -422,11 +414,11 @@ export const DatabaseService = {
     return data
   },
 
-  async getLeaderboard(limit = 10) {
+  async getLeaderboard(limit: number) {
     const { data, error } = await supabase
-      .from('leaderboard')
+      .from('player_profiles')
       .select('*')
-      .order('rank', { ascending: true })
+      .order('totalxp', { ascending: false })
       .limit(limit)
 
     if (error) throw error

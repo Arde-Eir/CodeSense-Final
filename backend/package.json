@@ -10,7 +10,8 @@
     "copy:parser": "shx mkdir -p dist/analysis && shx cp src/analysis/parser.js dist/analysis/parser.js",
     "build": "npm run clean && npm run build:parser && npm run build:ts && npm run copy:parser",
     "dev": "node --env-file-if-exists=.env.local --require ts-node/register src/server.ts",
-    "start": "node --env-file-if-exists=.env.local dist/server.js"
+    "start": "node --env-file-if-exists=.env.local dist/server.js",
+    "test": "node --test tests/*.test.cjs"
   },
   "keywords": [
     "cpp",
@@ -23,6 +24,7 @@
   "license": "ISC",
   "dependencies": {
     "@sentry/node": "^11.8.0",
+    "@supabase/supabase-js": "^2.110.0",
     "body-parser": "^2.3.0",
     "cors": "^2.8.6",
     "express": "^5.2.1",

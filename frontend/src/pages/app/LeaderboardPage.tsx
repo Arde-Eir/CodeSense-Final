@@ -193,7 +193,7 @@ export const LeaderboardPage: React.FC = () => {
   const fetchStatsSummary = useCallback(async () => {
     const since = new Date(Date.now() - 86400_000).toISOString()
     const [usersRes, reportsRes, activityRes, progressRes] = await Promise.all([
-      supabase.from('users').select('id, totalxp, lastactive').eq('isactive', true).eq('is_banned', false),
+      supabase.from('player_profiles').select('id, totalxp, lastactive').eq('isactive', true).eq('is_banned', false),
       supabase.from('reports').select('userid, createdat').gte('createdat', since).limit(1000),
       supabase.from('activity_log').select('userid, createdat').gte('createdat', since).limit(1000),
       supabase.from('mission_progress').select('userid, updatedat').gte('updatedat', since).limit(1000),
@@ -222,7 +222,7 @@ export const LeaderboardPage: React.FC = () => {
     try {
       const sortCfg = SORT_OPTIONS.find(s => s.key === sortKey) ?? SORT_OPTIONS[0]
       let query = supabase
-        .from('users')
+        .from('player_profiles')
         .select('id, playername, totalxp, currentlevel, sandbox_runs,  quests_completed, createdat, lastactive, charactertype, user_type', { count: 'exact' })
         .eq('isactive', true)
         .eq('is_banned', false)
@@ -312,7 +312,7 @@ export const LeaderboardPage: React.FC = () => {
       const profileImages = await getProfileImageUrls(me.id)
       setMyPlayer({ ...(me as Player), ...profileImages })
       const { count } = await supabase
-        .from('users').select('*', { count: 'exact', head: true })
+        .from('player_profiles').select('id', { count: 'exact', head: true })
         .eq('isactive', true).eq('is_banned', false).gt('totalxp', me.totalxp)
       setMyRank((count ?? 0) + 1)
     }
@@ -330,7 +330,7 @@ export const LeaderboardPage: React.FC = () => {
     fetchStatsSummary()
 
     const channel = supabase.channel('lb-page-realtime')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'users' }, () => {
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'player_profiles' }, () => {
         fetchPlayers(); fetchMyRank(); fetchStatsSummary()
       })
       .on('postgres_changes', { event: '*', schema: 'public', table: 'mission_progress' }, () => {

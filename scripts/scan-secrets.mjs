@@ -42,6 +42,10 @@ const TEXT_EXTENSIONS = new Set([
 
 const SECRET_PATTERNS = [
   {
+    name: 'Supabase secret API key',
+    pattern: /\bsb_secret_[A-Za-z0-9_-]{20,}\b/,
+  },
+  {
     name: 'Supabase service-role key',
     pattern: /SUPABASE_SERVICE_ROLE|SERVICE_ROLE_KEY/i,
   },

@@ -97,7 +97,7 @@ const DEPENDENCY_RULES: Array<{
 ];
 
 router.post('/analyze', (req, res) => {
-  const { sourceCode: rawSourceCode, hintsUsed = 0 } = req.body;
+  const rawSourceCode: unknown = req.body?.sourceCode;
 
   if (!rawSourceCode || typeof rawSourceCode !== 'string') {
     return res.status(400).json({
@@ -112,6 +112,7 @@ router.post('/analyze', (req, res) => {
     });
   }
 
+  const { hintsUsed = 0 } = req.body;
   const sourceCode = normalizePastedSourceCode(rawSourceCode);
 
   if (!sourceCode.trim()) {

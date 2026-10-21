@@ -246,7 +246,7 @@ export const ProfileSettings: React.FC = () => {
       }
 
       const { data: lb, error: leaderboardError } = await supabase
-        .from('users').select('id, playername, totalxp')
+        .from('player_profiles').select('id, playername, totalxp')
         .eq('isactive', true).eq('is_banned', false).order('totalxp', { ascending: false }).limit(10)
       if (leaderboardError) throw new Error(`Leaderboard lookup failed: ${leaderboardError.message}`)
       if (lb) {
@@ -254,7 +254,7 @@ export const ProfileSettings: React.FC = () => {
         const myPos = lb.findIndex(u => u.id === user.id)
         if (myPos !== -1) { setMyRank(myPos + 1) }
         else {
-          const { count, error: rankError } = await supabase.from('users').select('*', { count: 'exact', head: true })
+          const { count, error: rankError } = await supabase.from('player_profiles').select('id', { count: 'exact', head: true })
             .eq('isactive', true).eq('is_banned', false).gt('totalxp', prof?.totalxp ?? 0)
           if (rankError) throw new Error(`Rank lookup failed: ${rankError.message}`)
           setMyRank((count ?? 0) + 1)

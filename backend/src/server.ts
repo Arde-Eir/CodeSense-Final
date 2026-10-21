@@ -4,6 +4,7 @@ import cors from 'cors';
 import bodyParser from 'body-parser';
 import analyzeRoutes from './routes/analyze';
 import registrationCaptchaRoutes from './routes/registrationCaptcha';
+import playerLoginRoutes from './routes/playerLogin';
 
 const app = express();
 
@@ -177,6 +178,7 @@ app.use('/api', (req: Request, res: Response, next: NextFunction) => {
 
 // Enable parsing of JSON bodies (1 MB max to guard against oversized payloads)
 app.use('/api', registrationCaptchaRoutes);
+app.use('/api', playerLoginRoutes);
 app.use(bodyParser.json({ limit: '1mb' }));
 
 app.use((req: Request, _res: Response, next: NextFunction) => {
