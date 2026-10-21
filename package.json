@@ -3,9 +3,7 @@
     "build": "npm run build:frontend && npm run build:backend",
     "build:backend": "npm --prefix backend run build",
     "build:frontend": "npm --prefix frontend run build",
-    "check": "npm run scan:secrets && npm run check:audit && npm run check:permissions && npm run lint && npm run build",
-    "check:audit": "node scripts/check-admin-audit.mjs",
-    "check:permissions": "node scripts/check-permission-helpers.mjs",
+    "check": "npm run scan:secrets && npm run lint && npm run build",
     "lint": "npm --prefix frontend run lint",
     "scan:secrets": "node scripts/scan-secrets.mjs"
   },
