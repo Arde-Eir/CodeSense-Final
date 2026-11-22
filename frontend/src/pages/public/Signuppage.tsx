@@ -4,9 +4,9 @@ import { useAuth } from '@/components/AuthContext';
 import { executeSignupRecaptcha } from '@/services/recaptcha';
 
 
-const Field: React.FC<{ label: string; error?: string; children: React.ReactNode }> = ({ label, error, children }) => (
+const Field: React.FC<{ label: string; inputId?: string; error?: string; children: React.ReactNode }> = ({ label, inputId, error, children }) => (
   <div style={{ marginBottom: 20 }}>
-    <label style={{
+    <label htmlFor={inputId} style={{
       display: 'block', color: '#8b949e', fontSize: 12, fontWeight: 700,
       letterSpacing: '0.6px', textTransform: 'uppercase', marginBottom: 8,
       fontFamily: "'IBM Plex Mono', monospace",
@@ -15,7 +15,7 @@ const Field: React.FC<{ label: string; error?: string; children: React.ReactNode
     </label>
     {children}
     {error && (
-      <p style={{ color: '#f85149', fontSize: 11, marginTop: 5, display: 'flex', alignItems: 'center', gap: 4, fontFamily: "'IBM Plex Mono', monospace" }}>
+      <p role="alert" style={{ color: '#f85149', fontSize: 11, marginTop: 5, display: 'flex', alignItems: 'center', gap: 4, fontFamily: "'IBM Plex Mono', monospace" }}>
         <span>⚠</span> {error}
       </p>
     )}
@@ -368,10 +368,9 @@ const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     if      (msg === 'USERNAME_TAKEN')          setErrors({ username: 'This player name is already taken.' });
-    else if (msg === 'EMAIL_TAKEN')             setErrors({ email: 'An account with this email already exists.' });
-    else if (msg === 'EMAIL_ORPHANED')           setErrors({ email: 'This email is already registered. If this is your account, try logging in instead.' });
+    else if (msg === 'EMAIL_TAKEN')             setErrors({ email: 'This email is already registered. Sign in with your existing player name or use a different email address.' });
     else if (msg === 'PROFILE_SETUP_BLOCKED')   setErrors({ submit: 'Account auth was created, but profile setup is blocked by database security rules. Please apply the signup RLS fix in Supabase.' });
-    else if (msg === 'CONFIRMATION_EMAIL_FAILED') setErrors({ submit: 'Supabase could not send the confirmation email. Disable email confirmations or fix SMTP settings in Supabase Auth.' });
+    else if (msg === 'CONFIRMATION_EMAIL_FAILED') setErrors({ submit: 'The confirmation email could not be sent. Please contact the administrator to check email delivery, then try again.' });
     else if (msg === 'SERVER_ERROR')            setErrors({ submit: 'A server error occurred. Please try again in a moment.' });
     else {
       setErrors({ submit: msg || 'An unexpected error occurred. Please try again.' });
@@ -451,25 +450,25 @@ const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
 
           <form id="signup-form" onSubmit={handleSubmit} noValidate>
 
-            <Field label="Player Name" error={errors.username}>
+            <Field label="Player Name" inputId="signup-username" error={errors.username}>
               <input id="signup-username" type="text" name="username" value={formData.username} onChange={handleChange}
                 placeholder="e.g. CoderKnight" autoComplete="username"
                 style={inputStyle('username', !!errors.username)} {...focusProps('username')} />
             </Field>
 
-            <Field label="Email Address" error={errors.email}>
+            <Field label="Email Address" inputId="signup-email" error={errors.email}>
               <input id="signup-email" type="email" name="email" value={formData.email} onChange={handleChange}
                 placeholder="e.g. yourname@gmail.com" autoComplete="email"
                 style={inputStyle('email', !!errors.email)} {...focusProps('email')} />
             </Field>
 
-            <Field label="Secret Code (Password)" error={errors.password}>
+            <Field label="Secret Code (Password)" inputId="signup-password" error={errors.password}>
               <input id="signup-password" type="password" name="password" value={formData.password} onChange={handleChange}
                 placeholder="At least 8 characters" autoComplete="new-password"
                 style={inputStyle('password', !!errors.password)} {...focusProps('password')} />
             </Field>
 
-            <Field label="Confirm Code" error={errors.confirmPassword}>
+            <Field label="Confirm Code" inputId="signup-confirm-password" error={errors.confirmPassword}>
               <input id="signup-confirm-password" type="password" name="confirmPassword" value={formData.confirmPassword} onChange={handleChange}
                 placeholder="Repeat your code" autoComplete="new-password"
                 style={inputStyle('confirmPassword', !!errors.confirmPassword)} {...focusProps('confirmPassword')} />
@@ -483,17 +482,17 @@ const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
             </div>
 
             <Field label="I am a">
-              <div style={{ display: 'flex', gap: 8 }}>
+              <div role="group" aria-label="User type" style={{ display: 'flex', gap: 8 }}>
                 {(['student', 'professional'] as const).map(type => {
                   const active = formData.userType === type;
                   return (
-                    <button key={type} type="button"
+                    <button key={type} type="button" aria-pressed={active} data-testid={`signup-type-${type}`}
                       onClick={() => setFormData(prev => ({ ...prev, userType: type }))}
                       style={{
                         flex: 1, padding: '10px 12px',
                         background: active ? 'rgba(76,175,80,0.15)' : 'rgba(13,17,23,0.6)',
                         border: `1px solid ${active ? '#4caf50' : '#21262d'}`,
-                        borderRadius: 8, color: active ? '#4caf50' : '#484f58',
+                        borderRadius: 8, color: active ? '#4caf50' : '#8b949e',
                         fontSize: 12, fontWeight: 700, cursor: 'pointer',
                         textTransform: 'uppercase', letterSpacing: '0.5px',
                         transition: 'all 0.15s ease',

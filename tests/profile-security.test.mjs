@@ -8,8 +8,8 @@ const otherId = '10000000-0000-0000-0000-000000000002';
 const adminId = '10000000-0000-0000-0000-000000000003';
 const bannedAdminId = '10000000-0000-0000-0000-000000000004';
 const newId = '10000000-0000-0000-0000-000000000005';
-const prepareSql = await readFile(new URL('../supabase/migrations/202610220001_prepare_private_profiles.sql', import.meta.url), 'utf8');
-const restrictSql = await readFile(new URL('../supabase/migrations/202610220002_restrict_private_profiles.sql', import.meta.url), 'utf8');
+const prepareSql = await readFile(new URL('./fixtures/sql/202610220001_prepare_private_profiles.sql', import.meta.url), 'utf8');
+const restrictSql = await readFile(new URL('./fixtures/sql/202610220002_restrict_private_profiles.sql', import.meta.url), 'utf8');
 
 /** Execute the migrations against PostgreSQL with Supabase's JWT role model. */
 async function createDatabase() {

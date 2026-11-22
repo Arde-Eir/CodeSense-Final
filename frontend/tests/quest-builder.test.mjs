@@ -8,7 +8,7 @@ import { renderToStaticMarkup } from 'react-dom/server'
 import { JSDOM } from 'jsdom'
 
 const rootPath = fileURLToPath(new URL('../', import.meta.url))
-const server = await createServer({ root: rootPath, server: { middlewareMode: true }, appType: 'custom' })
+const server = await createServer({ root: rootPath, server: { middlewareMode: true, hmr: false, ws: false }, optimizeDeps: { noDiscovery: true }, appType: 'custom' })
 after(() => server.close())
 const { generateQuestDraftFromText } = await server.ssrLoadModule('/src/admin/questAutoGenerator.ts')
 const { defaultQF, questPreviewFromForm } = await server.ssrLoadModule('/src/admin/adminPanelModel.ts')

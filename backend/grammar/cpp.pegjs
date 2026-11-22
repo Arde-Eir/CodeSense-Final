@@ -418,7 +418,7 @@ Assignment
 
 AssignTarget
   = "*" _ operand:Primary { return { type: 'Dereference', operand, ...loc() }; }
-  / Primary
+  / target:Primary { return target.type === 'Identifier' ? target.name : target; }
 
 Conditional
   = condition:LogicalOr _ "?" _ trueExpr:Expression _ ":" _ falseExpr:Conditional {
@@ -532,7 +532,7 @@ Primary
   / GlobalAccess
   / "nullptr" { return { type: 'Identifier', name: 'nullptr', ...loc() }; }
   / "std::" name:Identifier { return { type: 'Identifier', name: "std::" + name, ...loc() }; }
-  / Identifier
+  / name:Identifier { return { type: 'Identifier', name, ...loc() }; }
 
 // Reserved-word boundaries allow identifiers such as integer.
 Identifier
@@ -596,13 +596,13 @@ Float
     }
 
 Char
-  = "'" ch:(("\\" .) / [^'\\]) "'" {
+  = "'" ch:(("\\" .) / [^'\\\r\n]) "'" {
       const raw = Array.isArray(ch) ? ch[0] + ch[1] : ch;
       return { type: 'Char', value: raw, ...loc() };
     }
 
 String
-  = prefix:$("u8" / "u" / "U" / "L")? "\"" chars:$((("\\" .) / [^"\\])*) "\"" {
+  = prefix:$("u8" / "u" / "U" / "L")? "\"" chars:$((("\\" .) / [^"\\\r\n])*) "\"" {
       return { type: 'String', value: chars, ...loc() };
     }
 

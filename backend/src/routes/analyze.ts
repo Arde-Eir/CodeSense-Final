@@ -67,7 +67,7 @@ const DEPENDENCY_RULES: Array<{
   {
     header: 'iomanip',
     legacyHeaders: ['iomanip.h'],
-    pattern: /\b(?:std::)?(setw|setprecision|setfill|fixed|showpoint|left|right|boolalpha|noboolalpha)\b/,
+    pattern: /\b(?:std::)?(setw|setprecision|setfill)\s*\(|(?:<<|\bstd::)\s*(fixed|showpoint|left|right|boolalpha|noboolalpha)\b/,
     message: "Formatting manipulators (setw, setprecision, fixed, etc.) require '#include <iomanip>'",
   },
   {
@@ -112,7 +112,13 @@ router.post('/analyze', (req, res) => {
     });
   }
 
-  const { hintsUsed = 0 } = req.body;
+  const hintsUsed: number = req.body.hintsUsed === undefined ? 0 : req.body.hintsUsed;
+  if (!Number.isSafeInteger(hintsUsed) || hintsUsed < 0) {
+    return res.status(400).json({
+      success: false,
+      errors: [{ type: 'semantic', severity: 'error', message: 'hintsUsed must be a nonnegative safe integer.', line: 0 }],
+    });
+  }
   const sourceCode = normalizePastedSourceCode(rawSourceCode);
 
   if (!sourceCode.trim()) {
@@ -153,15 +159,20 @@ router.post('/analyze', (req, res) => {
       msg: 'C++20 concepts/requires are not supported.' },
   ];
 
+  const featureScanSource = stripCommentsAndLiterals(sourceCode);
   const unsupportedWarnings = UNSUPPORTED_PATTERNS
-    .filter(({ re }) => re.test(sourceCode))
-    .map(({ msg }) => ({
-      type: 'semantic' as const,
-      severity: 'warning' as const,
-      message: `Unsupported feature: ${msg}`,
-      line: 0,
-      column: 0,
-    }));
+    .flatMap(({ re, msg }) => {
+      const match = re.exec(featureScanSource);
+      if (!match) return [];
+      const preceding = featureScanSource.slice(0, match.index);
+      return [{
+        type: 'semantic' as const,
+        severity: 'warning' as const,
+        message: `Unsupported feature: ${msg}`,
+        line: preceding.split('\n').length,
+        column: match.index - preceding.lastIndexOf('\n'),
+      }];
+    });
 
   const lexResult = tokenize(sourceCode);
 

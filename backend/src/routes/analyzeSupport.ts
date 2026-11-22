@@ -284,16 +284,16 @@ export function normalizeTypeForSignature(type: string): string {
 }
 
 export function stripCommentsAndLiterals(source: string): string {
-  return source
-    .replace(/\/\*[\s\S]*?\*\//g, match => ' '.repeat(match.length))
-    .replace(/\/\/[^\n\r]*/g, match => ' '.repeat(match.length))
-    .replace(/(?:u8|u|U|L)?R"([^(]*)\([\s\S]*?\)\1"/g, match => ' '.repeat(match.length))
-    .replace(/(?:u8|u|U|L)?"(?:\\[\s\S]|[^"\\])*"/g, match => ' '.repeat(match.length))
-    .replace(/(?:u|U|L)?'(?:\\[\s\S]|[^'\\])*'/g, match => ' '.repeat(match.length));
+  return source.replace(
+    /(?:u8|u|U|L)?R"([^\s()\\]*)\([\s\S]*?\)\1"|(?:u8|u|U|L)?"(?:\\[\s\S]|[^"\\])*"|(?:u|U|L)?'(?:\\[\s\S]|[^'\\])*'|\/\*[\s\S]*?\*\/|\/\/[^\n\r]*/g,
+    match => match.replace(/[^\r\n]/g, ' '),
+  );
 }
 
 export function normalizePastedSourceCode(source: string): string {
-  let normalized = source
+  let normalized = source;
+  if (/^\s*<(?:pre|code|div|p|span)(?:\s|>)/i.test(source)) {
+    normalized = source
     .replace(/<br\s*\/?>/gi, '\n')
     .replace(/<\/p\s*>/gi, '\n')
     .replace(/<\/div\s*>/gi, '\n')
@@ -302,15 +302,15 @@ export function normalizePastedSourceCode(source: string): string {
     .replace(/&gt;/g, '>')
     .replace(/&amp;/g, '&')
     .replace(/&quot;/g, '"')
-    .replace(/&#39;/g, "'")
-    .trim();
+    .replace(/&#39;/g, "'");
+  }
 
-  const fenced = normalized.match(/^```(?:cpp|c\+\+|cxx|cc)?\s*([\s\S]*?)\s*```$/i);
-  if (fenced) normalized = fenced[1].trim();
+  const fenced = normalized.match(/^\s*```(?:cpp|c\+\+|cxx|cc)?[ \t]*\r?\n([\s\S]*?)\r?\n[ \t]*```\s*$/i);
+  if (fenced) normalized = fenced[1];
 
   const lines = normalized.split(/\r?\n/);
   if (/^(?:cpp|c\+\+|cxx|cc)$/i.test(lines[0]?.trim() ?? '')) {
-    normalized = lines.slice(1).join('\n').trim();
+    normalized = lines.slice(1).join('\n');
   }
 
   return normalized;

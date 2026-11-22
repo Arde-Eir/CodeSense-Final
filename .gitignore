@@ -8,6 +8,11 @@ dist/
 backend/dist/
 frontend/dist/
 backend/build/
+*.tsbuildinfo
+.vite/
+.vite-temp/
+coverage/
+.cache/
 
 # Logs and generated debug output
 *.log
@@ -27,6 +32,18 @@ private/
 *.pem
 *.key
 *.p12
+*.pfx
+*.p8
+
+# Submission archives and temporary files
+*.zip
+*.tmp
+*.temp
+*.bak
+*.swp
+*.swo
+Thumbs.db
+Desktop.ini
 
 # Keep safe templates visible to repo viewers
 !.env.example

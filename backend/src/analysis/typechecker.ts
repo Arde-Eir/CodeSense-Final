@@ -1212,12 +1212,10 @@ export class TypeChecker {
 
 
 if (['&', '|', '^', '<<', '>>'].includes(bin.operator)) {
-  const streamTypes = ['ostream', 'istream', 'manipulator', 'unknown', 
-                       'ifstream', 'ofstream', 'fstream',
-                       'string', 'int', 'float', 'double', 'char', 'bool', 'long'];
+  const streamTypes = ['ostream', 'istream', 'ifstream', 'ofstream', 'fstream'];
   const isStreamOp =
     (bin.operator === '<<' || bin.operator === '>>') &&
-    (streamTypes.includes(leftType) || streamTypes.includes(rightType));
+    streamTypes.includes(leftType);
 
   if (!isStreamOp && (!this.isIntegralType(leftType) || !this.isIntegralType(rightType))) {
     this.addError(
@@ -1420,7 +1418,8 @@ if (['&', '|', '^', '<<', '>>'].includes(bin.operator)) {
     if (node.name && node.name !== node.name.toUpperCase()) {
       this.addError(node, 'Convention: macro names should be ALL_CAPS.', 'warning');
     }
-    this.addSymbol(node.name, 'macro', node.line || 0, true, undefined, true, 'variable');
+    const valueType: string | null = node.value ? this.visit(node.value) : null;
+    this.addSymbol(node.name, valueType || 'macro', node.line || 0, true, undefined, true, 'variable');
     return null;
   }
 
@@ -1438,6 +1437,7 @@ if (['&', '|', '^', '<<', '>>'].includes(bin.operator)) {
 
 
   private validateHeaderForSymbol(name: string, node: any): void {
+    if (!String(node.name ?? '').startsWith('std::') && (this.lookupSymbol(name)?.line ?? 0) > 0) return;
     const required = this.HEADER_REQUIREMENTS[name];
     if (!required) return;
     if (!this.includedHeaders.has(required)) {
@@ -1639,7 +1639,7 @@ if (['&', '|', '^', '<<', '>>'].includes(bin.operator)) {
     for (let i = this.scopeStack.length - 2; i >= 0; i--) {
       const parent = this.scopeStack.slice(0, i + 1).join('::');
       const parentKey = `${parent}::${name}`;
-      if (this.symbolTable[parentKey]) {
+      if (this.symbolTable[parentKey] && this.symbolTable[parentKey].line > 0) {
         this.addError(
           { line, type: 'VariableDecl' } as any,
           `Variable '${name}' shadows a declaration from an outer scope (line ${this.symbolTable[parentKey].line})`,
@@ -1830,7 +1830,7 @@ private isTypeCompatible(target: string, source: string, sourceNode?: any): bool
 
   // Apply numeric promotion and narrowing rules to normalized types.
   const numWeight: Record<string, number> = {
-    char: 1, short: 1.5, int: 2, long: 2.5, float: 3, double: 4,
+    bool: 0, char: 1, short: 1.5, int: 2, long: 2.5, float: 3, double: 4,
   };
   if (numWeight[tBase] !== undefined && numWeight[sBase] !== undefined) {
     if (numWeight[tBase] >= numWeight[sBase]) return true;
@@ -1858,7 +1858,7 @@ private isTypeCompatible(target: string, source: string, sourceNode?: any): bool
       .replace(/[*&\s]+$/g, '')             // trailing *, &, whitespace
       .replace(/^(const|static|volatile|unsigned|signed|mutable|extern|inline)\s+/g, '')
       .trim();
-    return ['int', 'float', 'double', 'char', 'long', 'short',
+    return ['int', 'float', 'double', 'char', 'long', 'short', 'bool',
             'long long', 'unsigned int', 'unsigned long', 'unsigned long long',
             'size_t', 'ptrdiff_t'].includes(base);
   }

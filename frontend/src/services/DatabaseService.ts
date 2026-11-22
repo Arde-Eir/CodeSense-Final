@@ -78,7 +78,7 @@ export const DatabaseService = {
 
       if (error) {
         const msg  = error.message.toLowerCase()
-        const code = (error as any).code ?? ''
+        const code = error.code ?? ''
 
         if (
           code === 'user_already_exists'  ||
@@ -88,60 +88,6 @@ export const DatabaseService = {
           msg.includes('email address is already') ||
           msg.includes('user already exists')
         ) {
-          // Authenticate before reading an existing account's private profile.
-          const { data: recoveryData, error: recoveryErr } = await supabase.auth.signInWithPassword({
-            email,
-            password: secretCode,
-          })
-          if (recoveryErr || !recoveryData.user) throw new Error('EMAIL_TAKEN')
-          const { data: existingProfile, error: existingProfileError } = await supabase
-            .from('users')
-            .select('id')
-            .eq('id', recoveryData.user.id)
-            .maybeSingle()
-          if (existingProfileError) throw existingProfileError
-
-          if (!existingProfile) {
-            if (recoveryData.user) {
-              const recoveredId = recoveryData.user.id
-              const { data: newProfile, error: insertErr } = await supabase
-                .from('users')
-                .insert({
-                  id:            recoveredId,
-                  playername:    playerName,
-                  email:         email,
-                  charactertype: 'squire',
-                  user_type:     userType,
-                  totalxp:       0,
-                  currentlevel:  1,
-                  createdat:     new Date().toISOString(),
-                  lastactive:    new Date().toISOString(),
-                })
-                .select()
-                .single()
-
-              if (insertErr) {
-                await supabase.auth.signOut()
-                throw new Error('SERVER_ERROR')
-              }
-
-              return {
-                id:            recoveredId,
-                playerName,
-                email,
-                secretCode:    '***',
-                characterType: 'squire',
-                userType,
-                totalXP:       0,
-                currentLevel:  1,
-                createdAt:     new Date(newProfile?.createdat ?? Date.now()),
-                lastActive:    new Date(),
-              } as ExplorerProfile
-            }
-
-            throw new Error('EMAIL_ORPHANED')
-          }
-          await supabase.auth.signOut()
           throw new Error('EMAIL_TAKEN')
         }
 
@@ -171,8 +117,12 @@ export const DatabaseService = {
       if (!data.user) {
         throw new Error('SIGNUP_FAILED')
       }
+      // Supabase can hide a duplicate confirmed account behind a successful response.
+      if (Array.isArray(data.user.identities) && data.user.identities.length === 0) {
+        throw new Error('EMAIL_TAKEN')
+      }
       if (!data.session) {
-        throw new Error('Your account was created. Confirm the link sent to your email, then sign in.')
+        throw new Error('Check your inbox for the confirmation link, then sign in after confirming your email.')
       }
 
       const userId = data.user.id

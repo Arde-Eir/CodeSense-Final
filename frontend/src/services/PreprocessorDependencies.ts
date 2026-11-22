@@ -18,7 +18,7 @@ export const STRICT_DEPENDENCY_RULES: DependencyRule[] = [
   {
     header: 'iomanip',
     legacyHeaders: ['iomanip.h'],
-    pattern: /\b(?:std::)?(setw|setprecision|setfill|fixed|showpoint|left|right|boolalpha|noboolalpha)\b/,
+    pattern: /\b(?:std::)?(setw|setprecision|setfill)\s*\(|(?:<<|\bstd::)\s*(fixed|showpoint|left|right|boolalpha|noboolalpha)\b/,
     message: "Formatting manipulators (setw, setprecision, fixed, etc.) require '#include <iomanip>'",
   },
   {
@@ -48,17 +48,15 @@ export const STRICT_DEPENDENCY_RULES: DependencyRule[] = [
 ];
 
 export function stripCommentsAndLiterals(source: string): string {
-  return source
-    .replace(/\/\*[\s\S]*?\*\//g, match => ' '.repeat(match.length))
-    .replace(/\/\/[^\n\r]*/g, match => ' '.repeat(match.length))
-    .replace(/(?:u8|u|U|L)?R"([^(]*)\([\s\S]*?\)\1"/g, match => ' '.repeat(match.length))
-    .replace(/(?:u8|u|U|L)?"(?:\\[\s\S]|[^"\\])*"/g, match => ' '.repeat(match.length))
-    .replace(/(?:u|U|L)?'(?:\\[\s\S]|[^'\\])*'/g, match => ' '.repeat(match.length));
+  return source.replace(
+    /(?:u8|u|U|L)?R"([^\s()\\]*)\([\s\S]*?\)\1"|(?:u8|u|U|L)?"(?:\\[\s\S]|[^"\\])*"|(?:u|U|L)?'(?:\\[\s\S]|[^'\\])*'|\/\*[\s\S]*?\*\/|\/\/[^\n\r]*/g,
+    match => match.replace(/[^\r\n]/g, ' '),
+  );
 }
 
 export function includedHeaders(source: string): Set<string> {
   const headers = new Set<string>();
-  for (const match of source.matchAll(/#include\s*<([^>]+)>/g)) {
+  for (const match of stripCommentsAndLiterals(source).matchAll(/^\s*#include\s*<([^>]+)>/gm)) {
     headers.add(match[1].trim());
   }
   return headers;

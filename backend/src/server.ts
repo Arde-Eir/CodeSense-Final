@@ -131,7 +131,7 @@ app.use('/api', (req: Request, res: Response, next: NextFunction) => {
             errors: [{
                 type: 'semantic',
                 severity: 'error',
-                message: `Too many API requests from ${key}. Wait 60 seconds and try again.`,
+                message: `Too many API requests. Wait ${Math.ceil(RATE_LIMIT_WINDOW_MS / 1000)} seconds and try again.`,
                 line: 0
             }],
             warnings: [],
@@ -155,7 +155,7 @@ app.use('/api', (req: Request, res: Response, next: NextFunction) => {
             errors: [{
                 type: 'semantic',
                 severity: 'error',
-                message: `Too many analysis requests from ${key}. Wait 60 seconds and try again.`,
+                message: `Too many analysis requests. Wait ${Math.ceil(RATE_LIMIT_WINDOW_MS / 1000)} seconds and try again.`,
                 line: 0
             }],
             warnings: [],

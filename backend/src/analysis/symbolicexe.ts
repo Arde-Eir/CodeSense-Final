@@ -25,10 +25,11 @@ import {
   ParameterNode,
   ForLoopNode,
   FunctionCallNode,
+  DefineNode,
 } from '../types';
 
 export type SymbolicValue =
-| { type: 'concrete'; value: number; arraySize?: number; arraySizes?: number[] }
+| { type: 'concrete'; value: number; numericType?: 'floating'; arraySize?: number; arraySizes?: number[] }
 | { type: 'symbolic'; name: string; constraints: Constraint[]; arraySize?: number; arraySizes?: number[] }
 | { type: 'unknown'; arraySize?: number; arraySizes?: number[] }
 | { type: 'pointer'; target?: string; offset: number; isNull?: boolean; isFreed?: boolean; arraySize?: number; arraySizes?: number[] }
@@ -47,6 +48,19 @@ interface SymbolicState {
   initialized: Set<string>;
   allocatedPointers: Map<string, { line: number; freed: boolean; size?: number; varName: string }>;
   freedPointers: Set<string>;
+}
+
+function convertNumericValue(value: SymbolicValue, declaredType: string): SymbolicValue {
+  if (value.type !== 'concrete' || declaredType.includes('*')) return value;
+  const scalarType = declaredType.replace(/\b(const|constexpr|static|extern|volatile)\b/g, '').replace(/&/g, '').trim();
+  if (['float', 'double', 'long double'].includes(scalarType)) {
+    return { ...value, numericType: 'floating' };
+  }
+  if (/^(?:(?:unsigned|signed)\s+)?(?:int|short|long(?:\s+long)?|char|bool|size_t|ptrdiff_t)$/.test(scalarType)) {
+    const { numericType: _numericType, ...integral } = value;
+    return { ...integral, value: scalarType === 'bool' ? Number(Boolean(value.value)) : Math.trunc(value.value) };
+  }
+  return value;
 }
 
 export class SymbolicExecutor {
@@ -169,7 +183,7 @@ export class SymbolicExecutor {
   }
 
   private visitFloat(node: any): SymbolicValue {
-    return { type: 'concrete', value: Number(node.value) };
+    return { type: 'concrete', value: Number(node.value), numericType: 'floating' };
   }
 
   private visitLiteral(node: any): SymbolicValue {
@@ -251,7 +265,7 @@ export class SymbolicExecutor {
   }
 
   let val: SymbolicValue = node.value
-    ? this.visit(node.value)
+    ? convertNumericValue(this.visit(node.value), node.varType)
     : { type: 'unknown' as const };
 
   // References alias the target variable by name.
@@ -331,19 +345,25 @@ export class SymbolicExecutor {
 }
 
   private visitAssignment(node: AssignmentNode): SymbolicValue {
-    const value = this.visit(node.value);
+    let value = this.visit(node.value);
 
     if (typeof node.target === 'string') {
       const targetName = this.resolveStorageName(node.target);
+      const declaredType = this.variableType(targetName);
       if (node.operator !== '=') {
         const current = this.state.variables.get(targetName);
         if (current?.type === 'concrete' && value.type === 'concrete') {
-          const computed = this.applyCompoundOp(node.operator, current.value, value.value);
+          if ((node.operator === '/=' || node.operator === '%=') && value.value === 0) {
+            this.addSafetyCheck(node.line || 0, 'arithmetic', 'UNSAFE', `${node.operator === '%=' ? 'Modulo' : 'Division'} by zero in '${node.operator}'.`);
+          }
+          const evaluated = this.evaluateConcrete(node.operator.slice(0, -1), current, value);
+          const computed = declaredType ? convertNumericValue(evaluated, declaredType) : evaluated;
           this.state.variables.set(targetName, computed);
           this.state.initialized.add(targetName);
           return computed;
         }
       }
+      if (declaredType) value = convertNumericValue(value, declaredType);
       this.state.variables.set(targetName, value);
       this.state.initialized.add(targetName);
 
@@ -384,17 +404,6 @@ export class SymbolicExecutor {
     return value;
   }
 
-  private applyCompoundOp(op: string, lv: number, rv: number): SymbolicValue {
-    switch (op) {
-      case '+=': return { type: 'concrete', value: lv + rv };
-      case '-=': return { type: 'concrete', value: lv - rv };
-      case '*=': return { type: 'concrete', value: lv * rv };
-      case '/=': return rv !== 0 ? { type: 'concrete', value: Math.trunc(lv / rv) } : { type: 'unknown' };
-      case '%=': return rv !== 0 ? { type: 'concrete', value: lv % rv } : { type: 'unknown' };
-      default:   return { type: 'unknown' };
-    }
-  }
-
   private visitIfStatement(node: IfStatementNode): SymbolicValue {
     const condAny = node.condition as any;
     if (condAny?.type === 'Assignment' && condAny.operator === '=') {
@@ -412,32 +421,41 @@ export class SymbolicExecutor {
     // then-branch entirely — it is dead code and should not raise safety checks.
     const condValue = this.evalConcreteCondition(node.condition);
     if (condValue === false) {
-      node.elseBranch?.forEach(s => this.visit(s));
+      this.visitStatements(node.elseBranch ?? []);
       return { type: 'unknown' as const };
     }
     if (condValue === true) {
-      node.thenBranch.forEach(s => this.visit(s));
+      this.visitStatements(node.thenBranch);
       return { type: 'unknown' as const };
     }
 
     const preBranchState = this.cloneState();
 
     this.applyPathConstraint(node.condition, false);
-    node.thenBranch.forEach(s => this.visit(s));
+    this.visitStatements(node.thenBranch);
     const thenState = this.cloneState();
+    const thenReturned = this.returned;
 
     this.state = preBranchState;
+    this.returned = false;
     this.applyPathConstraint(node.condition, true);
-    node.elseBranch?.forEach(s => this.visit(s));
+    this.visitStatements(node.elseBranch ?? []);
     const elseState = this.cloneState();
 
     this.state = this.mergeStates(thenState, elseState);
+    this.returned = thenReturned && this.returned;
     return { type: 'unknown' as const };
   }
 
-  private visitWhileLoop(node: WhileLoopNode): SymbolicValue {
-    this.detectInfiniteLoop(node);
+  private visitStatements(statements: ASTNode[]): void {
+    for (const statement of statements) {
+      if (this.returned) break;
+      this.visit(statement);
+    }
+  }
 
+  private visitWhileLoop(node: WhileLoopNode): SymbolicValue {
+    this.visit(node.condition);
     // Check whether the condition is false at loop entry.
     const condValue = this.evalConcreteCondition(node.condition);
     if (condValue === false) {
@@ -447,7 +465,10 @@ export class SymbolicExecutor {
         `is false on entry — the while loop will never execute. ` +
         `Check your variable values or the comparison operator.`,
       );
+      return { type: 'unknown' };
     }
+
+    this.detectInfiniteLoop(node);
 
     const condVars = this.extractVariables(node.condition);
     condVars.forEach(v => this.checkLoopBodyForZeroRisk(node.body, v));
@@ -639,15 +660,13 @@ export class SymbolicExecutor {
   }
 
   private visitBinaryOp(node: BinaryOpNode): SymbolicValue {
-
-    if (node.operator === '<<' || node.operator === '>>') {
-      const lv = this.visit(node.left);
-      const rv = this.visit(node.right);
-      const arraySize = (lv as any).arraySize ?? (rv as any).arraySize;
-      if (arraySize !== undefined) return { type: 'unknown', arraySize } as SymbolicValue;
-      return { type: 'unknown' as const };
+    const leftRaw = this.visit(node.left);
+    if (node.operator === '&&' && leftRaw.type === 'concrete' && !leftRaw.value) {
+      return { type: 'concrete', value: 0 };
     }
-    const leftRaw  = this.visit(node.left);
+    if (node.operator === '||' && leftRaw.type === 'concrete' && leftRaw.value) {
+      return { type: 'concrete', value: 1 };
+    }
     const rightRaw = this.visit(node.right);
 
     // Resolve unknown values — handles both {type:'Identifier',name} objects AND raw strings
@@ -726,8 +745,8 @@ export class SymbolicExecutor {
     }
 
     if (left.type === 'concrete' && right.type === 'concrete') {
-      const res = this.evaluateConcrete(node.operator, left.value, right.value);
-      if (res.type === 'concrete' && ['+', '-', '*'].includes(node.operator)) {
+      const res = this.evaluateConcrete(node.operator, left, right);
+      if (res.type === 'concrete' && res.numericType !== 'floating' && ['+', '-', '*'].includes(node.operator)) {
         if (res.value > this.INT_MAX || res.value < this.INT_MIN) {
           this.addSafetyCheck(
             (node as any).line || 0, 'overflow', 'WARNING',
@@ -795,11 +814,11 @@ export class SymbolicExecutor {
       // Try to get concrete value from operand node directly
       const operandVal = this.visit(operandNode);
       if (operandVal.type === 'concrete') {
-        return { type: 'concrete', value: -operandVal.value };
+        return { ...operandVal, value: -operandVal.value };
       }
       // Fallback: variable lookup
       if (val?.type === 'concrete') {
-        return { type: 'concrete', value: -val.value };
+        return { ...val, value: -val.value };
       }
       return { type: 'unknown' };
     }
@@ -830,6 +849,13 @@ export class SymbolicExecutor {
     return val ?? { type: 'unknown' as const };
   }
 
+  private variableType(name: string): string | null {
+    const functionScope = `global::${this.currentFunction}`;
+    const localSymbol = Object.values(this.symbolTable).find(symbol =>
+      symbol.name === name && (symbol.scope === functionScope || symbol.scope.startsWith(`${functionScope}::`)),
+    );
+    return localSymbol?.type ?? this.symbolTable[`global::${name}`]?.type ?? null;
+  }
   // Increment and decrement mark symbolic values as changed.
   private visitPreIncrement(node: any):  SymbolicValue { return this.applyIncDec(node,  1, true);  }
   private visitPostIncrement(node: any): SymbolicValue { return this.applyIncDec(node,  1, false); }
@@ -842,7 +868,7 @@ export class SymbolicExecutor {
     const oldVal  = current ?? { type: 'unknown' as const };
 
     if (name && current?.type === 'concrete') {
-      const newVal: SymbolicValue = { type: 'concrete', value: current.value + delta };
+      const newVal: SymbolicValue = { ...current, value: current.value + delta };
       this.state.variables.set(name, newVal);
       return pre ? newVal : oldVal;
     }
@@ -972,17 +998,25 @@ export class SymbolicExecutor {
   }
 
   private visitCastExpression(node: CastExpressionNode): SymbolicValue {
-    return this.visit(node.operand);
+    return convertNumericValue(this.visit(node.operand), node.targetType);
   }
 
-  private visitSizeofExpression(_node: SizeofExpressionNode): SymbolicValue {
-    return { type: 'concrete', value: 4 };
+  private visitSizeofExpression(node: SizeofExpressionNode): SymbolicValue {
+    this.addSafetyCheck(node.line || 0, 'sizeof', 'WARNING', 'sizeof is not evaluated by this analysis model; its value depends on the operand type and target platform.');
+    return { type: 'symbolic', name: `sizeof(${this.expressionToString(node.value)})`, constraints: [] };
   }
 
   private visitConditionalExpression(node: ConditionalExpressionNode): SymbolicValue {
     this.visit(node.condition);
+    const condition = this.evalConcreteCondition(node.condition);
+    if (condition === true) return this.visit(node.trueExpression);
+    if (condition === false) return this.visit(node.falseExpression);
+    const previousState = this.cloneState();
     const t = this.visit(node.trueExpression);
+    const trueState = this.cloneState();
+    this.state = previousState;
     const f = this.visit(node.falseExpression);
+    this.state = this.mergeStates(trueState, this.cloneState());
     if (JSON.stringify(t) === JSON.stringify(f)) return t;
     return { type: 'unknown' as const };
   }
@@ -1018,18 +1052,19 @@ export class SymbolicExecutor {
       const [a, b] = concreteArgs as number[];
       switch (node.name) {
         case 'abs':
+          return { type: 'concrete', value: Math.abs(a), numericType: args[0].type === 'concrete' ? args[0].numericType : undefined };
         case 'fabs':
-          return { type: 'concrete', value: Math.abs(a) };
+          return { type: 'concrete', value: Math.abs(a), numericType: 'floating' };
         case 'sqrt':
-          return a >= 0 ? { type: 'concrete', value: Math.sqrt(a) } : { type: 'unknown' };
+          return a >= 0 ? { type: 'concrete', value: Math.sqrt(a), numericType: 'floating' } : { type: 'unknown' };
         case 'pow':
-          return { type: 'concrete', value: Math.pow(a, b) };
+          return { type: 'concrete', value: Math.pow(a, b), numericType: 'floating' };
         case 'ceil':
-          return { type: 'concrete', value: Math.ceil(a) };
+          return { type: 'concrete', value: Math.ceil(a), numericType: 'floating' };
         case 'floor':
-          return { type: 'concrete', value: Math.floor(a) };
+          return { type: 'concrete', value: Math.floor(a), numericType: 'floating' };
         case 'round':
-          return { type: 'concrete', value: Math.round(a) };
+          return { type: 'concrete', value: Math.round(a), numericType: 'floating' };
       }
     }
 
@@ -1095,7 +1130,13 @@ export class SymbolicExecutor {
 
   // Preprocessor no-ops
   private visitInclude(_n: any):   SymbolicValue { return { type: 'unknown' as const }; }
-  private visitDefine(_n: any):    SymbolicValue { return { type: 'unknown' as const }; }
+  private visitDefine(node: DefineNode): SymbolicValue {
+    if (!node.value || node.value.type === 'MacroText') return { type: 'unknown' };
+    const value = this.visit(node.value);
+    this.state.variables.set(node.name, value);
+    this.state.initialized.add(node.name);
+    return value;
+  }
   private visitNamespace(_n: any): SymbolicValue { return { type: 'unknown' as const }; }
 
   private visitCinStatement(node: any): SymbolicValue {
@@ -1166,7 +1207,7 @@ export class SymbolicExecutor {
     const storageName = this.resolveStorageName(node.name);
     const val = this.state.variables.get(storageName);
 
-    if (!val && !this.state.initialized.has(storageName)) {
+    if ((!val || val.type === 'unknown') && !this.state.initialized.has(storageName)) {
       const stdSymbols = new Set([
         'cout', 'cin', 'endl', 'cerr', 'clog', 'string',
         'true', 'false', 'nullptr',
@@ -1189,7 +1230,8 @@ export class SymbolicExecutor {
       }
     }
 
-    return val ?? { type: 'unknown' as const };
+    const declaredType = this.variableType(storageName);
+    return val && declaredType ? convertNumericValue(val, declaredType) : val ?? { type: 'unknown' as const };
   }
 
 
@@ -1507,12 +1549,19 @@ export class SymbolicExecutor {
     }
   }
 
-  private evaluateConcrete(op: string, l: number, r: number): SymbolicValue {
+  private evaluateConcrete(
+    op: string,
+    left: Extract<SymbolicValue, { type: 'concrete' }>,
+    right: Extract<SymbolicValue, { type: 'concrete' }>,
+  ): SymbolicValue {
+    const l = left.value;
+    const r = right.value;
+    const numericType = left.numericType ?? right.numericType;
     switch (op) {
-      case '+':  return { type: 'concrete', value: l + r };
-      case '-':  return { type: 'concrete', value: l - r };
-      case '*':  return { type: 'concrete', value: l * r };
-      case '/':  return r !== 0 ? { type: 'concrete', value: Math.trunc(l / r) } : { type: 'unknown' };
+      case '+':  return { type: 'concrete', value: l + r, numericType };
+      case '-':  return { type: 'concrete', value: l - r, numericType };
+      case '*':  return { type: 'concrete', value: l * r, numericType };
+      case '/':  return r !== 0 ? { type: 'concrete', value: numericType === 'floating' ? l / r : Math.trunc(l / r), numericType } : { type: 'unknown' };
       case '%':  return r !== 0 ? { type: 'concrete', value: l % r }             : { type: 'unknown' };
       case '&':  return { type: 'concrete', value: l & r };
       case '|':  return { type: 'concrete', value: l | r };

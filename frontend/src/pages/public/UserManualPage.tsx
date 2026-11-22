@@ -14,7 +14,7 @@ interface ManualSection {
 
 
 const RULES: { code: string; severity: 'UNSAFE' | 'WARNING' | 'SAFE'; desc: string }[] = [
-  { code: 'UNINITIALIZED_READ',     severity: 'UNSAFE',  desc: 'Variable read before a value is assigned in every reachable path.' },
+  { code: 'UNINITIALIZED_READ',     severity: 'WARNING', desc: 'Variable may be read before a value is assigned.' },
   { code: 'ARRAY_OOB',              severity: 'UNSAFE',  desc: 'Array index provably exceeds the declared size (constant bounds).' },
   { code: 'NULL_DEREF',             severity: 'UNSAFE',  desc: 'Pointer dereferenced after being assigned NULL / nullptr.' },
   { code: 'DIV_BY_ZERO',            severity: 'UNSAFE',  desc: 'Divisor is a literal 0 or an expression proven to evaluate to 0.' },
@@ -63,7 +63,7 @@ const ROLES_MATRIX: { feature: string; tiers: Record<string, boolean> }[] = [
   { feature: 'User Manual',                     tiers: { Guest: true,  Student: true,  Professional: true,  Admin: true  } },
   { feature: 'Campaign quests',                 tiers: { Guest: false, Student: true,  Professional: true,  Admin: true  } },
   { feature: 'Progress report',                 tiers: { Guest: false, Student: true,  Professional: true,  Admin: true  } },
-  { feature: 'Leaderboard',                     tiers: { Guest: false, Student: true,  Professional: true,  Admin: true  } },
+  { feature: 'Leaderboard',                     tiers: { Guest: true,  Student: true,  Professional: true,  Admin: true  } },
   { feature: 'Profile settings',                tiers: { Guest: false, Student: true,  Professional: true,  Admin: true  } },
   { feature: 'Admin Panel (management / live help)', tiers: { Guest: false, Student: false, Professional: false, Admin: true  } },
   { feature: 'System metrics',                  tiers: { Guest: false, Student: false, Professional: false, Admin: true  } },
@@ -181,9 +181,8 @@ const SECTIONS: ManualSection[] = [
           <li>Open <b>Dashboard → Sandbox</b>. Monaco loads with a starter snippet.</li>
           <li>Click the yellow <b>ANALYZE</b> button (top of the editor).</li>
           <li>
-            Inspect the seven tabs on the right: <b>Tokens, AST, Symbols, CFG,
-            Math, Logs, Validation</b>. Each one shows a snapshot of a specific
-            pipeline stage.
+            Inspect <b>Lexical, Syntactic, Symbols, Math, and Logs</b> in the result panel.
+            The control-flow graph has its own canvas. Build Mode also shows graph validation.
           </li>
           <li>
             Click any node in the <b>CFG</b> tab — the editor highlights the
@@ -228,17 +227,17 @@ const SECTIONS: ManualSection[] = [
   {
     id: 'tabs',
     icon: '🔍',
-    title: 'The Seven Analyzer Tabs',
+    title: 'Analyzer Views',
     summary: 'What each tab shows and when to look at it.',
     content: (
       <>
         <DataTable
           headers={['TAB', 'WHAT IT SHOWS', 'LOOK HERE WHEN…']}
           rows={[
-            [<b>🔤 Tokens</b>,     'Lexer output: every token with type, value, line, column.',         '…you suspect a typo changed a keyword into an identifier.'],
-            [<b>🌳 AST</b>,        'JSON tree of the parsed structure. Collapsible nodes.',             '…the parser ran but the code "looks wrong" — the AST shows what was actually parsed.'],
+            [<b>🔤 Lexical</b>,    'Lexer output: every token with type, value, line, column.',         '…you suspect a typo changed a keyword into an identifier.'],
+            [<b>🌳 Syntactic</b>,  'JSON tree of the parsed structure. Collapsible nodes.',             '…the parser ran but the code "looks wrong" — the AST shows what was actually parsed.'],
             [<b>🔣 Symbols</b>,    'Symbol table: declared type, scope, initialized flag.',             '…you need to confirm a variable\'s declared type or scope reach.'],
-            [<b>🕸 CFG</b>,         'Interactive flowchart of execution order (ReactFlow + ELK).',       '…you want to see which paths the rule engine walked.'],
+            [<b>🕸 CFG canvas</b>,  'Interactive flowchart of execution order using React Flow.',       '…you want to inspect branches and loops.'],
             [<b>Σ Math</b>,        'Cognitive + cyclomatic complexity, plus symbolic execution values.', '…you want hard metrics on code maintainability.'],
             [<b>📟 Logs</b>,       'Lexical, syntactic, semantic errors + warnings.',                   '…CFG is empty — parser failed; read the errors here first.'],
             [<b>✓ Validation</b>,  'Build Mode: blocking issues before C++ codegen.',                   '…GENERATE C++ is disabled and you need to know why.'],
@@ -257,13 +256,13 @@ const SECTIONS: ManualSection[] = [
       <>
         <p style={{ color: '#8b949e', fontSize: 13 }}>
           If your code isn't flagged, <b>none of the rules below matched</b>.
-          That's the deterministic guarantee — silence means clean, not
-          "probably fine".
+          These checks cover the supported grammar and analysis model. An unflagged
+          program is not a guarantee of correctness or runtime safety.
         </p>
         <RuleTable />
-        <Callout color="#f85149" icon="⚠" title="UNSAFE blocks merge. WARNING lets it through.">
-          In Campaign quests, any UNSAFE rule firing fails the objective. A
-          WARNING drops the XP bonus but still counts as a completion.
+        <Callout color="#f85149" icon="⚠" title="Read the findings before continuing.">
+          UNSAFE identifies a detected hazard; WARNING identifies a potential issue.
+          Campaign completion depends on the required lesson activities, not a source-code merge.
         </Callout>
       </>
     ),
@@ -427,16 +426,16 @@ const SECTIONS: ManualSection[] = [
           headers={['EARN XP BY', 'AMOUNT']}
           rows={[
             ['Completing a quest',              'Base XP defined on the quest (varies).'],
-            ['Completing without hints',        'Full bonus.'],
-            ['Using one or more hints',         'XP minus each hint\'s cost.'],
+            ['Completing without hints',        'Configured quest reward, subject to the remaining level cap.'],
+            ['Using one or more hints',         '25 XP per revealed hint, capped at 50% of the completion reward.'],
+            ['Completing a retake',             '20 XP base reward, subject to hints and the remaining level cap.'],
             ['Running a sandbox analysis',      'Tracked as activity (no XP, but counts toward achievements).'],
           ]}
         />
         <Callout color="#ffa726" icon="⚔" title="Quest flow:">
-          Campaign page → pick phase → pick quest → Lesson Activity loads the
-          starter code into Monaco → you edit → click ANALYZE → if the rule
-          engine returns no UNSAFE hits, the quest is marked complete and XP
-          is awarded.
+          Campaign page → pick phase → pick quest → read the lesson → complete
+          all required activities. Quests can include multiple choice, matching,
+          ordering, balloon pop, and code fill. XP is saved on full completion.
         </Callout>
       </>
     ),
@@ -488,10 +487,10 @@ const SECTIONS: ManualSection[] = [
             ['⚔️ First Quest',       <span style={{ color: '#8b949e' }}>Common</span>,    'Complete 1 quest.'],
             ['🛡️ Quest Knight',      <span style={{ color: '#58a6ff' }}>Rare</span>,     'Complete 5 quests.'],
             ['🏆 Quest Champion',    <span style={{ color: '#a371f7' }}>Epic</span>,     'Complete 10 quests.'],
-            ['⚔️ Rising Knight',     <span style={{ color: '#8b949e' }}>Common</span>,    'Earn 1,000 XP.'],
-            ['🌟 Noble Lord',        <span style={{ color: '#58a6ff' }}>Rare</span>,     'Earn 4,000 XP.'],
-            ['👑 Grand Duke',        <span style={{ color: '#a371f7' }}>Epic</span>,     'Earn 10,000 XP.'],
-            ['🔱 Legendary King',    <span style={{ color: '#ffc107' }}>Legendary</span>, 'Earn 25,000 XP.'],
+            ['⚔️ Rising Knight',     <span style={{ color: '#8b949e' }}>Common</span>,    'Earn 5,000 XP.'],
+            ['🌟 Noble Lord',        <span style={{ color: '#58a6ff' }}>Rare</span>,     'Earn 20,000 XP.'],
+            ['👑 Grand Duke',        <span style={{ color: '#a371f7' }}>Epic</span>,     'Earn 75,000 XP.'],
+            ['🔱 Legendary King',    <span style={{ color: '#ffc107' }}>Legendary</span>, 'Earn 250,000 XP.'],
           ]}
         />
       </>
@@ -502,7 +501,7 @@ const SECTIONS: ManualSection[] = [
     id: 'profile',
     icon: '👤',
     title: 'Profile Settings',
-    summary: 'Five tabs, avatar crop, password change, and the danger zone.',
+    summary: 'Five tabs, avatar crop, password change, and sign out.',
     content: (
       <>
         <DataTable
@@ -511,7 +510,7 @@ const SECTIONS: ManualSection[] = [
             [<b>📋 Overview</b>,    'Animated XP progress bar, 4 stat chips (XP, analyses, quests, rank), About (member since, email).'],
             [<b>🏅 Achievements</b>, 'All 12 badges with rarity + progress bar. Locked badges are dimmed.'],
             [<b>📈 Activity</b>,    'Merged timeline of recent reports + completed quests, sorted by date. Click the icon to see details.'],
-            [<b>⚙️ Settings</b>,    'Displayed title picker (unlocked titles only), user type, password change, danger zone.'],
+            [<b>⚙️ Settings</b>,    'Displayed title picker (unlocked titles only), user type, password change, and sign out.'],
             [<b>📚 Learn</b>,       '5-step rank progression path + how-to-earn-XP cheat sheet.'],
           ]}
         />
@@ -523,13 +522,12 @@ const SECTIONS: ManualSection[] = [
         </ul>
         <h4 style={{ color: '#e6edf3', fontSize: 14, marginTop: 16, marginBottom: 6 }}>Password change</h4>
         <ul style={{ paddingLeft: 20, lineHeight: 1.9 }}>
-          <li>Runs via <code>supabase.auth.updateUser()</code>. No plaintext ever leaves the browser.</li>
+          <li>Your current password is verified and the new password is sent to Supabase Auth over HTTPS. Never share it in support chat.</li>
           <li>Minimum 8 characters, confirmed with a match field.</li>
         </ul>
-        <Callout color="#f85149" icon="⚠" title="Danger Zone (Delete Account):">
-          You must type your <b>exact player name</b> into the confirmation box
-          before the Confirm Delete button activates. Deletion logs you out and
-          redirects to the landing page.
+        <Callout color="#58a6ff" icon="ℹ" title="Ending your session:">
+          Use Sign Out in Profile settings or Log Out in the dashboard menu.
+          Signing out does not delete your account or saved progress.
         </Callout>
       </>
     ),
@@ -596,8 +594,8 @@ const SECTIONS: ManualSection[] = [
         <ul style={{ paddingLeft: 20, lineHeight: 1.9 }}>
           <li>The bell fetches the <b>10 most recent</b> announcements and subscribes to realtime changes (new inserts appear without refresh).</li>
           <li>A red pulsing badge shows unread count (capped at 99).</li>
-          <li>Clicking the bell marks shown items as seen. "Mark all read" clears everything.</li>
-          <li>Seen IDs persist in <code>localStorage</code> under key <code>cs-seen-announcements-v1</code> — survives refresh.</li>
+          <li>Opening the bell marks displayed items read. "Mark all read" updates read status; "Clear read" dismisses read items.</li>
+          <li>Signed-in notification receipts synchronize through the account database. Guest choices are stored in the current browser.</li>
           <li>"View all announcements →" opens a full modal with the complete history.</li>
         </ul>
         <DataTable
@@ -639,7 +637,7 @@ const SECTIONS: ManualSection[] = [
           <li><b>View Progress</b> opens a read-only profile and learning-progress snapshot; it never swaps your login identity.</li>
           <li><b>Request Live Help</b> sends a request to the learner. They must approve sharing the CodeSense browser tab.</li>
           <li>Once approved, the admin sees the learner's real tab and can point, click, scroll, and replace the focused text field. The learner sees the cursor and can stop at any time.</li>
-          <li>Passwords, secret codes, file inputs, and external links are not remotely controlled. Live help requires the support migration and configured network servers.</li>
+          <li>Passwords, secret codes, file inputs, and external links are not remotely controlled. Live help requires provisioned support tables, RPCs, private Realtime policies, and the support build setting.</li>
         </ul>
         <Callout color="#f85149" icon="🔐" title="Schema health:">
           If a table or column is missing in your Supabase DB, a red banner at

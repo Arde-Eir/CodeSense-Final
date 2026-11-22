@@ -2,7 +2,7 @@ import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import '@/layout.css';
 import { CodeEditor } from '@/components/Editor/CodeEditor';
-import { analyzeCode } from '@/services/api';
+import { analyzeCode, cancelAnalysis } from '@/services/api';
 import { FlowGraph } from '@/components/Visualizer/FlowGraph';
 import { TokenDrawer } from '@/components/Visualizer/TokenDrawer';
 import { TokenChart } from '@/components/Visualizer/TokenChart';
@@ -42,7 +42,7 @@ function analysisFailureFromError(error: unknown): AnalysisResult {
     symbolTable: {},
     safetyChecks: [],
     explanations: [
-      'Analysis could not complete. Check that the backend is running and the API URL is configured correctly.',
+      'Analysis did not complete. Review the error below, correct it, and analyze again. Your editor content is unchanged.',
       message,
     ],
     errors: [analysisError],
@@ -452,6 +452,12 @@ export const SandboxPage = () => {
   const navigate = useNavigate();
   const { user, isGuest } = useAuth();
   const editorRef = useRef<any>(null);
+  const analysisRequestRef = useRef(0);
+
+  useEffect(() => () => {
+    analysisRequestRef.current += 1;
+    cancelAnalysis();
+  }, []);
 
   const [mode, setMode] = useState<AppMode>('analyze');
   const [code, setCode] = useState<string>(() => {
@@ -608,8 +614,8 @@ int main() {
 
   const performAnalyzeSource = async (sourceCode: string) => {
     if (!user && !isGuest) return;
+    const requestId = ++analysisRequestRef.current;
     (document.activeElement as HTMLElement | null)?.blur?.();
-    DataIsolationService.saveSandboxCode(isGuest ? null : user?.id || null, sourceCode, 'main.cpp');
     setResult(null);
     setAnalysisRunKey(prev => prev + 1);
     setIsAnalyzing(true);
@@ -618,20 +624,27 @@ int main() {
 
     let data: AnalysisResult | null = null;
     try {
+      DataIsolationService.saveSandboxCode(isGuest ? null : user?.id || null, sourceCode, 'main.cpp');
       data = await analyzeCode(sourceCode, {
         currentLevel: liveStats?.currentLevel,
       });
+      if (requestId !== analysisRequestRef.current) return;
       setResult(data);
+      if (!data.success) setActiveTab('logs');
       if (data.success && isGuest) {
         DataIsolationService.saveGuestProgress({ sandboxProgress: { lastCode: sourceCode } });
       }
     } catch (err) {
+      if (requestId !== analysisRequestRef.current) return;
       console.error('Analysis failed:', err);
       data = analysisFailureFromError(err);
       setResult(data);
+      setActiveTab('logs');
     } finally {
-      setIsAnalyzing(false);
-      editorRef.current?.focus?.();
+      if (requestId === analysisRequestRef.current) {
+        setIsAnalyzing(false);
+        editorRef.current?.focus?.();
+      }
     }
 
     if (data?.success && user) {
@@ -642,6 +655,15 @@ int main() {
         .then(() => fetchLiveStats())
         .catch(err => console.error('DB log failed:', err));
     }
+  };
+
+  const handleCodeChange = (updatedCode: string): void => {
+    if (updatedCode === code) return;
+    analysisRequestRef.current += 1;
+    cancelAnalysis();
+    setCode(updatedCode);
+    setResult(null);
+    setIsAnalyzing(false);
   };
 
   const handleAnalyze = async () => {
@@ -668,6 +690,7 @@ int main() {
     () => safetyChecks?.filter(c => c.status === 'UNSAFE').length ?? 0,
     [safetyChecks]
   );
+  const hasAnalysisErrors = result?.success === false;
 
   const TABS = [
     { id: 'lexical',   label: 'Lexical'   },
@@ -735,7 +758,7 @@ int main() {
               <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden', padding: '12px', minHeight: 0 }}>
                 <div style={{ position: 'relative', flex: 1, minHeight: 0 }}>
                   <div className="editor-container" style={{ height: '100%' }}>
-                    <CodeEditor code={code} onChange={setCode} onEditorMount={e => (editorRef.current = e)} />
+                    <CodeEditor code={code} onChange={handleCodeChange} onEditorMount={e => (editorRef.current = e)} />
                   </div>
                   <button
                     type="button"
@@ -799,19 +822,24 @@ int main() {
               height={bothOpen ? `${(1 - ratio) * 100}%` : undefined}
               badge={
                 result && (
-                  <span style={{
+                  <span data-testid="sandbox-analysis-status" data-status={hasAnalysisErrors ? 'error' : unsafeCount > 0 ? 'unsafe' : 'clear'} style={{
                     fontSize: '9px', fontFamily: 'IBM Plex Mono, monospace',
-                    color: unsafeCount > 0 ? '#f85149' : '#3fb950',
-                    background: unsafeCount > 0 ? 'rgba(248,81,73,0.1)' : 'rgba(63,185,80,0.1)',
-                    border: `1px solid ${unsafeCount > 0 ? 'rgba(248,81,73,0.3)' : 'rgba(63,185,80,0.3)'}`,
+                    color: hasAnalysisErrors || unsafeCount > 0 ? '#f85149' : '#3fb950',
+                    background: hasAnalysisErrors || unsafeCount > 0 ? 'rgba(248,81,73,0.1)' : 'rgba(63,185,80,0.1)',
+                    border: `1px solid ${hasAnalysisErrors || unsafeCount > 0 ? 'rgba(248,81,73,0.3)' : 'rgba(63,185,80,0.3)'}`,
                     borderRadius: '4px', padding: '2px 6px',
                   }}>
-                    {unsafeCount > 0 ? `⚠ ${unsafeCount} issue${unsafeCount > 1 ? 's' : ''}` : '✓ clear'}
+                    {hasAnalysisErrors ? '✕ analysis failed' : unsafeCount > 0 ? `⚠ ${unsafeCount} issue${unsafeCount > 1 ? 's' : ''}` : '✓ clear'}
                   </span>
                 )
               }
             >
               <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden', minHeight: 0 }}>
+                {hasAnalysisErrors && (
+                  <p role="alert" data-testid="sandbox-analysis-error" style={{ color: '#f85149', padding: '10px 16px', overflowWrap: 'anywhere' }}>
+                    Analysis failed. {result?.errors[0]?.message}
+                  </p>
+                )}
                 <div className="tab-headers">
                   {TABS.map(({ id, label }) => (
                     <button key={id} onClick={() => setActiveTab(id)} className={activeTab === id ? 'tab-link active' : 'tab-link'}>
@@ -996,7 +1024,7 @@ int main() {
               <button type="button" onMouseDown={(e) => { e.stopPropagation(); setEditorFullscreen(false); }} style={{ padding: '6px 16px', borderRadius: '7px', border: '1px solid rgba(248,81,73,0.4)', background: 'rgba(248,81,73,0.1)', color: '#f85149', fontSize: '12px', fontWeight: '700', cursor: 'pointer', fontFamily: 'IBM Plex Mono, monospace', letterSpacing: '0.3px', flexShrink: 0 }}>✕ CLOSE</button>
             </div>
             <div style={{ flex: 1, minHeight: 0, overflow: 'hidden' }}>
-              <CodeEditor code={code} onChange={setCode} onEditorMount={e => (editorRef.current = e)} />
+              <CodeEditor code={code} onChange={handleCodeChange} onEditorMount={e => (editorRef.current = e)} />
             </div>
             <div style={{ padding: '12px 16px', borderTop: '1px solid rgba(63,185,80,0.15)', background: 'rgba(13,17,23,0.8)', flexShrink: 0, display: 'flex', gap: '10px' }}>
               <MagneticButton onClick={() => { setEditorFullscreen(false); handleAnalyze(); }} disabled={isAnalyzing} className="magnetic-button-wide" faceClassName="analyze-btn" data-testid="sandbox-fullscreen-analyze">

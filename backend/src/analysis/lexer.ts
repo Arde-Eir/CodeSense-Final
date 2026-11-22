@@ -1,4 +1,4 @@
-/** Tokenizes C++ source after expanding object-like macros. */
+/** Tokenizes submitted C++ source without changing literals or source locations. */
 
 import { Token } from '../types';
 
@@ -14,15 +14,15 @@ const TOKEN_PATTERNS: Array<{ type: Token['type']; pattern: RegExp }> = [
   { type: 'Keyword',    pattern: /#\s*(include|define|undef|ifdef|ifndef|endif|elif|if|else|pragma|error|warning|line)\b/y },
   { type: 'Keyword',    pattern: /(auto|bool|break|case|catch|char|class|const|constexpr|continue|default|delete|do|double|else|enum|explicit|extern|false|final|float|for|friend|goto|if|inline|int|long|mutable|namespace|new|nullptr|operator|override|private|protected|public|register|return|short|signed|sizeof|static|string|struct|switch|template|this|throw|true|try|typedef|typename|union|unsigned|using|virtual|void|volatile|while)\b/y },
   { type: 'Literal',    pattern: /(?:u8|u|U|L)?R"([^(]*)\([\s\S]*?\)\1"/y },
-  { type: 'Literal',    pattern: /(?:u8|u|U|L)"(\\(?:[abfnrtvx\\'"?\n0]|[0-7]{1,3}|x[0-9a-fA-F]{1,2})|[^"\\])*"/y },
-  { type: 'Literal',    pattern: /(?:u|U|L)'(\\(?:[abfnrtvx\\'"?0]|[0-7]{1,3}|x[0-9a-fA-F]{1,2})|[^'\\])'/y },
+  { type: 'Literal',    pattern: /(?:u8|u|U|L)"(\\(?:[abfnrtvx\\'"?\n0]|[0-7]{1,3}|x[0-9a-fA-F]{1,2})|[^"\\\r\n])*"/y },
+  { type: 'Literal',    pattern: /(?:u|U|L)'(\\(?:[abfnrtvx\\'"?0]|[0-7]{1,3}|x[0-9a-fA-F]{1,2})|[^'\\\r\n])'/y },
   { type: 'Literal',    pattern: /0[bB][01]+[uUlL]{0,3}/y },
   { type: 'Literal',    pattern: /0[xX][0-9a-fA-F]+[uUlL]{0,3}/y },
   { type: 'Literal',    pattern: /0[0-7]+[uUlL]{0,3}/y },
   { type: 'Literal',    pattern: /(?:[0-9]*\.[0-9]+|[0-9]+\.)(?:[eE][+-]?[0-9]+)?[fFlL]?|[0-9]+[eE][+-]?[0-9]+[fFlL]?/y },
   { type: 'Literal',    pattern: /[0-9]+[uU]?[lL]{0,2}/y },
-  { type: 'Literal',    pattern: /'(\\(?:[abfnrtvx\\'"?0]|[0-7]{1,3}|x[0-9a-fA-F]{1,2})|[^'\\])'/y },
-  { type: 'Literal',    pattern: /"(\\(?:[abfnrtvx\\'"?\n0]|[0-7]{1,3}|x[0-9a-fA-F]{1,2})|[^"\\])*"/y },
+  { type: 'Literal',    pattern: /'(\\(?:[abfnrtvx\\'"?0]|[0-7]{1,3}|x[0-9a-fA-F]{1,2})|[^'\\\r\n])'/y },
+  { type: 'Literal',    pattern: /"(\\(?:[abfnrtvx\\'"?\n0]|[0-7]{1,3}|x[0-9a-fA-F]{1,2})|[^"\\\r\n])*"/y },
   { type: 'Identifier', pattern: /(cout|cin|cerr|clog|endl|getline|fixed|setprecision|setw|setfill|showpoint|left|right|boolalpha|noboolalpha|pow|sqrt|abs|fabs|ceil|floor|round|fmod|log|log2|log10|exp|sin|cos|tan|asin|acos|atan|atan2|system|exit|rand|srand|stoi|stod|stof|stol|stoul|to_string|ifstream|ofstream|fstream|size_t|nullptr_t)\b/y },
   { type: 'Identifier', pattern: /[a-zA-Z_][a-zA-Z0-9_]*/y },
   { type: 'Operator',   pattern: /(<<=|>>=)/y },
@@ -31,50 +31,13 @@ const TOKEN_PATTERNS: Array<{ type: Token['type']; pattern: RegExp }> = [
   { type: 'Separator',  pattern: /[(){}\[\];,]/y },
 ];
 
-type MacroTable = Map<string, string>;
-
-function buildMacroTable(sourceCode: string): MacroTable {
-  const macros: MacroTable = new Map();
-  // Match:  #define IDENT   value_until_end_of_line
-  const re = /^[ \t]*#[ \t]*define[ \t]+([A-Za-z_][A-Za-z0-9_]*)(?:[ \t]+([^\n]*))?/gm;
-  let m: RegExpExecArray | null;
-  while ((m = re.exec(sourceCode)) !== null) {
-    const name = m[1];
-    const value = (m[2] || '').trim();
-    // Only track simple object-like macros (no parentheses = not a function-like macro)
-    if (!value.startsWith('(') && name !== value) {
-      macros.set(name, value);
-    }
-  }
-  return macros;
-}
-
-function expandMacros(sourceCode: string, macros: MacroTable): string {
-  if (macros.size === 0) return sourceCode;
-  // Remove #define lines first so we don't re-expand inside them
-  let expanded = sourceCode.replace(/^[ \t]*#[ \t]*define[^\n]*/gm, match => ' '.repeat(match.length));
-  macros.forEach((value, name) => {
-    // Word-boundary replacement; skip if replacement would be circular
-    if (value === name) return;
-    try {
-      const re = new RegExp(`\\b${name}\\b`, 'g');
-      expanded = expanded.replace(re, value);
-    } catch (_) {
-      // Invalid macro names are skipped.
-    }
-  });
-  return expanded;
-}
-
-
 const wsRegex = /[ \t]+/y;
 
 export function tokenize(sourceCode: string): LexerResult {
   const tokens: Token[] = [];
   const errors: Array<{ message: string; line: number; column: number }> = [];
 
-  const macros = buildMacroTable(sourceCode);
-  const workingSource = expandMacros(sourceCode, macros);
+  const workingSource = sourceCode;
   let line   = 1;
   let column = 1;
   let pos    = 0;
@@ -139,7 +102,9 @@ export function tokenize(sourceCode: string): LexerResult {
     if (!matched) {
       const ch = workingSource[pos];
       errors.push({
-        message: `Unexpected character '${ch}' (code: ${ch.charCodeAt(0)})`,
+        message: ch === '"' || ch === "'"
+          ? `Unterminated or invalid ${ch === '"' ? 'string' : 'character'} literal.`
+          : `Unexpected character '${ch}' (code: ${ch.charCodeAt(0)})`,
         line,
         column,
       });

@@ -14,7 +14,7 @@ const {
   mergeNotificationPreferences, preferencesFromReceipts,
 } = await server.ssrLoadModule('/src/components/dashboard/notificationState.ts')
 const { parseNotificationReceipts } = await server.ssrLoadModule('/src/services/notificationReceipts.ts')
-const migration = await readFile(new URL('../../supabase/migrations/202610190001_notification_receipts.sql', import.meta.url), 'utf8')
+const migration = await readFile(new URL('../../tests/fixtures/sql/202610190001_notification_receipts.sql', import.meta.url), 'utf8')
 const owner = '11111111-1111-4111-8111-111111111111'
 const other = '22222222-2222-4222-8222-222222222222'
 

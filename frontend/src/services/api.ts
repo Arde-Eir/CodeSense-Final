@@ -20,6 +20,10 @@ interface AnalyzeCodeOptions {
 // Cancel any in-flight request when a new one is submitted
 let _activeController: AbortController | null = null;
 
+export function cancelAnalysis(): void {
+  _activeController?.abort();
+}
+
 export const analyzeCode = async (
   sourceCode: string,
   options: AnalyzeCodeOptions | number = {}
@@ -51,11 +55,16 @@ export const analyzeCode = async (
     });
 
     if (!response.ok) {
-      console.error(`Backend returned status: ${response.status}`);
-      throw new Error('Analysis failed');
+      const body = await response.text();
+      throw new Error(`POST ${ANALYZE_URL} failed (HTTP ${response.status}): ${body || response.statusText}`);
     }
 
-    const result = await response.json();
+    const result: AnalysisResult = await response.json();
+    if (!result || typeof result.success !== 'boolean' || !Array.isArray(result.errors)
+      || !Array.isArray(result.tokens) || !result.cfg || !Array.isArray(result.cfg.nodes)
+      || !Array.isArray(result.cfg.edges)) {
+      throw new TypeError(`POST ${ANALYZE_URL} returned an invalid analysis response (HTTP ${response.status}).`);
+    }
     return normalizeAnalysisResult(sourceCode, result);
   } catch (err: unknown) {
     if (err instanceof DOMException && err.name === 'AbortError') {

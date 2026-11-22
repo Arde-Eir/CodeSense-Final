@@ -1,5 +1,5 @@
-import React, { useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import React, { useRef, useState } from 'react';
+import { Link, useNavigate } from 'react-router-dom';
 import { useAuth } from '@/components/AuthContext';
 
 const BannedModal: React.FC<{ reason: string; onClose: () => void }> = ({ reason, onClose }) => (
@@ -94,18 +94,21 @@ export const LoginPage: React.FC = () => {
   const [formData, setFormData] = useState({ playerName: '', secretCode: '' });
   const [error, setError] = useState('');
   const [isLoading, setIsLoading] = useState(false);
+  const submittingRef = useRef(false);
   const [banInfo, setBanInfo] = useState<{ reason: string } | null>(null);
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (submittingRef.current) return;
+    submittingRef.current = true;
     setIsLoading(true);
     setError('');
 
     try {
       await login(formData.playerName, formData.secretCode);
       navigate('/welcome');
-    } catch (err: any) {
-      const msg: string = err?.message ?? '';
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
       if (msg.startsWith('ACCOUNT_BANNED')) {
         // Format from DatabaseService: "ACCOUNT_BANNED: <reason>"  or just "ACCOUNT_BANNED"
         const reason = msg.slice('ACCOUNT_BANNED'.length).replace(/^:\s*/, '').trim();
@@ -116,6 +119,7 @@ export const LoginPage: React.FC = () => {
         setError(msg || 'The sign-in service is unavailable. Try again shortly.');
       }
     } finally {
+      submittingRef.current = false;
       setIsLoading(false);
     }
   };
@@ -137,6 +141,7 @@ export const LoginPage: React.FC = () => {
       <div className="login-card" style={cardStyle}>
         <div style={{ width: '100%', marginBottom: '15px', textAlign: 'left' }}>
           <button 
+            disabled={isLoading}
             onClick={() => navigate('/')} 
             style={{
               background: 'transparent',
@@ -159,10 +164,15 @@ export const LoginPage: React.FC = () => {
           <h2 style={{ color: 'white', marginTop: '10px' }}>Access System</h2>
         </div>
 
-        <form onSubmit={handleLogin}>
+        <form onSubmit={handleLogin} data-testid="login-form">
           <div style={{ marginBottom: '20px' }}>
-            <label style={labelStyle}>PLAYER NAME</label>
+            <label htmlFor="login-player-name" style={labelStyle}>PLAYER NAME</label>
             <input
+              id="login-player-name"
+              name="playerName"
+              autoComplete="username"
+              maxLength={50}
+              disabled={isLoading}
               type="text"
               required
               style={inputStyle}
@@ -172,8 +182,12 @@ export const LoginPage: React.FC = () => {
           </div>
 
           <div style={{ marginBottom: '25px' }}>
-            <label style={labelStyle}>SECRET CODE</label>
+            <label htmlFor="login-secret-code" style={labelStyle}>SECRET CODE</label>
             <input
+              id="login-secret-code"
+              name="secretCode"
+              autoComplete="current-password"
+              disabled={isLoading}
               type="password"
               required
               style={inputStyle}
@@ -182,7 +196,7 @@ export const LoginPage: React.FC = () => {
             />
           </div>
 
-          {error && <p style={{ color: '#ff4444', fontSize: '13px', textAlign: 'center' }}>{error}</p>}
+          {error && <p role="alert" data-testid="login-error" style={{ color: '#ff4444', fontSize: '13px', textAlign: 'center' }}>{error}</p>}
 
           <button type="submit" disabled={isLoading} style={primaryBtnStyle}>
             {isLoading ? 'DECRYPTING...' : 'LOGIN'}
@@ -191,12 +205,12 @@ export const LoginPage: React.FC = () => {
 
         <div style={{ margin: '20px 0', textAlign: 'center', color: '#444' }}>OR</div>
 
-        <button onClick={handleGuestEntry} style={secondaryBtnStyle}>
+        <button data-testid="login-guest" disabled={isLoading} onClick={handleGuestEntry} style={secondaryBtnStyle}>
           CONTINUE AS GUEST
         </button>
 
         <p style={{ color: '#8b949e', textAlign: 'center', marginTop: '20px', fontSize: '14px' }}>
-          New explorer? <span onClick={() => navigate('/signup')} style={linkStyle}>Register here</span>
+          New explorer? <Link to="/signup" style={linkStyle} onClick={event => { if (isLoading) event.preventDefault(); }} aria-disabled={isLoading}>Register here</Link>
         </p>
       </div>
 
@@ -209,7 +223,7 @@ export const LoginPage: React.FC = () => {
 const containerStyle: React.CSSProperties = { minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#0d1117', padding: '20px' };
 const cardStyle = { background: '#161b22', padding: '40px', borderRadius: '16px', border: '1px solid #30363d', width: '100%', maxWidth: '400px', boxShadow: '0 8px 32px rgba(0, 0, 0, 0.4)' };
 const labelStyle = { display: 'block', color: '#8b949e', fontSize: '12px', marginBottom: '8px', fontWeight: 'bold' as const };
-const inputStyle = { width: '100%', padding: '12px', background: '#0d1117', border: '1px solid #30363d', borderRadius: '8px', color: 'white', outline: 'none', fontSize: '16px' };
+const inputStyle = { width: '100%', padding: '12px', background: '#0d1117', border: '1px solid #30363d', borderRadius: '8px', color: 'white', fontSize: '16px' };
 const primaryBtnStyle = { width: '100%', padding: '12px', background: '#238636', color: 'white', border: 'none', borderRadius: '8px', fontWeight: 'bold' as const, cursor: 'pointer' };
 const secondaryBtnStyle = { width: '100%', padding: '12px', background: 'transparent', color: '#58a6ff', border: '1px solid #58a6ff', borderRadius: '8px', fontWeight: 'bold' as const, cursor: 'pointer' };
 const linkStyle = { color: '#58a6ff', cursor: 'pointer', textDecoration: 'underline' };
